@@ -108,6 +108,6 @@ _syscall3(int,write,int,fd,const char *,buf, int, len);
 
 void _start(void)
 {
-    write(1, "Hello World\n", 12);
+    qemu_write(1, "Hello World\n", 12);
     exit1(0);
 }

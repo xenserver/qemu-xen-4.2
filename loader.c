@@ -47,7 +47,7 @@ int load_image(const char *filename, uint8_t *addr)
         return -1;
     size = lseek(fd, 0, SEEK_END);
     lseek(fd, 0, SEEK_SET);
-    if (read(fd, addr, size) != size) {
+    if (qemu_read_ok(fd, addr, size) < 0) {
         close(fd);
         return -1;
     }
@@ -115,8 +115,7 @@ int load_aout(const char *filename, uint8_t *addr)
     if (fd < 0)
         return -1;
 
-    size = read(fd, &e, sizeof(e));
-    if (size < 0)
+    if (qemu_read_ok(fd, &e, sizeof(e)) < 0)
         goto fail;
 
     bswap_ahdr(&e);
@@ -127,17 +126,17 @@ int load_aout(const char *filename, uint8_t *addr)
     case QMAGIC:
     case OMAGIC:
 	lseek(fd, N_TXTOFF(e), SEEK_SET);
-	size = read(fd, addr, e.a_text + e.a_data);
-	if (size < 0)
+	size = qemu_read(fd, addr, e.a_text + e.a_data);
+	if (size != e.a_text + e.a_data)
 	    goto fail;
 	break;
     case NMAGIC:
 	lseek(fd, N_TXTOFF(e), SEEK_SET);
-	size = read(fd, addr, e.a_text);
-	if (size < 0)
+	size = qemu_read(fd, addr, e.a_text);
+	if (size != e.a_text)
 	    goto fail;
-	ret = read(fd, addr + N_DATADDR(e), e.a_data);
-	if (ret < 0)
+	ret = qemu_read(fd, addr + N_DATADDR(e), e.a_data);
+	if (ret != e.a_data)
 	    goto fail;
 	size += ret;
 	break;
@@ -161,7 +160,7 @@ static void *load_at(int fd, int offset, int size)
     ptr = qemu_malloc(size);
     if (!ptr)
         return NULL;
-    if (read(fd, ptr, size) != size) {
+    if (qemu_read_ok(fd, ptr, size) < 0) {
         qemu_free(ptr);
         return NULL;
     }
@@ -210,7 +209,7 @@ int load_elf(const char *filename, int64_t virt_to_phys_addend,
         perror(filename);
         return -1;
     }
-    if (read(fd, e_ident, sizeof(e_ident)) != sizeof(e_ident))
+    if (qemu_read_ok(fd, e_ident, sizeof(e_ident)) < 0)
         goto fail;
     if (e_ident[0] != ELFMAG0 ||
         e_ident[1] != ELFMAG1 ||
@@ -276,7 +275,7 @@ int load_uboot(const char *filename, target_ulong *ep, int *is_linux)
     if (fd < 0)
         return -1;
 
-    size = read(fd, hdr, sizeof(uboot_image_header_t));
+    size = qemu_read(fd, hdr, sizeof(uboot_image_header_t));
     if (size < 0)
         goto fail;
 
@@ -310,7 +309,7 @@ int load_uboot(const char *filename, target_ulong *ep, int *is_linux)
     if (!data)
         goto fail;
 
-    if (read(fd, data, hdr->ih_size) != hdr->ih_size) {
+    if (qemu_read_ok(fd, data, hdr->ih_size) < 0) {
         fprintf(stderr, "Error reading file\n");
         goto fail;
     }

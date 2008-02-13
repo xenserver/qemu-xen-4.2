@@ -2,6 +2,7 @@
 #define QEMU_OSDEP_H
 
 #include <stdarg.h>
+#include <sys/types.h>
 
 #ifndef glue
 #define xglue(x, y) x ## y
@@ -55,6 +56,17 @@ char *qemu_strdup(const char *str);
 void *qemu_memalign(size_t alignment, size_t size);
 void *qemu_vmalloc(size_t size);
 void qemu_vfree(void *ptr);
+
+ssize_t qemu_read(int fd, void *buf, size_t count);
+ssize_t qemu_write(int fd, const void *buf, size_t count);
+ /* Repeatedly call read/write until the request is satisfied or an error
+  * occurs, and then returns what read would have done.  If it returns
+  * a short read then errno is set, or zero if it was EOF. */
+
+int qemu_read_ok(int fd, void *buf, size_t count);
+int qemu_write_ok(int fd, const void *buf, size_t count);
+ /* Even more simplified versions which return 1 on success or -1 on
+  * failure.  EOF counts as failure but then errno is set to 0. */
 
 void *get_mmap_addr(unsigned long size);
 

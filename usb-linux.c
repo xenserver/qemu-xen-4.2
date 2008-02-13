@@ -348,8 +348,8 @@ static void urb_completion_pipe_read(void *opaque)
     struct usbdevfs_urb *purb = NULL;
     int len, ret;
 
-    len = read(s->pipe_fds[0], &pending_urb, sizeof(pending_urb));
-    if (len != sizeof(pending_urb)) {
+    ret = qemu_read_ok(s->pipe_fds[0], &pending_urb, sizeof(pending_urb));
+    if (ret < 0) {
         printf("urb_completion: error reading pending_urb, len=%d\n", len);
         return;
     }

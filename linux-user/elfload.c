@@ -871,7 +871,7 @@ static abi_ulong load_elf_interp(struct elfhdr * interp_elf_ex,
 
 	retval = lseek(interpreter_fd, interp_elf_ex->e_phoff, SEEK_SET);
 	if(retval >= 0) {
-	    retval = read(interpreter_fd,
+	    retval = qemu_read_ok(interpreter_fd,
 			   (char *) elf_phdata,
 			   sizeof(struct elf_phdr) * interp_elf_ex->e_phnum);
 	}
@@ -991,7 +991,7 @@ static void load_symbols(struct elfhdr *hdr, int fd)
 
     lseek(fd, hdr->e_shoff, SEEK_SET);
     for (i = 0; i < hdr->e_shnum; i++) {
-	if (read(fd, &sechdr, sizeof(sechdr)) != sizeof(sechdr))
+	if (qemu_read_ok(fd, &sechdr, sizeof(sechdr)) < 0)
 	    return;
 #ifdef BSWAP_NEEDED
 	bswap_shdr(&sechdr);
@@ -1000,8 +1000,7 @@ static void load_symbols(struct elfhdr *hdr, int fd)
 	    symtab = sechdr;
 	    lseek(fd, hdr->e_shoff
 		  + sizeof(sechdr) * sechdr.sh_link, SEEK_SET);
-	    if (read(fd, &strtab, sizeof(strtab))
-		!= sizeof(strtab))
+	    if (qemu_read_ok(fd, &strtab, sizeof(strtab)) < 0)
 		return;
 #ifdef BSWAP_NEEDED
 	    bswap_shdr(&strtab);
@@ -1024,7 +1023,7 @@ static void load_symbols(struct elfhdr *hdr, int fd)
 	return;
 
     lseek(fd, symtab.sh_offset, SEEK_SET);
-    if (read(fd, s->disas_symtab, symtab.sh_size) != symtab.sh_size)
+    if (qemu_read_ok(fd, s->disas_symtab, symtab.sh_size) < 0)
 	return;
 
     for (i = 0; i < symtab.sh_size / sizeof(struct elf_sym); i++) {
@@ -1047,7 +1046,7 @@ static void load_symbols(struct elfhdr *hdr, int fd)
     s->disas_symtab = syms32;
 #endif
     lseek(fd, strtab.sh_offset, SEEK_SET);
-    if (read(fd, strings, strtab.sh_size) != strtab.sh_size)
+    if (qemu_read_ok(fd, strings, strtab.sh_size) < 0)
 	return;
     s->disas_num_syms = symtab.sh_size / sizeof(struct elf_sym);
     s->next = syminfos;
@@ -1109,7 +1108,7 @@ int load_elf_binary(struct linux_binprm * bprm, struct target_pt_regs * regs,
 
     retval = lseek(bprm->fd, elf_ex.e_phoff, SEEK_SET);
     if(retval > 0) {
-	retval = read(bprm->fd, (char *) elf_phdata,
+	retval = qemu_read_ok(bprm->fd, (char *) elf_phdata,
 				elf_ex.e_phentsize * elf_ex.e_phnum);
     }
 
@@ -1164,7 +1163,7 @@ int load_elf_binary(struct linux_binprm * bprm, struct target_pt_regs * regs,
 
 	    retval = lseek(bprm->fd, elf_ppnt->p_offset, SEEK_SET);
 	    if(retval >= 0) {
-		retval = read(bprm->fd, elf_interpreter, elf_ppnt->p_filesz);
+		retval = qemu_read(bprm->fd, elf_interpreter, elf_ppnt->p_filesz);
 	    }
 	    if(retval < 0) {
 	 	perror("load_elf_binary2");
@@ -1200,7 +1199,7 @@ int load_elf_binary(struct linux_binprm * bprm, struct target_pt_regs * regs,
 	    if (retval >= 0) {
 		retval = lseek(interpreter_fd, 0, SEEK_SET);
 		if(retval >= 0) {
-		    retval = read(interpreter_fd,bprm->buf,128);
+		    retval = qemu_read_ok(interpreter_fd,bprm->buf,128);
 		}
 	    }
 	    if (retval >= 0) {

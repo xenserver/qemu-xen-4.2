@@ -446,17 +446,16 @@ static int load_kernel(const char *filename, uint8_t *addr,
         return -1;
 
     /* load 16 bit code */
-    if (read(fd, real_addr, 512) != 512)
+    if (qemu_read_ok(fd, real_addr, 512) < 0)
         goto fail;
     setup_sects = real_addr[0x1F1];
     if (!setup_sects)
         setup_sects = 4;
-    if (read(fd, real_addr + 512, setup_sects * 512) !=
-        setup_sects * 512)
+    if (qemu_read_ok(fd, real_addr + 512, setup_sects * 512) < 0)
         goto fail;
 
     /* load 32 bit code */
-    size = read(fd, addr, 16 * 1024 * 1024);
+    size = qemu_read(fd, addr, 16 * 1024 * 1024);
     if (size < 0)
         goto fail;
     close(fd);

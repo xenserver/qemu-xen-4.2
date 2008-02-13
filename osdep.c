@@ -28,6 +28,7 @@
 #include <errno.h>
 #include <unistd.h>
 #include <fcntl.h>
+#include <assert.h>
 #ifdef HOST_SOLARIS
 #include <sys/types.h>
 #include <sys/statvfs.h>
@@ -59,6 +60,33 @@ void *qemu_malloc(size_t size)
 {
     return malloc(size);
 }
+
+#define define_readwrite(rw, cnst)				\
+ssize_t qemu_##rw(int fd, cnst void *buf, size_t count) {	\
+    ssize_t got, done;						\
+    done = 0;							\
+    while (count>0) {						\
+	got = rw(fd, buf, count);				\
+	if (got == 0) { errno = 0; return done; }		\
+	if (got < 0) {						\
+	    if (errno==EINTR) continue;				\
+	    return done ? done : -1;				\
+	}							\
+        assert(got <= count);					\
+	done += got;						\
+	count -= got;						\
+	buf = (cnst char*)buf + got;				\
+    }								\
+    return done;						\
+}								\
+int qemu_##rw##_ok(int fd, cnst void *buf, size_t count) {	\
+    ssize_t got;						\
+    got = qemu_##rw(fd, buf, count);				\
+    if (got == count) return 1;					\
+    return -1;							\
+}
+define_readwrite(read, /* empty */)
+define_readwrite(write, const)
 
 #if defined(_WIN32)
 void *qemu_memalign(size_t alignment, size_t size)

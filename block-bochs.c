@@ -126,7 +126,7 @@ static int bochs_open(BlockDriverState *bs, const char *filename, int flags)
 
     s->fd = fd;
 
-    if (read(fd, &bochs, sizeof(bochs)) != sizeof(bochs)) {
+    if (qemu_read(fd, &bochs, sizeof(bochs)) != sizeof(bochs)) {
         goto fail;
     }
 
@@ -151,7 +151,7 @@ static int bochs_open(BlockDriverState *bs, const char *filename, int flags)
     s->catalog_bitmap = qemu_malloc(s->catalog_size * 4);
     if (!s->catalog_bitmap)
 	goto fail;
-    if (read(s->fd, s->catalog_bitmap, s->catalog_size * 4) !=
+    if (qemu_read(s->fd, s->catalog_bitmap, s->catalog_size * 4) !=
 	s->catalog_size * 4)
 	goto fail;
     for (i = 0; i < s->catalog_size; i++)
@@ -176,6 +176,7 @@ static inline int seek_to_sector(BlockDriverState *bs, int64_t sector_num)
     int64_t offset = sector_num * 512;
     int64_t extent_index, extent_offset, bitmap_offset, block_offset;
     char bitmap_entry;
+    int r;
 
     // seek to sector
     extent_index = offset / s->extent_size;
@@ -200,7 +201,9 @@ static inline int seek_to_sector(BlockDriverState *bs, int64_t sector_num)
     // read in bitmap for current extent
     lseek(s->fd, bitmap_offset + (extent_offset / 8), SEEK_SET);
 
-    read(s->fd, &bitmap_entry, 1);
+    r = read(s->fd, &bitmap_entry, 1);
+    if (r < 0) return -1;
+    if (r == 0) { errno= EIO; return -1; }
 
     if (!((bitmap_entry >> (extent_offset % 8)) & 1))
     {
@@ -223,8 +226,8 @@ static int bochs_read(BlockDriverState *bs, int64_t sector_num,
     while (nb_sectors > 0) {
 	if (!seek_to_sector(bs, sector_num))
 	{
-	    ret = read(s->fd, buf, 512);
-	    if (ret != 512)
+	    ret = qemu_read_ok(s->fd, buf, 512);
+	    if (ret < 0)
 		return -1;
 	}
 	else

@@ -163,7 +163,7 @@ static int raw_pread(BlockDriverState *bs, int64_t offset,
     }
     s->lseek_err_cnt=0;
 
-    ret = read(s->fd, buf, count);
+    ret = qemu_read(s->fd, buf, count);
     if (ret == count)
         goto label__raw_read__success;
 
@@ -175,11 +175,11 @@ static int raw_pread(BlockDriverState *bs, int64_t offset,
     /* Try harder for CDrom. */
     if (bs->type == BDRV_TYPE_CDROM) {
         lseek(s->fd, offset, SEEK_SET);
-        ret = read(s->fd, buf, count);
+        ret = qemu_read(s->fd, buf, count);
         if (ret == count)
             goto label__raw_read__success;
         lseek(s->fd, offset, SEEK_SET);
-        ret = read(s->fd, buf, count);
+        ret = qemu_read(s->fd, buf, count);
         if (ret == count)
             goto label__raw_read__success;
 
@@ -216,7 +216,7 @@ static int raw_pwrite(BlockDriverState *bs, int64_t offset,
     }
     s->lseek_err_cnt = 0;
 
-    ret = write(s->fd, buf, count);
+    ret = qemu_write(s->fd, buf, count);
     if (ret == count)
         goto label__raw_write__success;
 

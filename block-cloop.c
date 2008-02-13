@@ -66,10 +66,10 @@ cloop_close:
 	close(s->fd);
 	return -1;
     }
-    if(read(s->fd,&s->block_size,4)<4)
+    if(qemu_read_ok(s->fd,&s->block_size,4)<0)
 	goto cloop_close;
     s->block_size=be32_to_cpu(s->block_size);
-    if(read(s->fd,&s->n_blocks,4)<4)
+    if(qemu_read_ok(s->fd,&s->n_blocks,4)<0)
 	goto cloop_close;
     s->n_blocks=be32_to_cpu(s->n_blocks);
 
@@ -77,7 +77,7 @@ cloop_close:
     offsets_size=s->n_blocks*sizeof(uint64_t);
     if(!(s->offsets=(uint64_t*)malloc(offsets_size)))
 	goto cloop_close;
-    if(read(s->fd,s->offsets,offsets_size)<offsets_size)
+    if(qemu_read_ok(s->fd,s->offsets,offsets_size)<0)
 	goto cloop_close;
     for(i=0;i<s->n_blocks;i++) {
 	s->offsets[i]=be64_to_cpu(s->offsets[i]);
@@ -109,8 +109,8 @@ static inline int cloop_read_block(BDRVCloopState *s,int block_num)
         uint32_t bytes = s->offsets[block_num+1]-s->offsets[block_num];
 
 	lseek(s->fd, s->offsets[block_num], SEEK_SET);
-        ret = read(s->fd, s->compressed_block, bytes);
-        if (ret != bytes)
+        ret = qemu_read_ok(s->fd, s->compressed_block, bytes);
+        if (ret < 0)
             return -1;
 
 	s->zstream.next_in = s->compressed_block;

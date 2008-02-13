@@ -103,7 +103,7 @@ void test_file(void)
     fd = chk_error(open("file1", O_WRONLY | O_TRUNC | O_CREAT, 0644));
     for(i=0;i < FILE_BUF_SIZE; i++)
         buf[i] = i;
-    len = chk_error(write(fd, buf, FILE_BUF_SIZE / 2));
+    len = chk_error(qemu_write(fd, buf, FILE_BUF_SIZE / 2));
     if (len != (FILE_BUF_SIZE / 2))
         error("write");
     vecs[0].iov_base = buf + (FILE_BUF_SIZE / 2);

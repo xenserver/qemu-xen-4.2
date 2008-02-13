@@ -1999,29 +1999,9 @@ void socket_set_nonblock(int fd)
 
 #else
 
-static int unix_write(int fd, const uint8_t *buf, int len1)
-{
-    int ret, len;
-
-    len = len1;
-    while (len > 0) {
-        ret = write(fd, buf, len);
-        if (ret < 0) {
-            if (errno != EINTR && errno != EAGAIN)
-                return -1;
-        } else if (ret == 0) {
-            break;
-        } else {
-            buf += ret;
-            len -= ret;
-        }
-    }
-    return len1 - len;
-}
-
 static inline int send_all(int fd, const uint8_t *buf, int len1)
 {
-    return unix_write(fd, buf, len1);
+    return qemu_write(fd, buf, len1);
 }
 
 void socket_set_nonblock(int fd)
@@ -2043,7 +2023,7 @@ static int stdio_nb_clients = 0;
 static int fd_chr_write(CharDriverState *chr, const uint8_t *buf, int len)
 {
     FDCharDriver *s = chr->opaque;
-    return unix_write(s->fd_out, buf, len);
+    return qemu_write(s->fd_out, buf, len);
 }
 
 static int fd_chr_read_poll(void *opaque)
@@ -2479,8 +2459,7 @@ static int pp_ioctl(CharDriverState *chr, int cmd, void *arg)
     case CHR_IOCTL_PP_EPP_READ_ADDR:
 	if (pp_hw_mode(drv, IEEE1284_MODE_EPP|IEEE1284_ADDR)) {
 	    struct ParallelIOArg *parg = arg;
-	    int n = read(fd, parg->buffer, parg->count);
-	    if (n != parg->count) {
+	    if (qemu_read_ok(fd, parg->buffer, parg->count) < 0) {
 		return -EIO;
 	    }
 	}
@@ -2488,8 +2467,7 @@ static int pp_ioctl(CharDriverState *chr, int cmd, void *arg)
     case CHR_IOCTL_PP_EPP_READ:
 	if (pp_hw_mode(drv, IEEE1284_MODE_EPP)) {
 	    struct ParallelIOArg *parg = arg;
-	    int n = read(fd, parg->buffer, parg->count);
-	    if (n != parg->count) {
+	    if (qemu_read_ok(fd, parg->buffer, parg->count) < 0) {
 		return -EIO;
 	    }
 	}
@@ -2497,8 +2475,7 @@ static int pp_ioctl(CharDriverState *chr, int cmd, void *arg)
     case CHR_IOCTL_PP_EPP_WRITE_ADDR:
 	if (pp_hw_mode(drv, IEEE1284_MODE_EPP|IEEE1284_ADDR)) {
 	    struct ParallelIOArg *parg = arg;
-	    int n = write(fd, parg->buffer, parg->count);
-	    if (n != parg->count) {
+	    if (qemu_write(fd, parg->buffer, parg->count) < 0) {
 		return -EIO;
 	    }
 	}
@@ -2506,8 +2483,7 @@ static int pp_ioctl(CharDriverState *chr, int cmd, void *arg)
     case CHR_IOCTL_PP_EPP_WRITE:
 	if (pp_hw_mode(drv, IEEE1284_MODE_EPP)) {
 	    struct ParallelIOArg *parg = arg;
-	    int n = write(fd, parg->buffer, parg->count);
-	    if (n != parg->count) {
+	    if (qemu_write_ok(fd, parg->buffer, parg->count) < 0) {
 		return -EIO;
 	    }
 	}
@@ -3938,7 +3914,7 @@ static void tap_receive(void *opaque, const uint8_t *buf, int size)
     TAPState *s = opaque;
     int ret;
     for(;;) {
-        ret = write(s->fd, buf, size);
+        ret = write(s->fd, buf, size); /* No error handling ?! */
         if (ret < 0 && (errno == EINTR || errno == EAGAIN)) {
         } else {
             break;

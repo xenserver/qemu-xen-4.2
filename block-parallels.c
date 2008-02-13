@@ -84,7 +84,7 @@ static int parallels_open(BlockDriverState *bs, const char *filename, int flags)
 
     s->fd = fd;
 
-    if (read(fd, &ph, sizeof(ph)) != sizeof(ph))
+    if (qemu_read_ok(fd, &ph, sizeof(ph)) < 0)
         goto fail;
 
     if (memcmp(ph.magic, HEADER_MAGIC, 16) ||
@@ -103,8 +103,7 @@ static int parallels_open(BlockDriverState *bs, const char *filename, int flags)
     s->catalog_bitmap = qemu_malloc(s->catalog_size * 4);
     if (!s->catalog_bitmap)
 	goto fail;
-    if (read(s->fd, s->catalog_bitmap, s->catalog_size * 4) !=
-	s->catalog_size * 4)
+    if (qemu_read_ok(s->fd, s->catalog_bitmap, s->catalog_size * 4) < 0)
 	goto fail;
     for (i = 0; i < s->catalog_size; i++)
 	le32_to_cpus(&s->catalog_bitmap[i]);
@@ -147,7 +146,7 @@ static int parallels_read(BlockDriverState *bs, int64_t sector_num,
 
     while (nb_sectors > 0) {
 	if (!seek_to_sector(bs, sector_num)) {
-	    if (read(s->fd, buf, 512) != 512)
+	    if (qemu_read_ok(s->fd, buf, 512) < 0)
 		return -1;
 	} else
             memset(buf, 0, 512);

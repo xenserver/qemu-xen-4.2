@@ -220,13 +220,13 @@ static int vmdk_snapshot_create(const char *filename, const char *backing_file)
     /* read the header */
     if (lseek(p_fd, 0x0, SEEK_SET) == -1)
         goto fail;
-    if (read(p_fd, hdr, HEADER_SIZE) != HEADER_SIZE)
+    if (qemu_read_ok(p_fd, hdr, HEADER_SIZE) < 0)
         goto fail;
 
     /* write the header */
     if (lseek(snp_fd, 0x0, SEEK_SET) == -1)
         goto fail;
-    if (write(snp_fd, hdr, HEADER_SIZE) == -1)
+    if (qemu_write_ok(snp_fd, hdr, HEADER_SIZE) == -1)
         goto fail;
 
     memset(&header, 0, sizeof(header));
@@ -236,7 +236,7 @@ static int vmdk_snapshot_create(const char *filename, const char *backing_file)
     /* the descriptor offset = 0x200 */
     if (lseek(p_fd, 0x200, SEEK_SET) == -1)
         goto fail;
-    if (read(p_fd, p_desc, DESC_SIZE) != DESC_SIZE)
+    if (qemu_read_ok(p_fd, p_desc, DESC_SIZE) < 0)
         goto fail;
 
     if ((p_name = strstr(p_desc,"CID")) != 0) {
@@ -258,7 +258,7 @@ static int vmdk_snapshot_create(const char *filename, const char *backing_file)
     /* write the descriptor */
     if (lseek(snp_fd, 0x200, SEEK_SET) == -1)
         goto fail;
-    if (write(snp_fd, s_desc, strlen(s_desc)) == -1)
+    if (qemu_write_ok(snp_fd, s_desc, strlen(s_desc)) == -1)
         goto fail;
 
     gd_offset = header.gd_offset * SECTOR_SIZE;     // offset of GD table
@@ -280,11 +280,11 @@ static int vmdk_snapshot_create(const char *filename, const char *backing_file)
         goto fail;
     if (lseek(p_fd, rgd_offset, SEEK_SET) == -1)
         goto fail_rgd;
-    if (read(p_fd, rgd_buf, gd_size) != gd_size)
+    if (qemu_read_ok(p_fd, rgd_buf, gd_size) < 0)
         goto fail_rgd;
     if (lseek(snp_fd, rgd_offset, SEEK_SET) == -1)
         goto fail_rgd;
-    if (write(snp_fd, rgd_buf, gd_size) == -1)
+    if (qemu_write_ok(snp_fd, rgd_buf, gd_size) == -1)
         goto fail_rgd;
     qemu_free(rgd_buf);
 
@@ -294,11 +294,11 @@ static int vmdk_snapshot_create(const char *filename, const char *backing_file)
         goto fail_rgd;
     if (lseek(p_fd, gd_offset, SEEK_SET) == -1)
         goto fail_gd;
-    if (read(p_fd, gd_buf, gd_size) != gd_size)
+    if (qemu_read_ok(p_fd, gd_buf, gd_size) < 0)
         goto fail_gd;
     if (lseek(snp_fd, gd_offset, SEEK_SET) == -1)
         goto fail_gd;
-    if (write(snp_fd, gd_buf, gd_size) == -1)
+    if (qemu_write_ok(snp_fd, gd_buf, gd_size) == -1)
         goto fail_gd;
     qemu_free(gd_buf);
 
@@ -764,6 +764,8 @@ static int vmdk_create(const char *filename, int64_t total_size,
     header.check_bytes[1] = 0x20;
     header.check_bytes[2] = 0xd;
     header.check_bytes[3] = 0xa;
+
+    /* BUG XXX No error checking anywhere here! XXX BUG */
 
     /* write all the data */
     write(fd, &magic, sizeof(magic));

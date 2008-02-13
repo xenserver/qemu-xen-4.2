@@ -31,6 +31,7 @@
 #include <fcntl.h>
 
 #include "config-host.h"
+#include "osdep.h"
 
 /* NOTE: we test CONFIG_WIN32 instead of _WIN32 to enabled cross
    compilation */
@@ -251,7 +252,7 @@ static void *load_data(int fd, long offset, unsigned int size)
     if (!data)
         return NULL;
     lseek(fd, offset, SEEK_SET);
-    if (read(fd, data, size) != size) {
+    if (qemu_read_ok(fd, data, size) < 0) {
         free(data);
         return NULL;
     }
@@ -489,7 +490,7 @@ int load_object(const char *filename)
         error("can't open file '%s'", filename);
 
     /* Read ELF header.  */
-    if (read(fd, &ehdr, sizeof (ehdr)) != sizeof (ehdr))
+    if (qemu_read_ok(fd, &ehdr, sizeof (ehdr)) < 0)
         error("unable to read file header");
 
     /* Check ELF identification.  */
@@ -713,7 +714,7 @@ int load_object(const char *filename)
         error("can't open file '%s'", filename);
 
     /* Read COFF header.  */
-    if (read(fd, &fhdr, sizeof (fhdr)) != sizeof (fhdr))
+    if (qemu_read_ok(fd, &fhdr, sizeof (fhdr)) < 0)
         error("unable to read file header");
 
     /* Check COFF identification.  */
@@ -1086,7 +1087,7 @@ int load_object(const char *filename)
         error("can't open file '%s'", filename);
 
     /* Read Mach header.  */
-    if (read(fd, &mach_hdr, sizeof (mach_hdr)) != sizeof (mach_hdr))
+    if (qemu_read_ok(fd, &mach_hdr, sizeof (mach_hdr)) < 0)
         error("unable to read file header");
 
     /* Check Mach identification.  */
@@ -1103,14 +1104,14 @@ int load_object(const char *filename)
     /* read segment headers */
     for(i=0, j=sizeof(mach_hdr); i<mach_hdr.ncmds ; i++)
     {
-        if(read(fd, &lc, sizeof(struct load_command)) != sizeof(struct load_command))
+        if(qemu_read_ok(fd, &lc, sizeof(struct load_command)) < 0)
             error("unable to read load_command");
         if(lc.cmd == LC_SEGMENT)
         {
             offset_to_segment = j;
             lseek(fd, offset_to_segment, SEEK_SET);
             segment = malloc(sizeof(struct segment_command));
-            if(read(fd, segment, sizeof(struct segment_command)) != sizeof(struct segment_command))
+            if(qemu_read_ok(fd, segment, sizeof(struct segment_command)) < 0)
                 error("unable to read LC_SEGMENT");
         }
         if(lc.cmd == LC_DYSYMTAB)
@@ -1118,7 +1119,7 @@ int load_object(const char *filename)
             offset_to_dysymtab = j;
             lseek(fd, offset_to_dysymtab, SEEK_SET);
             dysymtabcmd = malloc(sizeof(struct dysymtab_command));
-            if(read(fd, dysymtabcmd, sizeof(struct dysymtab_command)) != sizeof(struct dysymtab_command))
+            if(qemu_read_ok(fd, dysymtabcmd, sizeof(struct dysymtab_command)) < 0)
                 error("unable to read LC_DYSYMTAB");
         }
         if(lc.cmd == LC_SYMTAB)
@@ -1126,7 +1127,7 @@ int load_object(const char *filename)
             offset_to_symtab = j;
             lseek(fd, offset_to_symtab, SEEK_SET);
             symtabcmd = malloc(sizeof(struct symtab_command));
-            if(read(fd, symtabcmd, sizeof(struct symtab_command)) != sizeof(struct symtab_command))
+            if(qemu_read_ok(fd, symtabcmd, sizeof(struct symtab_command)) < 0)
                 error("unable to read LC_SYMTAB");
         }
         j+=lc.cmdsize;

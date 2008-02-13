@@ -77,7 +77,7 @@ static int cow_open(BlockDriverState *bs, const char *filename, int flags)
     }
     s->fd = fd;
     /* see if it is a cow image */
-    if (read(fd, &cow_header, sizeof(cow_header)) != sizeof(cow_header)) {
+    if (qemu_read_ok(fd, &cow_header, sizeof(cow_header)) < 0) {
         goto fail;
     }
 
@@ -159,8 +159,8 @@ static int cow_read(BlockDriverState *bs, int64_t sector_num,
     while (nb_sectors > 0) {
         if (is_changed(s->cow_bitmap, sector_num, nb_sectors, &n)) {
             lseek(s->fd, s->cow_sectors_offset + sector_num * 512, SEEK_SET);
-            ret = read(s->fd, buf, n * 512);
-            if (ret != n * 512)
+            ret = qemu_read_ok(s->fd, buf, n * 512);
+            if (ret < 0)
                 return -1;
         } else {
             if (bs->backing_hd) {

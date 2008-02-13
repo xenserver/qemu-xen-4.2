@@ -60,7 +60,7 @@ static int dmg_probe(const uint8_t *buf, int buf_size, const char *filename)
 static off_t read_off(int fd)
 {
 	uint64_t buffer;
-	if(read(fd,&buffer,8)<8)
+	if(qemu_read_ok(fd,&buffer,8)<0)
 		return 0;
 	return be64_to_cpu(buffer);
 }
@@ -68,7 +68,7 @@ static off_t read_off(int fd)
 static off_t read_uint32(int fd)
 {
 	uint32_t buffer;
-	if(read(fd,&buffer,4)<4)
+	if(qemu_read_ok(fd,&buffer,4)<0)
 		return 0;
 	return be32_to_cpu(buffer);
 }
@@ -209,24 +209,15 @@ static inline int dmg_read_chunk(BDRVDMGState *s,int sector_num)
 	s->current_chunk = s->n_chunks;
 	switch(s->types[chunk]) {
 	case 0x80000005: { /* zlib compressed */
-	    int i;
-
 	    ret = lseek(s->fd, s->offsets[chunk], SEEK_SET);
 	    if(ret<0)
 		return -1;
 
 	    /* we need to buffer, because only the chunk as whole can be
 	     * inflated. */
-	    i=0;
-	    do {
-		ret = read(s->fd, s->compressed_chunk+i, s->lengths[chunk]-i);
-		if(ret<0 && errno==EINTR)
-		    ret=0;
-		i+=ret;
-	    } while(ret>=0 && ret+i<s->lengths[chunk]);
-
-	    if (ret != s->lengths[chunk])
-		return -1;
+	    ret = qemu_read_ok(s->fd, s->compressed_chunk, s->lengths[chunk]);
+	    if (ret < 0)
+	        return -1;
 
 	    s->zstream.next_in = s->compressed_chunk;
 	    s->zstream.avail_in = s->lengths[chunk];
@@ -240,8 +231,8 @@ static inline int dmg_read_chunk(BDRVDMGState *s,int sector_num)
 		return -1;
 	    break; }
 	case 1: /* copy */
-	    ret = read(s->fd, s->uncompressed_chunk, s->lengths[chunk]);
-	    if (ret != s->lengths[chunk])
+	    ret = qemu_read_ok(s->fd, s->uncompressed_chunk, s->lengths[chunk]);
+	    if (ret < 0)
 		return -1;
 	    break;
 	case 2: /* zero */

@@ -175,7 +175,7 @@ int main(int argc, char **argv)
         perror(filename);
         exit(1);
     }
-    ret = read(fd, vm86_mem + COM_BASE_ADDR, 65536 - 256);
+    ret = qemu_read_ok(fd, vm86_mem + COM_BASE_ADDR, 65536 - 256);
     if (ret < 0) {
         perror("read");
         exit(1);

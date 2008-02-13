@@ -1173,7 +1173,6 @@ static int open_file(BDRVVVFATState* s,mapping_t* mapping)
 static inline int read_cluster(BDRVVVFATState *s,int cluster_num)
 {
     if(s->current_cluster != cluster_num) {
-	int result=0;
 	off_t offset;
 	assert(!s->current_mapping || s->current_fd || (s->current_mapping->mode & MODE_DIRECTORY));
 	if(!s->current_mapping
@@ -1208,8 +1207,7 @@ read_cluster_directory:
 	if(lseek(s->current_fd, offset, SEEK_SET)!=offset)
 	    return -3;
 	s->cluster=s->cluster_buffer;
-	result=read(s->current_fd,s->cluster,s->cluster_size);
-	if(result<0) {
+	if (qemu_read_ok(s->current_fd,s->cluster,s->cluster_size) < 0) {
 	    s->current_cluster = -1;
 	    return -1;
 	}
@@ -2241,7 +2239,7 @@ static int commit_one_file(BDRVVVFATState* s,
 	if (ret < 0)
 	    return ret;
 
-	if (write(fd, cluster, rest_size) < 0)
+	if (qemu_write_ok(fd, cluster, rest_size) < 0)
 	    return -2;
 
 	offset += rest_size;

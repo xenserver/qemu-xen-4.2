@@ -149,7 +149,7 @@ static int glue(load_elf, SZ)(int fd, int64_t virt_to_phys_addend,
     uint64_t addr, low = 0, high = 0;
     uint8_t *data = NULL;
 
-    if (read(fd, &ehdr, sizeof(ehdr)) != sizeof(ehdr))
+    if (qemu_read_ok(fd, &ehdr, sizeof(ehdr)) < 0)
         goto fail;
     if (must_swab) {
         glue(bswap_ehdr, SZ)(&ehdr);
@@ -168,7 +168,7 @@ static int glue(load_elf, SZ)(int fd, int64_t virt_to_phys_addend,
     phdr = qemu_mallocz(size);
     if (!phdr)
         goto fail;
-    if (read(fd, phdr, size) != size)
+    if (qemu_read_ok(fd, phdr, size) < 0)
         goto fail;
     if (must_swab) {
         for(i = 0; i < ehdr.e_phnum; i++) {
@@ -187,7 +187,7 @@ static int glue(load_elf, SZ)(int fd, int64_t virt_to_phys_addend,
             if (ph->p_filesz > 0) {
                 if (lseek(fd, ph->p_offset, SEEK_SET) < 0)
                     goto fail;
-                if (read(fd, data, ph->p_filesz) != ph->p_filesz)
+                if (qemu_read_ok(fd, data, ph->p_filesz) < 0)
                     goto fail;
             }
             addr = ph->p_vaddr + virt_to_phys_addend;

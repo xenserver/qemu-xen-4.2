@@ -738,7 +738,7 @@ static void qcow_close(BlockDriverState *bs)
 static int qcow_create(const char *filename, int64_t total_size,
                       const char *backing_file, int flags)
 {
-    int fd, header_size, backing_filename_len, l1_size, i, shift;
+    int fd, header_size, backing_filename_len, l1_size, i, shift, errno_save;
     QCowHeader header;
     uint64_t tmp;
 
@@ -779,18 +779,28 @@ static int qcow_create(const char *filename, int64_t total_size,
         header.crypt_method = cpu_to_be32(QCOW_CRYPT_NONE);
     }
 
+
     /* write all the data */
-    write(fd, &header, sizeof(header));
+    if (qemu_write_ok(fd, &header, sizeof(header)) < 0)
+	goto fail;
     if (backing_file) {
-        write(fd, backing_file, backing_filename_len);
+        if (qemu_write_ok(fd, backing_file, backing_filename_len) < 0)
+	    goto fail;
     }
     lseek(fd, header_size, SEEK_SET);
     tmp = 0;
     for(i = 0;i < l1_size; i++) {
-        write(fd, &tmp, sizeof(tmp));
+        if (qemu_write_ok(fd, &tmp, sizeof(tmp)) < 0)
+	    goto fail;
     }
     close(fd);
     return 0;
+
+ fail:
+    errno_save= errno;
+    close(fd);
+    errno= errno_save;
+    return -1;
 }
 
 static int qcow_make_empty(BlockDriverState *bs)

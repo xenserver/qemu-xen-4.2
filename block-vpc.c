@@ -100,14 +100,14 @@ static int vpc_open(BlockDriverState *bs, const char *filename, int flags)
 
     s->fd = fd;
 
-    if (read(fd, &header, HEADER_SIZE) != HEADER_SIZE)
+    if (qemu_read_ok(fd, &header, HEADER_SIZE) < 0)
         goto fail;
 
     if (strncmp(header.magic, "conectix", 8))
         goto fail;
     lseek(s->fd, be32_to_cpu(header.type.main.subheader_offset), SEEK_SET);
 
-    if (read(fd, &header, HEADER_SIZE) != HEADER_SIZE)
+    if (qemu_read_ok(fd, &header, HEADER_SIZE) < 0)
         goto fail;
 
     if (strncmp(header.magic, "cxsparse", 8))
@@ -122,8 +122,7 @@ static int vpc_open(BlockDriverState *bs, const char *filename, int flags)
     s->pagetable = qemu_malloc(s->pagetable_entries * 4);
     if (!s->pagetable)
 	goto fail;
-    if (read(s->fd, s->pagetable, s->pagetable_entries * 4) !=
-	s->pagetable_entries * 4)
+    if (qemu_read_ok(s->fd, s->pagetable, s->pagetable_entries * 4) < 0)
 	goto fail;
     for (i = 0; i < s->pagetable_entries; i++)
 	be32_to_cpus(&s->pagetable[i]);
@@ -175,7 +174,7 @@ static inline int seek_to_sector(BlockDriverState *bs, int64_t sector_num)
 
 	// Scary! Bitmap is stored as big endian 32bit entries,
 	// while we used to look it up byte by byte
-	read(s->fd, s->pageentry_u8, 512);
+	read(s->fd, s->pageentry_u8, 512);  // no error handling ?!
 	for (i = 0; i < 128; i++)
 	    be32_to_cpus(&s->pageentry_u32[i]);
     }
@@ -185,7 +184,7 @@ static inline int seek_to_sector(BlockDriverState *bs, int64_t sector_num)
 #else
     lseek(s->fd, bitmap_offset + (pageentry_index / 8), SEEK_SET);
 
-    read(s->fd, &bitmap_entry, 1);
+    read(s->fd, &bitmap_entry, 1);  // no error handling ?!
 
     if ((bitmap_entry >> (pageentry_index % 8)) & 1)
 	return -1; // not allocated
@@ -205,8 +204,8 @@ static int vpc_read(BlockDriverState *bs, int64_t sector_num,
     while (nb_sectors > 0) {
 	if (!seek_to_sector(bs, sector_num))
 	{
-	    ret = read(s->fd, buf, 512);
-	    if (ret != 512)
+	    ret = qemu_read_ok(s->fd, buf, 512);
+	    if (ret < 0)
 		return -1;
 	}
 	else

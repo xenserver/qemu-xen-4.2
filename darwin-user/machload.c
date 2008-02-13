@@ -440,7 +440,7 @@ void *load_data(int fd, long offset, unsigned int size)
     if (!data)
         return NULL;
     lseek(fd, offset, SEEK_SET);
-    if (read(fd, data, size) != size) {
+    if (qemu_read_ok(fd, data, size) < 0) {
         free(data);
         return NULL;
     }
@@ -472,7 +472,7 @@ int load_object(const char *filename, struct target_pt_regs * regs, void ** mh)
         qerror("can't open file '%s'", filename);
 
     /* Read magic header.  */
-    if (read(fd, &magic, sizeof (magic)) != sizeof (magic))
+    if (qemu_read_ok(fd, &magic, sizeof (magic)) < 0)
         qerror("unable to read Magic of '%s'", filename);
 
     /* Check Mach identification.  */
@@ -506,7 +506,7 @@ int load_object(const char *filename, struct target_pt_regs * regs, void ** mh)
         lseek(fd, 0, SEEK_SET);
 
         /* Read Fat header.  */
-        if (read(fd, &fh, sizeof (fh)) != sizeof (fh))
+        if (qemu_read_ok(fd, &fh, sizeof (fh)) < 0)
             qerror("unable to read file header");
 
         if(need_bswap)
@@ -515,7 +515,7 @@ int load_object(const char *filename, struct target_pt_regs * regs, void ** mh)
         /* Read Fat Arch.  */
         fa = malloc(sizeof(struct fat_arch)*fh.nfat_arch);
 
-        if (read(fd, fa, sizeof(struct fat_arch)*fh.nfat_arch) != sizeof(struct fat_arch)*fh.nfat_arch)
+        if (qemu_read_ok(fd, fa, sizeof(struct fat_arch)*fh.nfat_arch) < 0)
             qerror("unable to read file header");
 
         for( i = 0; i < fh.nfat_arch; i++, fa++)
@@ -529,7 +529,7 @@ int load_object(const char *filename, struct target_pt_regs * regs, void ** mh)
 
                 /* Read Mach header.  */
 
-                if (read(fd, &mach_hdr, sizeof(struct mach_header)) != sizeof (struct mach_header))
+                if (qemu_read_ok(fd, &mach_hdr, sizeof(struct mach_header)) < 0)
                     qerror("unable to read file header");
 
                 if(mach_hdr.magic == MH_MAGIC)
@@ -549,7 +549,7 @@ int load_object(const char *filename, struct target_pt_regs * regs, void ** mh)
     {
         lseek(fd, 0, SEEK_SET);
         /* Read Mach header */
-        if (read(fd, &mach_hdr, sizeof (mach_hdr)) != sizeof (mach_hdr))
+        if (qemu_read_ok(fd, &mach_hdr, sizeof (mach_hdr)) < 0)
             qerror("%s: unable to read file header", filename);
     }
 
@@ -573,7 +573,7 @@ int load_object(const char *filename, struct target_pt_regs * regs, void ** mh)
     /* read segment headers */
     lcmds = malloc(mach_hdr.sizeofcmds);
 
-    if(read(fd, lcmds, mach_hdr.sizeofcmds) != mach_hdr.sizeofcmds)
+    if(qemu_read_ok(fd, lcmds, mach_hdr.sizeofcmds) < 0)
             qerror("%s: unable to read load_command", filename);
     slide = 0;
     mmapfixed = 0;
