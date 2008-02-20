@@ -1895,6 +1895,7 @@ static void ide_ioport_write(void *opaque, uint32_t addr, uint32_t val)
     IDEState *s;
     int unit, n;
     int lba48 = 0;
+    int ret;
 
 #ifdef DEBUG_IDE
     printf("IDE: write addr=0x%x val=0x%02x\n", addr, val);
@@ -2140,8 +2141,10 @@ static void ide_ioport_write(void *opaque, uint32_t addr, uint32_t val)
             break;
         case WIN_FLUSH_CACHE:
         case WIN_FLUSH_CACHE_EXT:
-            if (s->bs)
-                bdrv_flush(s->bs);
+            if (s->bs) {
+                ret = bdrv_flush(s->bs);
+		if (ret) goto abort_cmd;
+	    }
 	    s->status = READY_STAT;
             ide_set_irq(s);
             break;

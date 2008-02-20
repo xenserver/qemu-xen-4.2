@@ -293,6 +293,7 @@ static int32_t scsi_send_command(SCSIDevice *d, uint32_t tag,
     uint8_t command;
     uint8_t *outbuf;
     SCSIRequest *r;
+    int ret;
 
     command = buf[0];
     r = scsi_find_request(s, tag);
@@ -620,7 +621,12 @@ static int32_t scsi_send_command(SCSIDevice *d, uint32_t tag,
         break;
     case 0x35:
         DPRINTF("Synchronise cache (sector %d, count %d)\n", lba, len);
-        bdrv_flush(s->bdrv);
+        ret = bdrv_flush(s->bdrv);
+        if (ret) {
+            DPRINTF("IO error on bdrv_flush\n");
+            scsi_command_complete(r, SENSE_HARDWARE_ERROR);
+            return 0;
+        }
         break;
     case 0x43:
         {
