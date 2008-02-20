@@ -1476,7 +1476,7 @@ static int parse_short_name(BDRVVVFATState* s,
 	if (direntry->name[i] <= ' ' || direntry->name[i] > 0x7f)
 	    return -1;
 	else if (s->downcase_short_names)
-	    lfn->name[i] = tolower(direntry->name[i]);
+	    lfn->name[i] = CTYPE(tolower,direntry->name[i]);
 	else
 	    lfn->name[i] = direntry->name[i];
     }
@@ -1489,7 +1489,7 @@ static int parse_short_name(BDRVVVFATState* s,
 	    if (direntry->extension[j] <= ' ' || direntry->extension[j] > 0x7f)
 		return -2;
 	    else if (s->downcase_short_names)
-		lfn->name[i + j] = tolower(direntry->extension[j]);
+		lfn->name[i + j] = CTYPE(tolower,direntry->extension[j]);
 	    else
 		lfn->name[i + j] = direntry->extension[j];
 	}

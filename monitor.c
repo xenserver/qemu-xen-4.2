@@ -1779,7 +1779,7 @@ static void next(void)
 {
     if (pch != '\0') {
         pch++;
-        while (isspace(*pch))
+        while (CTYPE(isspace,*pch))
             pch++;
     }
 }
@@ -1838,7 +1838,7 @@ static int64_t expr_unary(void)
                     *q++ = *pch;
                 pch++;
             }
-            while (isspace(*pch))
+            while (CTYPE(isspace,*pch))
                 pch++;
             *q = 0;
             ret = get_monitor_def(&reg, buf);
@@ -1863,7 +1863,7 @@ static int64_t expr_unary(void)
             expr_error("invalid char in expression");
         }
         pch = p;
-        while (isspace(*pch))
+        while (CTYPE(isspace,*pch))
             pch++;
         break;
     }
@@ -1957,7 +1957,7 @@ static int get_expr(int64_t *pval, const char **pp)
         *pp = pch;
         return -1;
     }
-    while (isspace(*pch))
+    while (CTYPE(isspace,*pch))
         pch++;
     *pval = expr_sum();
     *pp = pch;
@@ -1972,7 +1972,7 @@ static int get_str(char *buf, int buf_size, const char **pp)
 
     q = buf;
     p = *pp;
-    while (isspace(*p))
+    while (CTYPE(isspace,*p))
         p++;
     if (*p == '\0') {
     fail:
@@ -2017,7 +2017,7 @@ static int get_str(char *buf, int buf_size, const char **pp)
         }
         p++;
     } else {
-        while (*p != '\0' && !isspace(*p)) {
+        while (*p != '\0' && !CTYPE(isspace,*p)) {
             if ((q - buf) < buf_size - 1) {
                 *q++ = *p;
             }
@@ -2052,12 +2052,12 @@ static void monitor_handle_command(const char *cmdline)
     /* extract the command name */
     p = cmdline;
     q = cmdname;
-    while (isspace(*p))
+    while (CTYPE(isspace,*p))
         p++;
     if (*p == '\0')
         return;
     pstart = p;
-    while (*p != '\0' && *p != '/' && !isspace(*p))
+    while (*p != '\0' && *p != '/' && !CTYPE(isspace,*p))
         p++;
     len = p - pstart;
     if (len > sizeof(cmdname) - 1)
@@ -2093,7 +2093,7 @@ static void monitor_handle_command(const char *cmdline)
                 int ret;
                 char *str;
 
-                while (isspace(*p))
+                while (CTYPE(isspace,*p))
                     p++;
                 if (*typestr == '?') {
                     typestr++;
@@ -2134,7 +2134,7 @@ static void monitor_handle_command(const char *cmdline)
             {
                 int count, format, size;
 
-                while (isspace(*p))
+                while (CTYPE(isspace,*p))
                     p++;
                 if (*p == '/') {
                     /* format found */
@@ -2181,7 +2181,7 @@ static void monitor_handle_command(const char *cmdline)
                         }
                     }
                 next:
-                    if (*p != '\0' && !isspace(*p)) {
+                    if (*p != '\0' && !CTYPE(isspace,*p)) {
                         term_printf("invalid char in format: '%c'\n", *p);
                         goto fail;
                     }
@@ -2215,7 +2215,7 @@ static void monitor_handle_command(const char *cmdline)
             {
                 int64_t val;
 
-                while (isspace(*p))
+                while (CTYPE(isspace,*p))
                     p++;
                 if (*typestr == '?' || *typestr == '.') {
                     if (*typestr == '?') {
@@ -2226,7 +2226,7 @@ static void monitor_handle_command(const char *cmdline)
                     } else {
                         if (*p == '.') {
                             p++;
-                            while (isspace(*p))
+                            while (CTYPE(isspace,*p))
                                 p++;
                             has_arg = 1;
                         } else {
@@ -2271,7 +2271,7 @@ static void monitor_handle_command(const char *cmdline)
                 c = *typestr++;
                 if (c == '\0')
                     goto bad_type;
-                while (isspace(*p))
+                while (CTYPE(isspace,*p))
                     p++;
                 has_option = 0;
                 if (*p == '-') {
@@ -2296,7 +2296,7 @@ static void monitor_handle_command(const char *cmdline)
         }
     }
     /* check that all arguments were parsed */
-    while (isspace(*p))
+    while (CTYPE(isspace,*p))
         p++;
     if (*p != '\0') {
         term_printf("%s: extraneous characters at the end of line\n",
@@ -2434,7 +2434,7 @@ static void parse_cmdline(const char *cmdline,
     p = cmdline;
     nb_args = 0;
     for(;;) {
-        while (isspace(*p))
+        while (CTYPE(isspace,*p))
             p++;
         if (*p == '\0')
             break;
@@ -2468,7 +2468,7 @@ void readline_find_completion(const char *cmdline)
     /* if the line ends with a space, it means we want to complete the
        next arg */
     len = strlen(cmdline);
-    if (len > 0 && isspace(cmdline[len - 1])) {
+    if (len > 0 && CTYPE(isspace,cmdline[len - 1])) {
         if (nb_args >= MAX_ARGS)
             return;
         args[nb_args++] = qemu_strdup("");

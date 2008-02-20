@@ -3599,7 +3599,7 @@ int parse_host_port(struct sockaddr_in *saddr, const char *str)
     if (buf[0] == '\0') {
         saddr->sin_addr.s_addr = 0;
     } else {
-        if (isdigit(buf[0])) {
+        if (CTYPE(isdigit,buf[0])) {
             if (!inet_aton(buf, &saddr->sin_addr))
                 return -1;
         } else {
@@ -4001,7 +4001,7 @@ int tap_alloc(char *dev)
 
     if( *dev ){
        ptr = dev;
-       while( *ptr && !isdigit((int)*ptr) ) ptr++;
+       while( *ptr && !CTYPE(isdigit,(int)*ptr) ) ptr++;
        ppa = atoi(ptr);
     }
 
