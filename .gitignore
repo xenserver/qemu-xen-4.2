@@ -29,3 +29,5 @@ qemu-img
 
 *.[oa]
 *~
+
+i386-dm/Makefile
