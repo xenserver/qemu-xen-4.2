@@ -53,6 +53,8 @@ typedef float64 CPU86_LDouble;
 #endif
 #endif
 
+#define NB_MMU_MODES 2
+
 /* Empty for now */
 typedef struct CPUX86State {
     uint32_t a20_mask;
@@ -71,6 +73,10 @@ void cpu_set_ferr(CPUX86State *s);
 
 void cpu_x86_set_a20(CPUX86State *env, int a20_state);
 
+/* used to debug */
+#define X86_DUMP_FPU  0x0001 /* dump FPU state too */
+#define X86_DUMP_CCOP 0x0002 /* dump qemu flag cache */
+
 #ifndef IN_OP_I386
 void cpu_x86_outb(CPUX86State *env, int addr, int val);
 void cpu_x86_outw(CPUX86State *env, int addr, int val);
@@ -88,6 +94,23 @@ int main_loop(void);
 #elif defined(__ia64__)
 #define TARGET_PAGE_BITS 14
 #endif 
+
+#define CPUState CPUX86State
+#define cpu_init cpu_x86_init
+#define cpu_exec cpu_x86_exec
+#define cpu_gen_code cpu_x86_gen_code
+#define cpu_signal_handler cpu_x86_signal_handler
+#define cpu_list x86_cpu_list
+
+/* MMU modes definitions */
+#define MMU_MODE0_SUFFIX _kernel
+#define MMU_MODE1_SUFFIX _user
+#define MMU_USER_IDX 1
+static inline int cpu_mmu_index (CPUState *env)
+{
+    return (env->hflags & HF_CPL_MASK) == 3 ? 1 : 0;
+}
+
 #include "cpu-all.h"
 
 #endif /* CPU_I386_H */
