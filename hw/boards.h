@@ -26,6 +26,10 @@ extern QEMUMachine bareetraxfs_machine;
 extern QEMUMachine pc_machine;
 extern QEMUMachine isapc_machine;
 
+/* Xen */
+extern QEMUMachine xenpv_machine;
+extern QEMUMachine xenfv_machine;
+
 /* ppc.c */
 extern QEMUMachine prep_machine;
 extern QEMUMachine core99_machine;

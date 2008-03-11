@@ -9,6 +9,8 @@ endif
 
 QEMU_PROG=qemu-dm
 
+CFLAGS += -Wno-unused -Werror
+
 LIBS += -L../../libxc -lxenctrl -lxenguest
 LIBS += -L../../xenstore -lxenstore
 
@@ -22,3 +24,4 @@ OBJS += xen_machine_fv.o
 OBJS += xen_machine_pv.o
 OBJS += xenfb.o
 OBJS += xen_console.o
+OBJS += xen_machine_fv.o

@@ -243,6 +243,8 @@ static int event_pending = 1;
 
 #define TFR(expr) do { if ((expr) != -1) break; } while (errno == EINTR)
 
+#include "xen-vl-extra.c"
+
 /***********************************************************/
 /* x86 ISA bus support */
 
@@ -473,7 +475,7 @@ void hw_error(const char *fmt, ...)
     fprintf(stderr, "\n");
     for(env = first_cpu; env != NULL; env = env->next_cpu) {
         fprintf(stderr, "CPU #%d:\n", env->cpu_index);
-#ifdef TARGET_I386
+#if defined(TARGET_I386) && !defined(CONFIG_DM)
         cpu_dump_state(env, stderr, fprintf, X86_DUMP_FPU);
 #else
         cpu_dump_state(env, stderr, fprintf, 0);
@@ -863,7 +865,7 @@ static void win32_rearm_timer(struct qemu_alarm_timer *t);
 static int unix_start_timer(struct qemu_alarm_timer *t);
 static void unix_stop_timer(struct qemu_alarm_timer *t);
 
-#ifdef __linux__
+#if defined(__linux__) && !defined(CONFIG_DM)
 
 static int dynticks_start_timer(struct qemu_alarm_timer *t);
 static void dynticks_stop_timer(struct qemu_alarm_timer *t);
@@ -881,7 +883,7 @@ static void rtc_stop_timer(struct qemu_alarm_timer *t);
 
 static struct qemu_alarm_timer alarm_timers[] = {
 #ifndef _WIN32
-#ifdef __linux__
+#if defined(__linux__) && !defined(CONFIG_DM)
     {"dynticks", ALARM_FLAG_DYNTICKS, dynticks_start_timer,
      dynticks_stop_timer, dynticks_rearm_timer, NULL},
     /* HPET - if available - is preferred */
@@ -1128,8 +1130,10 @@ static void timer_save(QEMUFile *f, void *opaque)
     if (cpu_ticks_enabled) {
         hw_error("cannot save state if virtual timers are running");
     }
+#ifndef CONFIG_DM
     qemu_put_be64(f, cpu_ticks_offset);
     qemu_put_be64(f, ticks_per_sec);
+#endif
     qemu_put_be64(f, cpu_clock_offset);
 }
 
@@ -1140,14 +1144,19 @@ static int timer_load(QEMUFile *f, void *opaque, int version_id)
     if (cpu_ticks_enabled) {
         return -EINVAL;
     }
+#ifndef CONFIG_DM
     cpu_ticks_offset=qemu_get_be64(f);
     ticks_per_sec=qemu_get_be64(f);
     if (version_id == 2) {
+#else
+    if (version_id == 1 || version_id == 2) {
+#endif
         cpu_clock_offset=qemu_get_be64(f);
     }
     return 0;
 }
 
+#ifndef CONFIG_DM
 #ifdef _WIN32
 void CALLBACK host_alarm_handler(UINT uTimerID, UINT uMsg,
                                  DWORD_PTR dwUser, DWORD_PTR dw1, DWORD_PTR dw2)
@@ -1535,6 +1544,7 @@ static void win32_rearm_timer(struct qemu_alarm_timer *t)
 }
 
 #endif /* _WIN32 */
+#endif /* !CONFIG_DM */
 
 static void init_timer_alarm(void)
 {
@@ -6035,6 +6045,8 @@ static int bdrv_snapshot_find(BlockDriverState *bs, QEMUSnapshotInfo *sn_info,
     return ret;
 }
 
+#ifndef CONFIG_DM
+
 void do_savevm(const char *name)
 {
     BlockDriverState *bs, *bs1;
@@ -6204,6 +6216,8 @@ void do_loadvm(const char *name)
         vm_start();
 }
 
+#endif /* !CONFIG_DM */
+
 void do_delvm(const char *name)
 {
     BlockDriverState *bs, *bs1;
@@ -6270,7 +6284,10 @@ void do_info_snapshots(void)
 /***********************************************************/
 /* cpu save/restore */
 
-#if defined(TARGET_I386)
+#if defined(CONFIG_DM)
+void cpu_save(QEMUFile *f, void *opaque) { }
+int cpu_load(QEMUFile *f, void *opaque, int version_id) { return 0; }
+#elif defined(TARGET_I386)
 
 static void cpu_put_seg(QEMUFile *f, SegmentCache *dt)
 {
@@ -6821,6 +6838,11 @@ int cpu_load(QEMUFile *f, void *opaque, int version_id)
 /***********************************************************/
 /* ram save/restore */
 
+#ifdef CONFIG_DM
+static void ram_save(QEMUFile *f, void *opaque) { }
+static int ram_load(QEMUFile *f, void *opaque, int version_id) { return 0; }
+#else /* !CONFIG_DM */
+
 static int ram_get_page(QEMUFile *f, uint8_t *buf, int len)
 {
     int v;
@@ -7075,6 +7097,8 @@ static int ram_load(QEMUFile *f, void *opaque, int version_id)
     ram_decompress_close(s);
     return 0;
 }
+
+#endif /* !CONFIG_DM */
 
 /***********************************************************/
 /* bottom halves (can be seen as timers which expire ASAP) */
@@ -7493,6 +7517,8 @@ void main_loop_wait(int timeout)
 
 }
 
+#ifndef CONFIG_DM
+
 static int main_loop(void)
 {
     int ret, timeout;
@@ -7572,6 +7598,7 @@ static int main_loop(void)
     cpu_disable_ticks();
     return ret;
 }
+#endif /* !CONFIG_DM */
 
 static void help(int exitcode)
 {
@@ -7967,7 +7994,10 @@ static void read_passwords(void)
 /* XXX: currently we cannot use simultaneously different CPUs */
 static void register_machines(void)
 {
-#if defined(TARGET_I386)
+#if defined(CONFIG_DM)
+    qemu_register_machine(&xenfv_machine);
+    qemu_register_machine(&xenpv_machine);
+#elif defined(TARGET_I386)
     qemu_register_machine(&pc_machine);
     qemu_register_machine(&isapc_machine);
 #elif defined(TARGET_PPC)
@@ -8032,7 +8062,7 @@ static void register_machines(void)
 #ifdef HAS_AUDIO
 struct soundhw soundhw[] = {
 #ifdef HAS_AUDIO_CHOICE
-#ifdef TARGET_I386
+#if defined(TARGET_I386) && !defined(CONFIG_DM)
     {
         "pcspk",
         "PC speaker",
@@ -8894,7 +8924,7 @@ int main(int argc, char **argv)
                     vlan->id);
     }
 
-#ifdef TARGET_I386
+#if defined(TARGET_I386) && !defined(CONFIG_DM)
     /* XXX: this should be moved in the PC machine instantiation code */
     if (net_boot != 0) {
         int netroms = 0;

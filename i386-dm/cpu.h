@@ -22,6 +22,8 @@
 
 #include "config.h"
 
+struct CPUX86State;
+
 #ifdef TARGET_X86_64
 #define TARGET_LONG_BITS 64
 #else
@@ -34,6 +36,16 @@
 /* support for self modifying code even if the modified instruction is
    close to the modifying instruction */
 #define TARGET_HAS_PRECISE_SMC
+
+/* MMU modes definitions
+ */
+/* We aren't handling the MMU in Qemu; all the addresses we deal with
+ * are guest physical.  So as far as qemu
+ * is concerned there is only the one MMU mode.
+ */
+#define NB_MMU_MODES 1
+#define MMU_MODE0_SUFFIX _xen
+static inline int cpu_mmu_index(struct CPUX86State *env) { return 0; }
 
 #include "cpu-defs.h"
 
@@ -53,7 +65,12 @@ typedef float64 CPU86_LDouble;
 #endif
 #endif
 
-#define NB_MMU_MODES 2
+typedef struct SegmentCache {
+    uint32_t selector;
+    target_ulong base;
+    uint32_t limit;
+    uint32_t flags;
+} SegmentCache;
 
 /* Empty for now */
 typedef struct CPUX86State {
@@ -100,16 +117,6 @@ int main_loop(void);
 #define cpu_exec cpu_x86_exec
 #define cpu_gen_code cpu_x86_gen_code
 #define cpu_signal_handler cpu_x86_signal_handler
-#define cpu_list x86_cpu_list
-
-/* MMU modes definitions */
-#define MMU_MODE0_SUFFIX _kernel
-#define MMU_MODE1_SUFFIX _user
-#define MMU_USER_IDX 1
-static inline int cpu_mmu_index (CPUState *env)
-{
-    return (env->hflags & HF_CPL_MASK) == 3 ? 1 : 0;
-}
 
 #include "cpu-all.h"
 
