@@ -25,3 +25,7 @@ OBJS += xen_machine_pv.o
 OBJS += xenfb.o
 OBJS += xen_console.o
 OBJS += xen_machine_fv.o
+
+BAD_OBJS += monitor.o
+
+OBJS := $(filter-out $(BAD_OBJS), $(OBJS))
