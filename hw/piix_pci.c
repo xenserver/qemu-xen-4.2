@@ -26,6 +26,11 @@
 #include "pc.h"
 #include "pci.h"
 
+
+static void i440fx_set_irq(void *pic, int irq_num, int level);
+static void piix3_write_config(PCIDevice *d, 
+                               uint32_t address, uint32_t val, int len);
+
 typedef uint32_t pci_addr_t;
 #include "pci_host.h"
 
@@ -50,14 +55,20 @@ static void piix3_set_irq(qemu_irq *pic, int irq_num, int level);
    mapping. */
 static int pci_slot_get_pirq(PCIDevice *pci_dev, int irq_num)
 {
+#ifndef CONFIG_DM
     int slot_addend;
     slot_addend = (pci_dev->devfn >> 3) - 1;
     return (irq_num + slot_addend) & 3;
+#else  /* !CONFIG_DM */
+    return irq_num + ((pci_dev->devfn >> 3) << 2);
+#endif /* !CONFIG_DM */
 }
 
 static uint32_t isa_page_descs[384 / 4];
 static uint8_t smm_enabled;
 static int pci_irq_levels[4];
+
+#ifndef CONFIG_DM
 
 static void update_pam(PCIDevice *d, uint32_t start, uint32_t end, int r)
 {
@@ -137,16 +148,20 @@ static void i440fx_write_config(PCIDevice *d,
         i440fx_update_memory_mappings(d);
 }
 
+#endif /* !CONFIG_DM */
+
 static void i440fx_save(QEMUFile* f, void *opaque)
 {
     PCIDevice *d = opaque;
     int i;
 
     pci_device_save(d, f);
+#ifndef CONFIG_DM
     qemu_put_8s(f, &smm_enabled);
 
     for (i = 0; i < 4; i++)
         qemu_put_be32(f, pci_irq_levels[i]);
+#endif /* !CONFIG_DM */
 }
 
 static int i440fx_load(QEMUFile* f, void *opaque, int version_id)
@@ -159,12 +174,14 @@ static int i440fx_load(QEMUFile* f, void *opaque, int version_id)
     ret = pci_device_load(d, f);
     if (ret < 0)
         return ret;
+#ifndef CONFIG_DM
     i440fx_update_memory_mappings(d);
     qemu_get_8s(f, &smm_enabled);
 
     if (version_id >= 2)
         for (i = 0; i < 4; i++)
             pci_irq_levels[i] = qemu_get_be32(f);
+#endif /* !CONFIG_DM */
 
     return 0;
 }
@@ -176,7 +193,7 @@ PCIBus *i440fx_init(PCIDevice **pi440fx_state, qemu_irq *pic)
     I440FXState *s;
 
     s = qemu_mallocz(sizeof(I440FXState));
-    b = pci_register_bus(piix3_set_irq, pci_slot_get_pirq, pic, 0, 4);
+    b = pci_register_bus(i440fx_set_irq, pci_slot_get_pirq, NULL, 0, 128);
     s->bus = b;
 
     register_ioport_write(0xcf8, 4, 4, i440fx_addr_writel, s);
@@ -201,7 +218,9 @@ PCIBus *i440fx_init(PCIDevice **pi440fx_state, qemu_irq *pic)
     d->config[0x0b] = 0x06; // class_base = PCI_bridge
     d->config[0x0e] = 0x00; // header_type
 
+#ifndef CONFIG_DM
     d->config[0x72] = 0x02; /* SMRAM */
+#endif /* !CONFIG_DM */
 
     register_savevm("I440FX", 0, 2, i440fx_save, i440fx_load, d);
     *pi440fx_state = d;
@@ -269,7 +288,15 @@ static void piix3_reset(PCIDevice *d)
     pci_conf[0xab] = 0x00;
     pci_conf[0xac] = 0x00;
     pci_conf[0xae] = 0x00;
+
+#ifdef CONFIG_DM
+    pci_conf[0x61] = 0x80;
+    pci_conf[0x62] = 0x80;
+    pci_conf[0x63] = 0x80;
+#endif /* CONFIG_DM */
 }
+
+#ifndef CONFIG_DM
 
 static void piix4_reset(PCIDevice *d)
 {
@@ -308,6 +335,8 @@ static void piix4_reset(PCIDevice *d)
     pci_conf[0xae] = 0x00;
 }
 
+#endif /* !CONFIG_DM */
+
 static void piix_save(QEMUFile* f, void *opaque)
 {
     PCIDevice *d = opaque;
@@ -328,7 +357,7 @@ int piix3_init(PCIBus *bus, int devfn)
     uint8_t *pci_conf;
 
     d = pci_register_device(bus, "PIIX3", sizeof(PCIDevice),
-                                    devfn, NULL, NULL);
+                                    devfn, NULL, piix3_write_config);
     register_savevm("PIIX3", 0, 2, piix_save, piix_load, d);
 
     piix3_dev = d;
@@ -346,6 +375,7 @@ int piix3_init(PCIBus *bus, int devfn)
     return d->devfn;
 }
 
+#ifndef CONFIG_DM
 int piix4_init(PCIBus *bus, int devfn)
 {
     PCIDevice *d;
@@ -368,4 +398,34 @@ int piix4_init(PCIBus *bus, int devfn)
 
     piix4_reset(d);
     return d->devfn;
+}
+#endif /* !CONFIG_DM */
+
+
+
+
+
+static void piix3_write_config(PCIDevice *d, 
+                               uint32_t address, uint32_t val, int len)
+{
+    int i;
+
+    /* Scan for updates to PCI link routes (0x60-0x63). */
+    for (i = 0; i < len; i++) {
+        uint8_t v = (val >> (8*i)) & 0xff;
+        if (v & 0x80)
+            v = 0;
+        v &= 0xf;
+        if (((address+i) >= 0x60) && ((address+i) <= 0x63))
+            xc_hvm_set_pci_link_route(xc_handle, domid, address + i - 0x60, v);
+    }
+
+    /* Hand off to default logic. */
+    pci_default_write_config(d, address, val, len);
+}
+
+static void i440fx_set_irq(void *pic, int irq_num, int level)
+{
+    xc_hvm_set_pci_intx_level(xc_handle, domid, 0, 0, irq_num >> 2,
+                              irq_num & 3, level);
 }
