@@ -39,6 +39,7 @@ int get_image_size(const char *filename)
 }
 
 /* return the size or -1 if error */
+/* deprecated, because caller does not specify buffer size! */
 int load_image(const char *filename, uint8_t *addr)
 {
     int fd, size;
@@ -53,6 +54,48 @@ int load_image(const char *filename, uint8_t *addr)
     }
     close(fd);
     return size;
+}
+
+/* return the amount read, just like fread.  0 may mean error or eof */
+int fread_targphys(target_phys_addr_t dst_addr, size_t nbytes, FILE *f)
+{
+    unsigned char buf[4096];
+    target_phys_addr_t dst_begin = dst_addr;
+    size_t want, did;
+
+    while (nbytes) {
+	want = nbytes > sizeof(buf) ? sizeof(buf) : nbytes;
+	did = fread(buf, 1, want, f);
+	if (did != want) break;
+	
+	cpu_physical_memory_write(dst_addr, buf, did);
+	dst_addr += did;
+	nbytes -= did;
+    }
+    return dst_addr - dst_begin;
+}
+
+/* returns 0 on error, 1 if ok */
+int fread_targphys_ok(target_phys_addr_t dst_addr, size_t nbytes, FILE *f)
+{
+    return fread_targphys(dst_addr, nbytes, f) == nbytes;
+}
+    
+/* return the size or -1 if error */
+int load_image_targphys(const char *filename,
+			target_phys_addr_t addr, int max_sz)
+{
+    FILE *f;
+    size_t got;
+
+    f = fopen(filename, "rb");
+    if (!f) return -1;
+
+    got = fread_targphys(addr, max_sz, f);
+    if (ferror(f)) { fclose(f); return -1; }
+    fclose(f);
+
+    return got;
 }
 
 /* A.OUT loader */
