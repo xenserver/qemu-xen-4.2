@@ -23,7 +23,10 @@
  * THE SOFTWARE.
  */
 
-#include "vl.h"
+#include "hw.h"
+#include "pc.h"
+#include "pci.h"
+
 #include <xen/hvm/ioreq.h>
 
 /* PM1a_CNT bits, as defined in the ACPI specification. */
@@ -497,7 +500,7 @@ void acpi_php_add(int pci_slot)
 #endif /* CONFIG_PASSTHROUGH */
 
 /* PIIX4 acpi pci configuration space, func 2 */
-void pci_piix4_acpi_init(PCIBus *bus, int devfn)
+void *piix4_pm_init(PCIBus *bus, int devfn)
 {
     PCIAcpiState *d;
     uint8_t *pci_conf;

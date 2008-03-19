@@ -50,6 +50,10 @@ static PITState *pit;
 static IOAPICState *ioapic;
 static PCIDevice *i440fx_state;
 
+static void xen_relocator_hook(target_phys_addr_t prot_addr, uint16_t protocol,
+			       uint8_t header[], int kernel_size);
+#define smbus_eeprom_device_init (void)
+
 static void ioport80_write(void *opaque, uint32_t addr, uint32_t data)
 {
 }
@@ -90,7 +94,7 @@ void cpu_smm_update(CPUState *env)
         i440fx_set_smm(i440fx_state, (env->hflags >> HF_SMM_SHIFT) & 1);
 }
 
-
+#ifndef CONFIG_DM
 /* IRQ handling */
 int cpu_get_pic_interrupt(CPUState *env)
 {
@@ -117,6 +121,7 @@ static void pic_irq_request(void *opaque, int irq, int level)
     if (level && apic_accept_pic_intr(env))
         cpu_interrupt(env, CPU_INTERRUPT_HARD);
 }
+#endif /* !CONFIG_DM */
 
 /* PC cmos mappings */
 
@@ -469,6 +474,7 @@ static void load_linux(const char *kernel_filename,
 		       const char *initrd_filename,
 		       const char *kernel_cmdline)
 {
+#ifndef __ia64__
     uint16_t protocol;
     uint32_t gpr[8];
     uint16_t seg[6];
@@ -517,7 +523,7 @@ static void load_linux(const char *kernel_filename,
 	prot_addr    = 0x100000;
     }
 
-#if 0
+#if 1
     fprintf(stderr,
 	    "qemu: real_addr     = %#zx\n"
 	    "qemu: cmdline_addr  = %#zx\n"
@@ -600,6 +606,8 @@ static void load_linux(const char *kernel_filename,
     setup_size = (setup_size+1)*512;
     kernel_size -= setup_size;	/* Size of protected-mode code */
 
+    xen_relocator_hook(prot_addr, protocol, header, kernel_size);
+
     if (!fread_targphys_ok(real_addr+1024, setup_size-1024, f) ||
 	!fread_targphys_ok(prot_addr, kernel_size, f)) {
 	fprintf(stderr, "qemu: read error on kernel '%s'\n",
@@ -616,6 +624,7 @@ static void load_linux(const char *kernel_filename,
     gpr[4] = cmdline_addr-real_addr-16;	/* SP (-16 is paranoia) */
 
     generate_bootsect(gpr, seg, 0);
+#endif
 }
 
 static void main_cpu_reset(void *opaque)
@@ -719,12 +728,14 @@ static void pc_init1(int ram_size, int vga_ram_size,
             fprintf(stderr, "Unable to find x86 CPU definition\n");
             exit(1);
         }
+#ifndef CONFIG_DM
         if (i != 0)
             env->hflags |= HF_HALTED_MASK;
         if (smp_cpus > 1) {
             /* XXX: enable it in all cases */
             env->cpuid_features |= CPUID_APIC;
         }
+#endif /* !CONFIG_DM */
         register_savevm("cpu", i, 4, cpu_save, cpu_load, env);
         qemu_register_reset(main_cpu_reset, env);
         if (pci_enabled) {
@@ -733,6 +744,7 @@ static void pc_init1(int ram_size, int vga_ram_size,
         vmport_init(env);
     }
 
+#ifndef CONFIG_DM
     /* allocate RAM */
     ram_addr = qemu_ram_alloc(ram_size);
     cpu_register_physical_memory(0, ram_size, ram_addr);
@@ -820,6 +832,7 @@ static void pc_init1(int ram_size, int vga_ram_size,
     /* map all the bios at the top of memory */
     cpu_register_physical_memory((uint32_t)(-bios_size),
                                  bios_size, bios_offset | IO_MEM_ROM);
+#endif /* !CONFIG_DM */
 
     bochs_bios_init();
 
@@ -872,6 +885,7 @@ static void pc_init1(int ram_size, int vga_ram_size,
     register_ioport_read(0x92, 1, 1, ioport92_read, NULL);
     register_ioport_write(0x92, 1, 1, ioport92_write, NULL);
 
+#ifndef CONFIG_DM
     if (pci_enabled) {
         ioapic = ioapic_init();
     }
@@ -880,6 +894,9 @@ static void pc_init1(int ram_size, int vga_ram_size,
     if (pci_enabled) {
         pic_set_alt_irq_func(isa_pic, ioapic_set_irq, ioapic);
     }
+#endif /* !CONFIG_DM */
+    if (pci_enabled)
+        pci_xen_platform_init(pci_bus);
 
     for(i = 0; i < MAX_SERIAL_PORTS; i++) {
         if (serial_hds[i]) {
@@ -939,6 +956,11 @@ static void pc_init1(int ram_size, int vga_ram_size,
 	                 hd[MAX_IDE_DEVS * i], hd[MAX_IDE_DEVS * i + 1]);
         }
     }
+
+#ifdef HAS_TPM
+    if (has_tpm_device())
+        tpm_tis_init(&i8259[11]);
+#endif
 
     i8042_init(i8259[1], i8259[12], 0x60);
     DMA_init(0);
@@ -1030,3 +1052,134 @@ QEMUMachine isapc_machine = {
     "ISA-only PC",
     pc_init_isa,
 };
+
+
+
+
+/*
+ * Evil helper for non-relocatable kernels
+ *
+ * So it works out like this:
+ *
+ *  0x100000  - Xen HVM firmware lives here. Kernel wants to boot here
+ *
+ * You can't both live there and HVM firmware is needed first, thus
+ * our plan is
+ *
+ *  0x200000              - kernel is loaded here by QEMU
+ *  0x200000+kernel_size  - helper code is put here by QEMU
+ *
+ * code32_switch in kernel header is set to point at out helper
+ * code at 0x200000+kernel_size
+ *
+ * Our helper basically does memmove(0x100000,0x200000,kernel_size)
+ * and then jmps to  0x1000000.
+ *
+ * So we've overwritten the HVM firmware (which was no longer
+ * needed) and the non-relocatable kernel can happily boot
+ * at its usual address.
+ *
+ * Simple, eh ?
+ *
+ * Well the assembler needed to do this is fairly short:
+ *
+ *  # Load segments
+ *    cld                         
+ *    cli                         
+ *    movl $0x18,%eax
+ *    mov %ax,%ds                 
+ *    mov %ax,%es                 
+ *    mov %ax,%fs                 
+ *    mov %ax,%gs                 
+ *    mov %ax,%ss                 
+ *
+ *  # Move the kernel into position
+ *    xor    %edx,%edx            
+ *_doloop:                        
+ *    movzbl 0x600000(%edx),%eax  
+ *    mov    %al,0x100000(%edx)   
+ *    add    $0x1,%edx            
+ *    cmp    $0x500000,%edx       
+ *    jne    _doloop              
+ *
+ *  # start kernel
+ *    xorl %ebx,%ebx              
+ *    mov    $0x100000,%ecx       
+ *    jmp    *%ecx                
+ *
+ */
+static void setup_relocator(target_phys_addr_t addr, target_phys_addr_t src, target_phys_addr_t dst, size_t len)
+{
+  /* Now this assembler corresponds to follow machine code, with our args from QEMU spliced in :-) */
+  unsigned char buf[] = {
+    /* Load segments */
+    0xfc,                         /* cld               */
+    0xfa,                         /* cli               */ 
+    0xb8, 0x18, 0x00, 0x00, 0x00, /* mov    $0x18,%eax */
+    0x8e, 0xd8,                   /* mov    %eax,%ds   */
+    0x8e, 0xc0,                   /* mov    %eax,%es   */
+    0x8e, 0xe0,                   /* mov    %eax,%fs   */
+    0x8e, 0xe8,                   /* mov    %eax,%gs   */
+    0x8e, 0xd0,                   /* mov    %eax,%ss   */
+    0x31, 0xd2,                   /* xor    %edx,%edx  */
+  
+    /* Move the kernel into position */
+    0x0f, 0xb6, 0x82, (src&0xff), ((src>>8)&0xff), ((src>>16)&0xff), ((src>>24)&0xff), /*   movzbl $src(%edx),%eax */
+    0x88, 0x82, (dst&0xff), ((dst>>8)&0xff), ((dst>>16)&0xff), ((dst>>24)&0xff),       /*   mov    %al,$dst(%edx)  */
+    0x83, 0xc2, 0x01,                                                                  /*   add    $0x1,%edx       */
+    0x81, 0xfa, (len&0xff), ((len>>8)&0xff), ((len>>16)&0xff), ((len>>24)&0xff),       /*   cmp    $len,%edx       */
+    0x75, 0xe8,                                                                        /*   jne    13 <_doloop>    */
+
+    /* Start kernel */
+    0x31, 0xdb,                                                                        /*   xor    %ebx,%ebx       */
+    0xb9, (dst&0xff), ((dst>>8)&0xff), ((dst>>16)&0xff), ((dst>>24)&0xff),             /*   mov    $dst,%ecx  */
+    0xff, 0xe1,                                                                        /*   jmp    *%ecx           */
+  };
+  cpu_physical_memory_rw(addr, buf, sizeof(buf), 1);
+  fprintf(stderr, "qemu: helper at 0x%x of size %d bytes, to move kernel of %d bytes from 0x%x to 0x%x\n",
+	  (int)addr, (int)sizeof(buf), (int)len, (int)src, (int)dst);
+}
+
+
+static void xen_relocator_hook(target_phys_addr_t prot_addr, uint16_t protocol,
+			       uint8_t header[], int kernel_size)
+{
+
+    /* Urgh, Xen's HVM firmware lives at 0x100000, but that's also the
+     * address Linux wants to start life at prior to relocatable support
+     */
+    fprintf(stderr, "checking need for relocation, header protocol: %x\n",
+	    protocol);
+
+    if (prot_addr != 0x10000) { /* old low kernels are OK */
+	target_phys_addr_t reloc_prot_addr = 0x20000;
+	
+        if (protocol >= 0x205 && (header[0x234] & 1)) {
+	    /* Relocatable automatically */
+	    stl_p(header+0x214, reloc_prot_addr);
+	    fprintf(stderr, "qemu: kernel is relocatable\n");
+	} else {
+	    /* Setup a helper which moves  kernel back to
+	     * its expected addr after firmware has got out
+	     * of the way. We put a helper at  reloc_prot_addr+kernel_size.
+	     * It moves kernel from reloc_prot_addr to prot_addr and
+	     * then jumps to prot_addr. Yes this is sick.
+	     */
+	    fprintf(stderr, "qemu: kernel is NOT relocatable\n");
+	    stl_p(header+0x214, reloc_prot_addr + kernel_size);
+	    setup_relocator(reloc_prot_addr + kernel_size, reloc_prot_addr, prot_addr, kernel_size);
+	}
+    }
+
+    fprintf(stderr, "qemu: loading kernel real mode (%#x bytes) at %#zx\n",
+	    setup_size-1024, real_addr);
+    fprintf(stderr, "qemu: loading kernel protected mode (%#x bytes) at %#zx\n",
+	    kernel_size, reloc_prot_addr);
+}
+
+#ifdef CONFIG_DM
+
+void vmport_init(CPUX86State *env) { }
+void apic_init(CPUX86State *env) { }
+
+#endif /* CONFIG_DM */

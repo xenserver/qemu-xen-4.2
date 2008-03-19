@@ -39,3 +39,5 @@ SDL_CFLAGS=-I/usr/include/SDL -D_GNU_SOURCE=1 -D_REENTRANT
 CONFIG_CURSES=yes
 CURSES_LIBS=-lcurses
 TOOLS=qemu-img$(EXESUF) 
+
+TARGET_DIRS = i386-dm i386-stubdom

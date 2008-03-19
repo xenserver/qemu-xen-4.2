@@ -9,14 +9,14 @@ endif
 
 QEMU_PROG=qemu-dm
 
-CFLAGS += -Wno-unused -Werror
+#CFLAGS += -Wno-unused -Wno-declaration-after-statement
+#	-Werror
 
 LIBS += -L../../libxc -lxenctrl -lxenguest
 LIBS += -L../../xenstore -lxenstore
 
 LDFLAGS := $(CFLAGS) $(LDFLAGS)
 
-OBJS += loader.o
 OBJS += piix4acpi.o
 OBJS += xenstore.o
 OBJS += xen_platform.o
@@ -26,6 +26,6 @@ OBJS += xenfb.o
 OBJS += xen_console.o
 OBJS += xen_machine_fv.o
 
-BAD_OBJS += monitor.o
+BAD_OBJS += loader.o monitor.o gdbstub.o acpi.o
 
 OBJS := $(filter-out $(BAD_OBJS), $(OBJS))
