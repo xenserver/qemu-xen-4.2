@@ -383,6 +383,7 @@ typedef struct IDEState {
     PCIDevice *pci_dev;
     struct BMDMAState *bmdma;
     int drive_serial;
+    int write_cache;
     /* ide regs */
     uint8_t feature;
     uint8_t error;
@@ -559,7 +560,8 @@ static void ide_identify(IDEState *s)
     put_le16(p + 68, 120);
     put_le16(p + 80, 0xf0); /* ata3 -> ata6 supported */
     put_le16(p + 81, 0x16); /* conforms to ata5 */
-    put_le16(p + 82, (1 << 14));
+    /* 14=nop 5=write_cache */
+    put_le16(p + 82, (1 << 14) | (1 << 5));
     /* 13=flush_cache_ext,12=flush_cache,10=lba48 */
     put_le16(p + 83, (1 << 14) | (1 << 13) | (1 <<12) | (1 << 10));
     put_le16(p + 84, (1 << 14));
@@ -965,6 +967,9 @@ static void ide_sector_write(IDEState *s)
     if (n > s->req_nb_sectors)
         n = s->req_nb_sectors;
     ret = bdrv_write(s->bs, sector_num, s->io_buffer, n);
+    if (ret == 0 && !s->write_cache) {
+	ret = bdrv_flush(s->bs);
+    }
     if (ret != 0) {
 	ide_rw_error(s);
 	return;
@@ -1021,6 +1026,13 @@ static void ide_write_dma_cb(void *opaque, int ret)
 
     /* end of transfer ? */
     if (s->nsector == 0) {
+	if (!s->write_cache) {
+	    ret = bdrv_flush(s->bs);
+	    if (ret != 0) {
+		ide_dma_error(s);
+		return;
+	    }
+	}
         s->status = READY_STAT | SEEK_STAT;
         ide_set_irq(s);
     eot:
@@ -2103,7 +2115,17 @@ static void ide_ioport_write(void *opaque, uint32_t addr, uint32_t val)
             case 0xcc: /* reverting to power-on defaults enable */
             case 0x66: /* reverting to power-on defaults disable */
             case 0x02: /* write cache enable */
+                s->write_cache = 1;
+                s->status = READY_STAT | SEEK_STAT;
+                ide_set_irq(s);
+                break;
             case 0x82: /* write cache disable */
+                s->write_cache = 0;
+                ret = bdrv_flush(s->bs);
+		if (ret != 0) goto abort_cmd;
+                s->status = READY_STAT | SEEK_STAT;
+                ide_set_irq(s);
+                break;
             case 0xaa: /* read look-ahead enable */
             case 0x55: /* read look-ahead disable */
             case 0x05: /* set advanced power management mode */
@@ -2629,6 +2651,7 @@ static void ide_init2(IDEState *ide_state,
         s->irq = irq;
         s->sector_write_timer = qemu_new_timer(vm_clock,
                                                ide_sector_write_timer_cb, s);
+	s->write_cache = 0;
         ide_reset(s);
     }
 }
@@ -2657,6 +2680,7 @@ static void ide_save(QEMUFile* f, IDEState *s)
     if (s->identify_set) {
         qemu_put_buffer(f, (const uint8_t *)s->identify_data, 512);
     }
+    qemu_put_8s(f, &s->write_cache);
     qemu_put_8s(f, &s->feature);
     qemu_put_8s(f, &s->error);
     qemu_put_be32s(f, &s->nsector);
@@ -2685,6 +2709,8 @@ static void ide_load(QEMUFile* f, IDEState *s)
     if (s->identify_set) {
         qemu_get_buffer(f, (uint8_t *)s->identify_data, 512);
     }
+    if (version_id >= 2)
+	qemu_get_8s(f, &s->write_cache);
     qemu_get_8s(f, &s->feature);
     qemu_get_8s(f, &s->error);
     qemu_get_be32s(f, &s->nsector);
@@ -3029,7 +3055,7 @@ static int pci_ide_load(QEMUFile* f, void *opaque, int version_id)
     PCIIDEState *d = opaque;
     int ret, i;
 
-    if (version_id != 1)
+    if (version_id != 1 && version_id != 2)
         return -EINVAL;
     ret = pci_device_load(&d->dev, f);
     if (ret < 0)
@@ -3105,7 +3131,7 @@ void pci_piix3_ide_init(PCIBus *bus, BlockDriverState **hd_table, int devfn,
     ide_init_ioport(&d->ide_if[0], 0x1f0, 0x3f6);
     ide_init_ioport(&d->ide_if[2], 0x170, 0x376);
 
-    register_savevm("ide", 0, 1, pci_ide_save, pci_ide_load, d);
+    register_savevm("ide", 0, 2, pci_ide_save, pci_ide_load, d);
 }
 
 /* hd_table must contain 4 block drivers */
@@ -3143,7 +3169,7 @@ void pci_piix4_ide_init(PCIBus *bus, BlockDriverState **hd_table, int devfn,
     ide_init_ioport(&d->ide_if[0], 0x1f0, 0x3f6);
     ide_init_ioport(&d->ide_if[2], 0x170, 0x376);
 
-    register_savevm("ide", 0, 1, pci_ide_save, pci_ide_load, d);
+    register_savevm("ide", 0, 2, pci_ide_save, pci_ide_load, d);
 }
 
 /***********************************************************/
