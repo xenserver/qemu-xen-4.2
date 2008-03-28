@@ -2114,18 +2114,6 @@ static void ide_ioport_write(void *opaque, uint32_t addr, uint32_t val)
             switch(s->feature) {
             case 0xcc: /* reverting to power-on defaults enable */
             case 0x66: /* reverting to power-on defaults disable */
-            case 0x02: /* write cache enable */
-                s->write_cache = 1;
-                s->status = READY_STAT | SEEK_STAT;
-                ide_set_irq(s);
-                break;
-            case 0x82: /* write cache disable */
-                s->write_cache = 0;
-                ret = bdrv_flush(s->bs);
-		if (ret != 0) goto abort_cmd;
-                s->status = READY_STAT | SEEK_STAT;
-                ide_set_irq(s);
-                break;
             case 0xaa: /* read look-ahead enable */
             case 0x55: /* read look-ahead disable */
             case 0x05: /* set advanced power management mode */
@@ -2136,6 +2124,18 @@ static void ide_ioport_write(void *opaque, uint32_t addr, uint32_t val)
             case 0x9a: /* NOP */
             case 0x42: /* enable Automatic Acoustic Mode */
             case 0xc2: /* disable Automatic Acoustic Mode */
+                s->status = READY_STAT | SEEK_STAT;
+                ide_set_irq(s);
+                break;
+            case 0x02: /* write cache enable */
+                s->write_cache = 1;
+                s->status = READY_STAT | SEEK_STAT;
+                ide_set_irq(s);
+                break;
+            case 0x82: /* write cache disable */
+                s->write_cache = 0;
+                ret = bdrv_flush(s->bs);
+		if (ret != 0) goto abort_cmd;
                 s->status = READY_STAT | SEEK_STAT;
                 ide_set_irq(s);
                 break;
