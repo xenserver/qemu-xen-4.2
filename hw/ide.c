@@ -724,6 +724,7 @@ static inline void ide_abort_command(IDEState *s)
 static inline void ide_set_irq(IDEState *s)
 {
     BMDMAState *bm = s->bmdma;
+    if (!s->bs) return; /* yikes */
     if (!(s->cmd & IDE_CMD_DISABLE_IRQ)) {
         if (bm) {
             bm->status |= BM_STATUS_INT;
@@ -903,6 +904,8 @@ static void ide_read_dma_cb(void *opaque, int ret)
 	return;
     }
 
+    if (!s->bs) return; /* yikes */
+
     n = s->io_buffer_size >> 9;
     sector_num = ide_get_sector(s);
     if (n > 0) {
@@ -1016,6 +1019,8 @@ static void ide_write_dma_cb(void *opaque, int ret)
 	return;
     }
 
+    if (!s->bs) return; /* yikes */
+
     n = s->io_buffer_size >> 9;
     sector_num = ide_get_sector(s);
     if (n > 0) {
@@ -1066,6 +1071,39 @@ static void ide_sector_write_dma(IDEState *s)
     s->io_buffer_index = 0;
     s->io_buffer_size = 0;
     ide_dma_start(s, ide_write_dma_cb);
+}
+
+static void ide_device_utterly_broken(IDEState *s) {
+    s->status |= BUSY_STAT;
+    s->bs = NULL;
+    /* This prevents all future commands from working.  All of the
+     * asynchronous callbacks (and ide_set_irq, as a safety measure)
+     * check to see whether this has happened and bail if so.
+     */
+}
+
+static void ide_flush_cb(void *opaque, int ret)
+{
+    IDEState *s = opaque;
+
+    if (!s->bs) return; /* yikes */
+
+    if (ret) {
+        /* We are completely doomed.  The IDE spec does not permit us
+	 * to return an error from a flush except via a protocol which
+	 * requires us to say where the error is and which
+	 * contemplates the guest repeating the flush attempt to
+	 * attempt flush the remaining data.  We can't support that
+	 * because f(data)sync (which is what the block drivers use
+	 * eventually) doesn't report the necessary information or
+	 * give us the necessary control.  So we make the disk vanish.
+	 */
+	ide_device_utterly_broken(s);
+	return;
+    }
+    else
+        s->status = READY_STAT;
+    ide_set_irq(s);
 }
 
 static void ide_atapi_cmd_ok(IDEState *s)
@@ -1293,6 +1331,8 @@ static void ide_atapi_cmd_read_dma_cb(void *opaque, int ret)
     BMDMAState *bm = opaque;
     IDEState *s = bm->ide_if;
     int data_offset, n;
+
+    if (!s->bs) return; /* yikes */
 
     if (ret < 0) {
         ide_atapi_io_error(s, ret);
@@ -1872,6 +1912,8 @@ static void cdrom_change_cb(void *opaque)
     IDEState *s = opaque;
     uint64_t nb_sectors;
 
+    if (!s->bs) return; /* yikes */
+
     /* XXX: send interrupt too */
     bdrv_get_geometry(s->bs, &nb_sectors);
     s->nb_sectors = nb_sectors;
@@ -1975,8 +2017,8 @@ static void ide_ioport_write(void *opaque, uint32_t addr, uint32_t val)
         printf("ide: CMD=%02x\n", val);
 #endif
         s = ide_if->cur_drive;
-        /* ignore commands to non existant slave */
-        if (s != ide_if && !s->bs)
+	/* ignore commands to non existant device */
+        if (!s->bs)
             break;
 
         switch(val) {
@@ -2169,12 +2211,8 @@ static void ide_ioport_write(void *opaque, uint32_t addr, uint32_t val)
             break;
         case WIN_FLUSH_CACHE:
         case WIN_FLUSH_CACHE_EXT:
-            if (s->bs) {
-                ret = bdrv_flush(s->bs);
-		if (ret) goto abort_cmd;
-	    }
-	    s->status = READY_STAT;
-            ide_set_irq(s);
+	    s->status = BUSY_STAT;
+	    bdrv_aio_flush(s->bs, ide_flush_cb, s);
             break;
         case WIN_STANDBY:
         case WIN_STANDBY2:
