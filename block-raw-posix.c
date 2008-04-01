@@ -429,6 +429,20 @@ static BlockDriverAIOCB *raw_aio_write(BlockDriverState *bs,
     return &acb->common;
 }
 
+static BlockDriverAIOCB *raw_aio_flush(BlockDriverState *bs,
+        BlockDriverCompletionFunc *cb, void *opaque)
+{
+    RawAIOCB *acb;
+
+    acb = raw_aio_setup(bs, 0, NULL, 0, cb, opaque);
+    if (!acb)
+        return NULL;
+    if (aio_fsync(O_SYNC, &acb->aiocb) < 0) {
+        qemu_aio_release(acb);
+        return NULL;
+    }
+    return &acb->common;
+}
 static void raw_aio_cancel(BlockDriverAIOCB *blockacb)
 {
     int ret;
@@ -763,20 +777,6 @@ static int fd_open(BlockDriverState *bs)
     return 0;
 }
 
-static BlockDriverAIOCB *raw_aio_flush(BlockDriverState *bs,
-        BlockDriverCompletionFunc *cb, void *opaque)
-{
-    RawAIOCB *acb;
-
-    acb = raw_aio_setup(bs, 0, NULL, 0, cb, opaque);
-    if (!acb)
-        return NULL;
-    if (aio_fsync(O_SYNC, &acb->aiocb) < 0) {
-        qemu_aio_release(acb);
-        return NULL;
-    }
-    return &acb->common;
-}
 #endif
 
 #if defined(__linux__)
