@@ -383,7 +383,7 @@ typedef struct IDEState {
     PCIDevice *pci_dev;
     struct BMDMAState *bmdma;
     int drive_serial;
-    int write_cache;
+    uint8_t write_cache;
     /* ide regs */
     uint8_t feature;
     uint8_t error;
@@ -2740,7 +2740,7 @@ static void ide_save(QEMUFile* f, IDEState *s)
 }
 
 /* load per IDE drive data */
-static void ide_load(QEMUFile* f, IDEState *s)
+static void ide_load(QEMUFile* f, IDEState *s, int version_id)
 {
     s->mult_sectors=qemu_get_be32(f);
     s->identify_set=qemu_get_be32(f);
@@ -3118,7 +3118,7 @@ static int pci_ide_load(QEMUFile* f, void *opaque, int version_id)
 
     /* per IDE drive data */
     for(i = 0; i < 4; i++) {
-        ide_load(f, &d->ide_if[i]);
+        ide_load(f, &d->ide_if[i], version_id);
     }
     return 0;
 }
@@ -3641,7 +3641,7 @@ static int md_load(QEMUFile *f, void *opaque, int version_id)
     s->ide->cur_drive = &s->ide[(drive1_selected != 0)];
 
     for (i = 0; i < 2; i ++)
-        ide_load(f, &s->ide[i]);
+        ide_load(f, &s->ide[i], version_id);
 
     return 0;
 }
