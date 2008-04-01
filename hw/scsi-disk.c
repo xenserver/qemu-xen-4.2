@@ -276,6 +276,16 @@ static uint8_t *scsi_get_buf(SCSIDevice *d, uint32_t tag)
     return r->dma_buf;
 }
 
+static void scsi_flush_cb(void *opaque, int ret) {
+    SCSIRequest *r = opaque;
+    if (ret) {
+        BADF("scsi-disc: IO error on flush: %s\n", strerror(-ret));
+	scsi_command_complete(r, SENSE_HARDWARE_ERROR);
+    } else {
+	scsi_command_complete(r, SENSE_NO_SENSE);
+    }
+}
+
 /* Execute a scsi command.  Returns the length of the data expected by the
    command.  This will be Positive for data transfers from the device
    (eg. disk reads), negative for transfers to the device (eg. disk writes),
@@ -621,13 +631,8 @@ static int32_t scsi_send_command(SCSIDevice *d, uint32_t tag,
         break;
     case 0x35:
         DPRINTF("Synchronise cache (sector %d, count %d)\n", lba, len);
-        ret = bdrv_flush(s->bdrv);
-        if (ret) {
-            DPRINTF("IO error on bdrv_flush\n");
-            scsi_command_complete(r, SENSE_HARDWARE_ERROR);
-            return 0;
-        }
-        break;
+	bdrv_aio_flush(s->bdrv, scsi_flush_cb, r);
+	return 0;
     case 0x43:
         {
             int start_track, format, msf, toclen;
