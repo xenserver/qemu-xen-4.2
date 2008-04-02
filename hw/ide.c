@@ -892,6 +892,14 @@ static int dma_buf_rw(BMDMAState *bm, int is_write)
     return 1;
 }
 
+static void ide_dma_eot(BMDMAState *bm) {
+    bm->status &= ~BM_STATUS_DMAING;
+    bm->status |= BM_STATUS_INT;
+    bm->dma_cb = NULL;
+    bm->ide_if = NULL;
+    bm->aiocb = NULL;
+}
+
 static void ide_read_dma_cb(void *opaque, int ret)
 {
     BMDMAState *bm = opaque;
@@ -921,11 +929,7 @@ static void ide_read_dma_cb(void *opaque, int ret)
         s->status = READY_STAT | SEEK_STAT;
         ide_set_irq(s);
     eot:
-        bm->status &= ~BM_STATUS_DMAING;
-        bm->status |= BM_STATUS_INT;
-        bm->dma_cb = NULL;
-        bm->ide_if = NULL;
-        bm->aiocb = NULL;
+	ide_dma_eot(bm);
         return;
     }
 
@@ -1007,6 +1011,20 @@ static void ide_sector_write(IDEState *s)
     }
 }
 
+static void ide_write_flush_cb(void *opaque, int ret) {
+    BMDMAState *bm = opaque;
+    IDEState *s = bm->ide_if;
+
+    if (ret != 0) {
+	ide_dma_error(s);
+	return;
+    }
+    s->status = READY_STAT | SEEK_STAT;
+    ide_set_irq(s);
+    ide_dma_eot(bm);
+    return;
+}
+
 static void ide_write_dma_cb(void *opaque, int ret)
 {
     BMDMAState *bm = opaque;
@@ -1032,20 +1050,13 @@ static void ide_write_dma_cb(void *opaque, int ret)
     /* end of transfer ? */
     if (s->nsector == 0) {
 	if (!s->write_cache) {
-	    ret = bdrv_flush(s->bs);
-	    if (ret != 0) {
-		ide_dma_error(s);
-		return;
-	    }
+	    bdrv_aio_flush(s->bs, ide_write_flush_cb, bm);
+	    return;
 	}
         s->status = READY_STAT | SEEK_STAT;
         ide_set_irq(s);
     eot:
-        bm->status &= ~BM_STATUS_DMAING;
-        bm->status |= BM_STATUS_INT;
-        bm->dma_cb = NULL;
-        bm->ide_if = NULL;
-        bm->aiocb = NULL;
+	ide_dma_eot(bm);
         return;
     }
 
@@ -1366,11 +1377,7 @@ static void ide_atapi_cmd_read_dma_cb(void *opaque, int ret)
         s->nsector = (s->nsector & ~7) | ATAPI_INT_REASON_IO | ATAPI_INT_REASON_CD;
         ide_set_irq(s);
     eot:
-        bm->status &= ~BM_STATUS_DMAING;
-        bm->status |= BM_STATUS_INT;
-        bm->dma_cb = NULL;
-        bm->ide_if = NULL;
-        bm->aiocb = NULL;
+	ide_dma_eot(bm);
         return;
     }
 
