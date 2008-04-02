@@ -279,7 +279,7 @@ static uint8_t *scsi_get_buf(SCSIDevice *d, uint32_t tag)
 static void scsi_flush_cb(void *opaque, int ret) {
     SCSIRequest *r = opaque;
     if (ret) {
-        BADF("scsi-disc: IO error on flush: %s\n", strerror(-ret));
+        BADF("IO error on flush: %s\n", strerror(-ret));
 	scsi_command_complete(r, SENSE_HARDWARE_ERROR);
     } else {
 	scsi_command_complete(r, SENSE_NO_SENSE);
