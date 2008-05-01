@@ -1339,6 +1339,7 @@ static void do_key_event(VncState *vs, int down, uint32_t sym)
             return;
         }
         break;
+    case 0x3a:			/* CapsLock */
     case 0x45:			/* NumLock */
 	if (down) {
             kbd_put_keycode(keycode & 0x7f);
