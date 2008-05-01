@@ -819,7 +819,7 @@ static void vnc_update_client(void *opaque)
 {
     VncState *vs = opaque;
 
-    vs->ds->dpy_refresh(vs->ds);
+    vga_hw_update();
     _vnc_update_client(vs);
 }
 
@@ -829,11 +829,6 @@ static void vnc_timer_init(VncState *vs)
 	vs->timer = qemu_new_timer(rt_clock, vnc_update_client, vs);
 	vs->timer_interval = VNC_REFRESH_INTERVAL_BASE;
     }
-}
-
-static void vnc_dpy_refresh(DisplayState *ds)
-{
-    vga_hw_update();
 }
 
 static int vnc_listen_poll(void *opaque)
@@ -2490,7 +2485,7 @@ void vnc_display_init(DisplayState *ds)
     vs->ds->dpy_resize = vnc_dpy_resize;
     vs->ds->dpy_colourdepth = vnc_dpy_colourdepth;
     vs->ds->dpy_setdata = vnc_dpy_setdata;
-    vs->ds->dpy_refresh = vnc_dpy_refresh;
+    vs->ds->dpy_refresh = NULL;
 
     vs->ds->width = 640;
     vs->ds->height = 400;
