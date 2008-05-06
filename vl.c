@@ -39,6 +39,7 @@
 #include "audio/audio.h"
 
 #include <unistd.h>
+#include <stdlib.h>
 #include <fcntl.h>
 #include <signal.h>
 #include <time.h>
@@ -2260,7 +2261,7 @@ static CharDriverState *qemu_chr_open_stdio(void)
     return chr;
 }
 
-#if defined(__linux__) || defined(__sun__)
+#if defined(__linux__) || defined(__sun__) || defined(__NetBSD__) || defined(__OpenBSD__)
 static CharDriverState *qemu_chr_open_pty(void)
 {
     struct termios tty;
@@ -2407,12 +2408,12 @@ static CharDriverState *qemu_chr_open_tty(const char *filename)
     qemu_chr_reset(chr);
     return chr;
 }
-#else  /* ! __linux__ && ! __sun__ */
+#else  /* ! __linux__ etc. (qemu_chr_open_pty) */
 static CharDriverState *qemu_chr_open_pty(void)
 {
     return NULL;
 }
-#endif /* __linux__ || __sun__ */
+#endif  /* ! __linux__ etc. (qemu_chr_open_pty) */
 
 #if defined(__linux__)
 typedef struct {
@@ -2431,6 +2432,7 @@ static int pp_hw_mode(ParallelCharDriver *s, uint16_t mode)
     return 1;
 }
 
+#if defined(__linux__)
 static int pp_ioctl(CharDriverState *chr, int cmd, void *arg)
 {
     ParallelCharDriver *drv = chr->opaque;
@@ -3536,7 +3538,7 @@ static int parse_macaddr(uint8_t *macaddr, const char *p)
     return -1;
 }
 
-static int get_str_sep(char *buf, int buf_size, const char **pp, int sep)
+static int get_str_sep(char *buf, size_t buf_size, const char **pp, int sep)
 {
     const char *p, *p1;
     int len;
@@ -3972,18 +3974,28 @@ static TAPState *net_tap_fd_init(VLANState *vlan, int fd)
 static int tap_open(char *ifname, int ifname_size)
 {
     int fd;
+#ifndef TAPGIFNAME
     char *dev;
     struct stat s;
+#endif
 
     TFR(fd = open("/dev/tap", O_RDWR));
     if (fd < 0) {
-        fprintf(stderr, "warning: could not open /dev/tap: no virtual network emulation\n");
         return -1;
     }
 
+#ifdef TAPGIFNAME
+    if (ioctl (fd, TAPGIFNAME, (void*)&ifr) < 0) {
+       fprintf(stderr, "warning: could not open get tap name: %s\n",
+           strerror(errno));
+       return -1;
+    }
+    pstrcpy(ifname, ifname_size, ifr.ifr_name);
+#else
     fstat(fd, &s);
     dev = devname(s.st_rdev, S_IFCHR);
     pstrcpy(ifname, ifname_size, dev);
+#endif
 
     fcntl(fd, F_SETFL, O_NONBLOCK);
     return fd;
@@ -4131,7 +4143,6 @@ static int tap_open(char *ifname, int ifname_size)
 
     TFR(fd = open("/dev/net/tun", O_RDWR));
     if (fd < 0) {
-        fprintf(stderr, "warning: could not open /dev/net/tun: no virtual network emulation\n");
         return -1;
     }
     memset(&ifr, 0, sizeof(ifr));
@@ -4194,6 +4205,8 @@ static int net_tap_init(VLANState *vlan, const char *ifname1,
     TAPState *s;
     int fd;
     char ifname[128];
+
+    memset(ifname, 0, sizeof(ifname));
 
     if (ifname1 != NULL)
         pstrcpy(ifname, sizeof(ifname), ifname1);
@@ -4671,7 +4684,7 @@ static const char *get_opt_value(char *buf, int buf_size, const char *p)
     return p;
 }
 
-static int get_param_value(char *buf, int buf_size,
+static int get_param_value(char *buf, size_t buf_size,
                            const char *tag, const char *str)
 {
     const char *p;
@@ -4810,6 +4823,10 @@ static int net_client_init(const char *str)
         char ifname[64];
         char setup_script[1024], down_script[1024];
         int fd;
+
+	memset(ifname, 0, sizeof(ifname));
+	memset(setup_script, 0, sizeof(setup_script));
+
         vlan->nb_host_devs++;
         if (get_param_value(buf, sizeof(buf), "fd", p) > 0) {
             fd = strtol(buf, NULL, 0);
@@ -8225,9 +8242,38 @@ int main(int argc, char **argv)
     char usb_devices[MAX_USB_CMDLINE][128];
     int usb_devices_index;
     int fds[2];
+#ifndef CONFIG_STUBDOM
+    struct rlimit rl;
+#endif
     const char *pid_file = NULL;
     VLANState *vlan;
 
+#if !defined(__sun__) && !defined(CONFIG_STUBDOM)
+    /* Maximise rlimits. Needed where default constraints are tight (*BSD). */
+    if (getrlimit(RLIMIT_STACK, &rl) != 0) {
+       perror("getrlimit(RLIMIT_STACK)");
+       exit(1);
+    }
+    rl.rlim_cur = rl.rlim_max;
+    if (setrlimit(RLIMIT_STACK, &rl) != 0)
+       perror("setrlimit(RLIMIT_STACK)");
+    if (getrlimit(RLIMIT_DATA, &rl) != 0) {
+       perror("getrlimit(RLIMIT_DATA)");
+       exit(1);
+    }
+    rl.rlim_cur = rl.rlim_max;
+    if (setrlimit(RLIMIT_DATA, &rl) != 0)
+       perror("setrlimit(RLIMIT_DATA)");
+    rl.rlim_cur = RLIM_INFINITY;
+    rl.rlim_max = RLIM_INFINITY;
+    if (setrlimit(RLIMIT_RSS, &rl) != 0)
+       perror("setrlimit(RLIMIT_RSS)");
+    rl.rlim_cur = RLIM_INFINITY;
+    rl.rlim_max = RLIM_INFINITY;
+    if (setrlimit(RLIMIT_MEMLOCK, &rl) != 0)
+       perror("setrlimit(RLIMIT_MEMLOCK)");
+ #endif
+ 
     QEMU_LIST_INIT (&vm_change_state_head);
 #ifndef _WIN32
     {

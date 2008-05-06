@@ -146,6 +146,7 @@
 #undef SHIFT
 
 t_sample *mixeng_conv[2][2][2][3] = {
+#ifndef _BSD
     {
         {
             {
@@ -198,9 +199,11 @@ t_sample *mixeng_conv[2][2][2][3] = {
             }
         }
     }
+#endif /* !_BSD */
 };
 
 f_sample *mixeng_clip[2][2][2][3] = {
+#ifndef _BSD
     {
         {
             {
@@ -253,6 +256,7 @@ f_sample *mixeng_clip[2][2][2][3] = {
             }
         }
     }
+#endif /* !_BSD */
 };
 
 /*

@@ -23,7 +23,7 @@
  */
 #include "qemu-common.h"
 
-void pstrcpy(char *buf, int buf_size, const char *str)
+void pstrcpy(char *buf, size_t buf_size, const char *str)
 {
     int c;
     char *q = buf;
@@ -41,7 +41,7 @@ void pstrcpy(char *buf, int buf_size, const char *str)
 }
 
 /* strcat and truncate. */
-char *pstrcat(char *buf, int buf_size, const char *s)
+char *pstrcat(char *buf, size_t buf_size, const char *s)
 {
     int len;
     len = strlen(buf);
