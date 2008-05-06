@@ -463,8 +463,8 @@ static void sdl_grab_start(void)
 static void sdl_grab_end(void)
 {
     SDL_WM_GrabInput(SDL_GRAB_OFF);
-    sdl_show_cursor();
     gui_grab = 0;
+    sdl_show_cursor();
     sdl_update_caption();
 }
 
