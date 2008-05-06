@@ -418,7 +418,10 @@ static void sdl_update_caption(void)
         strcat(buf, " [Stopped]");
     }
     if (gui_grab) {
-        strcat(buf, " - Press Ctrl-Alt to exit grab");
+        if (!alt_grab)
+	    strcat(buf, " - Press Ctrl-Alt to exit grab");
+	else
+            strcat(buf, " - Press Ctrl-Alt-Shift to exit grab");
     }
     SDL_WM_SetCaption(buf, domain_name);
 }
@@ -525,8 +528,13 @@ static void sdl_refresh(DisplayState *ds)
         case SDL_KEYDOWN:
         case SDL_KEYUP:
             if (ev->type == SDL_KEYDOWN) {
-                mod_state = (SDL_GetModState() & gui_grab_code) ==
-                    gui_grab_code;
+                if (!alt_grab) {
+		    mod_state = (SDL_GetModState() & gui_grab_code) ==
+			gui_grab_code;
+                } else {
+                    mod_state = (SDL_GetModState() & (gui_grab_code | KMOD_LSHIFT)) ==
+                                (gui_grab_code | KMOD_LSHIFT);
+                }
                 gui_key_modifier_pressed = mod_state;
                 if (gui_key_modifier_pressed) {
                     int keycode;
@@ -586,7 +594,12 @@ static void sdl_refresh(DisplayState *ds)
                     }
                 }
             } else if (ev->type == SDL_KEYUP) {
-                mod_state = (ev->key.keysym.mod & gui_grab_code);
+                if (!alt_grab) {
+		    mod_state = (ev->key.keysym.mod & gui_grab_code);
+                } else {
+                    mod_state = (ev->key.keysym.mod &
+                                 (gui_grab_code | KMOD_LSHIFT));
+                }
                 if (!mod_state) {
                     if (gui_key_modifier_pressed) {
                         gui_key_modifier_pressed = 0;
