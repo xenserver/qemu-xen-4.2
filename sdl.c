@@ -41,6 +41,7 @@ static int gui_grab; /* if true, all keyboard/mouse events are grabbed */
 static int last_vm_running;
 static int gui_saved_grab;
 static int gui_fullscreen;
+static int gui_noframe;
 static int gui_key_modifier_pressed;
 static int gui_keysym;
 static int gui_fullscreen_initial_grab;
@@ -206,7 +207,9 @@ static void sdl_resize(DisplayState *ds, int w, int h, int linesize)
         flags |= SDL_FULLSCREEN;
         flags &= ~SDL_RESIZABLE;
     }
-    
+    if (gui_noframe)
+        flags |= SDL_NOFRAME;
+
     width = w;
     height = h;
 
@@ -716,6 +719,9 @@ void sdl_display_init(DisplayState *ds, int full_screen, int opengl)
         if (!kbd_layout)
             exit(1);
     }
+
+    if (no_frame)
+        gui_noframe = 1;
 
     flags = SDL_INIT_VIDEO | SDL_INIT_NOPARACHUTE;
     if (SDL_Init (flags)) {
