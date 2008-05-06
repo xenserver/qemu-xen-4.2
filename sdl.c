@@ -1,8 +1,8 @@
 /*
  * QEMU SDL display driver
- *
+ * 
  * Copyright (c) 2003 Fabrice Bellard
- *
+ * 
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
  * in the Software without restriction, including without limitation the rights
@@ -21,9 +21,7 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
-#include "qemu-common.h"
-#include "console.h"
-#include "sysemu.h"
+#include "vl.h"
 
 #include <SDL.h>
 
@@ -31,12 +29,16 @@
 #include <signal.h>
 #endif
 
+#ifdef CONFIG_OPENGL
+#include <SDL_opengl.h>
+#endif
+
 static SDL_Surface *screen;
+static SDL_Surface *shared = NULL;
 static int gui_grab; /* if true, all keyboard/mouse events are grabbed */
 static int last_vm_running;
 static int gui_saved_grab;
 static int gui_fullscreen;
-static int gui_noframe;
 static int gui_key_modifier_pressed;
 static int gui_keysym;
 static int gui_fullscreen_initial_grab;
@@ -46,56 +48,241 @@ static int width, height;
 static SDL_Cursor *sdl_cursor_normal;
 static SDL_Cursor *sdl_cursor_hidden;
 static int absolute_enabled = 0;
-static int guest_cursor = 0;
-static int guest_x, guest_y;
-static SDL_Cursor *guest_sprite = 0;
+static int opengl_enabled;
+
+#ifdef CONFIG_OPENGL
+static GLint tex_format;
+static GLint tex_type;
+static GLuint texture_ref = 0;
+static GLint gl_format;
+
+static void opengl_setdata(DisplayState *ds, void *pixels)
+{
+    glEnable(GL_TEXTURE_RECTANGLE_ARB);
+    glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_REPLACE);
+    glClearColor(0, 0, 0, 0);
+    glDisable(GL_BLEND);
+    glDisable(GL_LIGHTING);
+    glDisable(GL_DEPTH_TEST);
+    glDepthMask(GL_FALSE);
+    glDisable(GL_CULL_FACE);
+    glViewport( 0, 0, screen->w, screen->h);
+    glMatrixMode(GL_PROJECTION);
+    glLoadIdentity();
+    glOrtho(0, screen->w, screen->h, 0, -1,1);
+    glMatrixMode(GL_MODELVIEW);
+    glLoadIdentity();
+    glClear(GL_COLOR_BUFFER_BIT);
+    ds->data = pixels;
+
+    if (texture_ref) {
+        glDeleteTextures(1, &texture_ref);
+        texture_ref = 0;
+    }
+
+    glGenTextures(1, &texture_ref);
+    glBindTexture(GL_TEXTURE_RECTANGLE_ARB, texture_ref);
+    glPixelStorei(GL_UNPACK_LSB_FIRST, 1);
+    switch (ds->depth) {
+        case 8:
+            tex_format = GL_RGB;
+            tex_type = GL_UNSIGNED_BYTE_3_3_2;
+            glPixelStorei (GL_UNPACK_ALIGNMENT, 1);
+            break;
+        case 16:
+            tex_format = GL_RGB;
+            tex_type = GL_UNSIGNED_SHORT_5_6_5;
+            glPixelStorei (GL_UNPACK_ALIGNMENT, 2);
+            break;
+        case 24:
+            tex_format = GL_BGR;
+            tex_type = GL_UNSIGNED_BYTE;
+            glPixelStorei (GL_UNPACK_ALIGNMENT, 1);
+            break;
+        case 32:
+            if (!ds->bgr) {
+                tex_format = GL_BGRA;
+                tex_type = GL_UNSIGNED_BYTE;
+            } else {
+                tex_format = GL_RGBA;
+                tex_type = GL_UNSIGNED_BYTE;                
+            }
+            glPixelStorei (GL_UNPACK_ALIGNMENT, 4);
+            break;
+    }   
+    glPixelStorei(GL_UNPACK_ROW_LENGTH, (ds->linesize * 8) / ds->depth);
+    glTexImage2D(GL_TEXTURE_RECTANGLE_ARB, 0, gl_format, ds->width, ds->height, 0, tex_format, tex_type, pixels);
+    glTexParameterf(GL_TEXTURE_RECTANGLE_ARB, GL_TEXTURE_PRIORITY, 1.0);
+    glTexParameteri(GL_TEXTURE_RECTANGLE_ARB, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_RECTANGLE_ARB, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_RECTANGLE_ARB, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_RECTANGLE_ARB, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glBindTexture(GL_TEXTURE_RECTANGLE_ARB, 0);
+}
+
+static void opengl_update(DisplayState *ds, int x, int y, int w, int h)
+{  
+    int bpp = ds->depth / 8;
+    GLvoid *pixels = ds->data + y * ds->linesize + x * bpp;
+    glBindTexture(GL_TEXTURE_RECTANGLE_ARB, texture_ref);
+    glPixelStorei(GL_UNPACK_ROW_LENGTH, ds->linesize / bpp);
+    glTexSubImage2D(GL_TEXTURE_RECTANGLE_ARB, 0, x, y, w, h, tex_format, tex_type, pixels);
+    glBegin(GL_QUADS);
+        glTexCoord2d(0, 0);
+        glVertex2d(0, 0);
+        glTexCoord2d(ds->width, 0);
+        glVertex2d(screen->w, 0);
+        glTexCoord2d(ds->width, ds->height);
+        glVertex2d(screen->w, screen->h);
+        glTexCoord2d(0, ds->height);
+        glVertex2d(0, screen->h);
+    glEnd();
+    glBindTexture(GL_TEXTURE_RECTANGLE_ARB, 0);
+    SDL_GL_SwapBuffers();
+}
+#endif
 
 static void sdl_update(DisplayState *ds, int x, int y, int w, int h)
 {
     //    printf("updating x=%d y=%d w=%d h=%d\n", x, y, w, h);
-    SDL_UpdateRect(screen, x, y, w, h);
+    if (shared) {
+        SDL_Rect rec;
+        rec.x = x;
+        rec.y = y;
+        rec.w = w;
+        rec.h = h;
+        SDL_BlitSurface(shared, &rec, screen, &rec);
+    }
+    SDL_Flip(screen);
 }
 
-static void sdl_resize(DisplayState *ds, int w, int h)
+static void sdl_setdata(DisplayState *ds, void *pixels)
+{
+    uint32_t rmask, gmask, bmask, amask = 0;
+    switch (ds->depth) {
+        case 8:
+            rmask = 0x000000E0;
+            gmask = 0x0000001C;
+            bmask = 0x00000003;
+            break;
+        case 16:
+            rmask = 0x0000F800;
+            gmask = 0x000007E0;
+            bmask = 0x0000001F;
+            break;
+        case 24:
+            rmask = 0x00FF0000;
+            gmask = 0x0000FF00;
+            bmask = 0x000000FF;
+            break;
+        case 32:
+            rmask = 0x00FF0000;
+            gmask = 0x0000FF00;
+            bmask = 0x000000FF;
+            break;
+        default:
+            return;
+    }
+    shared = SDL_CreateRGBSurfaceFrom(pixels, width, height, ds->depth, ds->linesize, rmask , gmask, bmask, amask);
+    ds->data = pixels;
+}
+
+static void sdl_resize(DisplayState *ds, int w, int h, int linesize)
 {
     int flags;
 
     //    printf("resizing to %d %d\n", w, h);
 
-    flags = SDL_HWSURFACE|SDL_ASYNCBLIT|SDL_HWACCEL;
-    if (gui_fullscreen)
-        flags |= SDL_FULLSCREEN;
-    if (gui_noframe)
-        flags |= SDL_NOFRAME;
+#ifdef CONFIG_OPENGL
+    if (ds->shared_buf && opengl_enabled)
+        flags = SDL_OPENGL|SDL_RESIZABLE;
+    else
+#endif
+        flags = SDL_HWSURFACE|SDL_ASYNCBLIT|SDL_HWACCEL|SDL_DOUBLEBUF|SDL_HWPALETTE;
 
+    if (gui_fullscreen) {
+        flags |= SDL_FULLSCREEN;
+        flags &= ~SDL_RESIZABLE;
+    }
+    
     width = w;
     height = h;
 
  again:
     screen = SDL_SetVideoMode(w, h, 0, flags);
+
     if (!screen) {
-        fprintf(stderr, "Could not open SDL display\n");
+        fprintf(stderr, "Could not open SDL display: %s\n", SDL_GetError());
+        if (opengl_enabled) {
+            /* Fallback to SDL */
+            opengl_enabled = 0;
+            ds->dpy_update = sdl_update;
+            ds->dpy_setdata = sdl_setdata;
+            sdl_resize(ds, w, h, linesize);
+            return;
+        }
         exit(1);
-    }
-    if (!screen->pixels && (flags & SDL_HWSURFACE) && (flags & SDL_FULLSCREEN)) {
-        flags &= ~SDL_HWSURFACE;
-        goto again;
     }
 
-    if (!screen->pixels) {
-        fprintf(stderr, "Could not open SDL display\n");
-        exit(1);
+    if (!opengl_enabled) {
+        if (!screen->pixels && (flags & SDL_HWSURFACE) && (flags & SDL_FULLSCREEN)) {
+            flags &= ~SDL_HWSURFACE;
+            goto again;
+        }
+
+        if (!screen->pixels) {
+            fprintf(stderr, "Could not open SDL display: %s\n", SDL_GetError());
+            exit(1);
+        }
     }
-    ds->data = screen->pixels;
-    ds->linesize = screen->pitch;
-    ds->depth = screen->format->BitsPerPixel;
-    if (screen->format->Bshift > screen->format->Rshift) {
-        ds->bgr = 1;
-    } else {
-        ds->bgr = 0;
-    }
+
     ds->width = w;
     ds->height = h;
+    if (!ds->shared_buf) {
+        ds->depth = screen->format->BitsPerPixel;
+        if (ds->depth == 32 && screen->format->Rshift == 0) {
+            ds->bgr = 1;
+        } else {
+            ds->bgr = 0;
+        }
+        ds->data = screen->pixels;
+        ds->linesize = screen->pitch;
+    } else {
+        ds->linesize = linesize;
+#ifdef CONFIG_OPENGL
+        switch(screen->format->BitsPerPixel) {
+        case 8:
+            gl_format = GL_RGB;
+            break;
+        case 16:
+            gl_format = GL_RGB;
+            break;
+        case 24:
+            gl_format = GL_RGB;
+            break;
+        case 32:
+            if (!screen->format->Rshift)
+                gl_format = GL_BGRA;
+            else
+                gl_format = GL_RGBA;
+            break;
+        };
+#endif
+    }
+}
+
+static void sdl_colourdepth(DisplayState *ds, int depth)
+{
+    if (!depth || !ds->depth) return;
+    ds->shared_buf = 1;
+    ds->depth = depth;
+    ds->linesize = width * depth / 8;
+#ifdef CONFIG_OPENGL
+    if (opengl_enabled) {
+        ds->dpy_update = opengl_update;
+        ds->dpy_setdata = opengl_setdata;
+    }
+#endif
 }
 
 /* generic keyboard conversion */
@@ -221,30 +408,18 @@ static void sdl_process_key(SDL_KeyboardEvent *ev)
 static void sdl_update_caption(void)
 {
     char buf[1024];
-    const char *status = "";
-
-    if (!vm_running)
-        status = " [Stopped]";
-    else if (gui_grab) {
-        if (!alt_grab)
-            status = " - Press Ctrl-Alt to exit grab";
-        else
-            status = " - Press Ctrl-Alt-Shift to exit grab";
+    strcpy(buf, domain_name);
+    if (!vm_running) {
+        strcat(buf, " [Stopped]");
     }
-
-    if (qemu_name)
-        snprintf(buf, sizeof(buf), "QEMU (%s)%s", qemu_name, status);
-    else
-        snprintf(buf, sizeof(buf), "QEMU%s", status);
-
-    SDL_WM_SetCaption(buf, "QEMU");
+    if (gui_grab) {
+        strcat(buf, " - Press Ctrl-Alt to exit grab");
+    }
+    SDL_WM_SetCaption(buf, domain_name);
 }
 
 static void sdl_hide_cursor(void)
 {
-    if (!cursor_hide)
-        return;
-
     if (kbd_mouse_is_absolute()) {
         SDL_ShowCursor(1);
         SDL_SetCursor(sdl_cursor_hidden);
@@ -255,27 +430,18 @@ static void sdl_hide_cursor(void)
 
 static void sdl_show_cursor(void)
 {
-    if (!cursor_hide)
-        return;
-
     if (!kbd_mouse_is_absolute()) {
         SDL_ShowCursor(1);
-        if (guest_cursor &&
-                (gui_grab || kbd_mouse_is_absolute() || absolute_enabled))
-            SDL_SetCursor(guest_sprite);
-        else
-            SDL_SetCursor(sdl_cursor_normal);
+        SDL_SetCursor(sdl_cursor_normal);
     }
 }
 
 static void sdl_grab_start(void)
 {
-    if (guest_cursor) {
-        SDL_SetCursor(guest_sprite);
-        SDL_WarpMouse(guest_x, guest_y);
-    } else
-        sdl_hide_cursor();
+    sdl_hide_cursor();
     SDL_WM_GrabInput(SDL_GRAB_ON);
+    /* dummy read to avoid moving the mouse */
+    SDL_GetRelativeMouseState(NULL, NULL);
     gui_grab = 1;
     sdl_update_caption();
 }
@@ -283,15 +449,14 @@ static void sdl_grab_start(void)
 static void sdl_grab_end(void)
 {
     SDL_WM_GrabInput(SDL_GRAB_OFF);
-    gui_grab = 0;
     sdl_show_cursor();
+    gui_grab = 0;
     sdl_update_caption();
 }
 
-static void sdl_send_mouse_event(int dx, int dy, int dz, int x, int y, int state)
+static void sdl_send_mouse_event(int dx, int dy, int dz, int state)
 {
-    int buttons;
-    buttons = 0;
+    int buttons = 0;
     if (state & SDL_BUTTON(SDL_BUTTON_LEFT))
         buttons |= MOUSE_EVENT_LBUTTON;
     if (state & SDL_BUTTON(SDL_BUTTON_RIGHT))
@@ -308,18 +473,12 @@ static void sdl_send_mouse_event(int dx, int dy, int dz, int x, int y, int state
 	    absolute_enabled = 1;
 	}
 
-       dx = x * 0x7FFF / (width - 1);
-       dy = y * 0x7FFF / (height - 1);
+	SDL_GetMouseState(&dx, &dy);
+        dx = dx * 0x7FFF / (screen->w - 1);
+        dy = dy * 0x7FFF / (screen->h - 1);
     } else if (absolute_enabled) {
 	sdl_show_cursor();
 	absolute_enabled = 0;
-    } else if (guest_cursor) {
-        x -= guest_x;
-        y -= guest_y;
-        guest_x += x;
-        guest_y += y;
-        dx = x;
-        dy = y;
     }
 
     kbd_mouse_event(dx, dy, dz, buttons);
@@ -328,7 +487,8 @@ static void sdl_send_mouse_event(int dx, int dy, int dz, int x, int y, int state
 static void toggle_full_screen(DisplayState *ds)
 {
     gui_fullscreen = !gui_fullscreen;
-    sdl_resize(ds, screen->w, screen->h);
+    sdl_resize(ds, ds->width, ds->height, ds->linesize);
+    ds->dpy_setdata(ds, ds->data);
     if (gui_fullscreen) {
         gui_saved_grab = gui_grab;
         sdl_grab_start();
@@ -344,8 +504,7 @@ static void sdl_refresh(DisplayState *ds)
 {
     SDL_Event ev1, *ev = &ev1;
     int mod_state;
-    int buttonstate = SDL_GetMouseState(NULL, NULL);
-
+                     
     if (last_vm_running != vm_running) {
         last_vm_running = vm_running;
         sdl_update_caption();
@@ -356,18 +515,13 @@ static void sdl_refresh(DisplayState *ds)
     while (SDL_PollEvent(ev)) {
         switch (ev->type) {
         case SDL_VIDEOEXPOSE:
-            sdl_update(ds, 0, 0, screen->w, screen->h);
+            ds->dpy_update(ds, 0, 0, ds->width, ds->height);
             break;
         case SDL_KEYDOWN:
         case SDL_KEYUP:
             if (ev->type == SDL_KEYDOWN) {
-                if (!alt_grab) {
-                    mod_state = (SDL_GetModState() & gui_grab_code) ==
-                                gui_grab_code;
-                } else {
-                    mod_state = (SDL_GetModState() & (gui_grab_code | KMOD_LSHIFT)) ==
-                                (gui_grab_code | KMOD_LSHIFT);
-                }
+                mod_state = (SDL_GetModState() & gui_grab_code) ==
+                    gui_grab_code;
                 gui_key_modifier_pressed = mod_state;
                 if (gui_key_modifier_pressed) {
                     int keycode;
@@ -377,7 +531,7 @@ static void sdl_refresh(DisplayState *ds)
                         toggle_full_screen(ds);
                         gui_keysym = 1;
                         break;
-                    case 0x02 ... 0x0a: /* '1' to '9' keys */
+                    case 0x02 ... 0x0a: /* '1' to '9' keys */ 
                         /* Reset the modifiers sent to the current console */
                         reset_keys();
                         console_select(keycode - 0x02);
@@ -416,8 +570,7 @@ static void sdl_refresh(DisplayState *ds)
                         case SDLK_END: keysym = QEMU_KEY_END; break;
                         case SDLK_PAGEUP: keysym = QEMU_KEY_PAGEUP; break;
                         case SDLK_PAGEDOWN: keysym = QEMU_KEY_PAGEDOWN; break;
-                        case SDLK_BACKSPACE: keysym = QEMU_KEY_BACKSPACE; break;
-                        case SDLK_DELETE: keysym = QEMU_KEY_DELETE; break;
+                        case SDLK_BACKSPACE: keysym = QEMU_KEY_BACKSPACE; break;                        case SDLK_DELETE: keysym = QEMU_KEY_DELETE; break;
                         default: break;
                         }
                     }
@@ -428,12 +581,7 @@ static void sdl_refresh(DisplayState *ds)
                     }
                 }
             } else if (ev->type == SDL_KEYUP) {
-                if (!alt_grab) {
-                    mod_state = (ev->key.keysym.mod & gui_grab_code);
-                } else {
-                    mod_state = (ev->key.keysym.mod &
-                                 (gui_grab_code | KMOD_LSHIFT));
-                }
+                mod_state = (ev->key.keysym.mod & gui_grab_code);
                 if (!mod_state) {
                     if (gui_key_modifier_pressed) {
                         gui_key_modifier_pressed = 0;
@@ -460,48 +608,52 @@ static void sdl_refresh(DisplayState *ds)
                     }
                 }
             }
-            if (is_graphic_console() && !gui_keysym)
+            if (is_graphic_console() && !gui_keysym) 
                 sdl_process_key(&ev->key);
             break;
         case SDL_QUIT:
             if (!no_quit) {
-                qemu_system_shutdown_request();
-                vm_start();	/* In case we're paused */
+               qemu_system_shutdown_request();
             }
             break;
         case SDL_MOUSEMOTION:
             if (gui_grab || kbd_mouse_is_absolute() ||
                 absolute_enabled) {
-                sdl_send_mouse_event(ev->motion.xrel, ev->motion.yrel, 0,
-                       ev->motion.x, ev->motion.y, ev->motion.state);
+                int dx, dy, state;
+                state = SDL_GetRelativeMouseState(&dx, &dy);
+                sdl_send_mouse_event(dx, dy, 0, state);
+            }
+            break;
+        case SDL_MOUSEBUTTONUP:
+            if (gui_grab || kbd_mouse_is_absolute()) {
+                int dx, dy, state;
+                state = SDL_GetRelativeMouseState(&dx, &dy);
+                sdl_send_mouse_event(dx, dy, 0, state);
             }
             break;
         case SDL_MOUSEBUTTONDOWN:
-        case SDL_MOUSEBUTTONUP:
             {
                 SDL_MouseButtonEvent *bev = &ev->button;
                 if (!gui_grab && !kbd_mouse_is_absolute()) {
                     if (ev->type == SDL_MOUSEBUTTONDOWN &&
-                        (bev->button == SDL_BUTTON_LEFT)) {
+                        (bev->state & SDL_BUTTON_LMASK)) {
                         /* start grabbing all events */
                         sdl_grab_start();
                     }
                 } else {
-                    int dz;
+                    int dx, dy, dz, state;
                     dz = 0;
-                    if (ev->type == SDL_MOUSEBUTTONDOWN) {
-                        buttonstate |= SDL_BUTTON(bev->button);
-                    } else {
-                        buttonstate &= ~SDL_BUTTON(bev->button);
-                    }
+                    state = SDL_GetRelativeMouseState(&dx, &dy);
 #ifdef SDL_BUTTON_WHEELUP
-                    if (bev->button == SDL_BUTTON_WHEELUP && ev->type == SDL_MOUSEBUTTONDOWN) {
+                    if (bev->button == SDL_BUTTON_WHEELUP) {
                         dz = -1;
-                    } else if (bev->button == SDL_BUTTON_WHEELDOWN && ev->type == SDL_MOUSEBUTTONDOWN) {
+                    } else if (bev->button == SDL_BUTTON_WHEELDOWN) {
                         dz = 1;
+                    } else {
+                        state = bev->button | state;
                     }
-#endif
-                    sdl_send_mouse_event(0, 0, dz, bev->x, bev->y, buttonstate);
+#endif               
+                    sdl_send_mouse_event(dx, dy, dz, state);
                 }
             }
             break;
@@ -510,100 +662,47 @@ static void sdl_refresh(DisplayState *ds)
                 !ev->active.gain && !gui_fullscreen_initial_grab) {
                 sdl_grab_end();
             }
-            if (ev->active.state & SDL_APPACTIVE) {
-                if (ev->active.gain) {
-                    /* Back to default interval */
-                    ds->gui_timer_interval = 0;
-                } else {
-                    /* Sleeping interval */
-                    ds->gui_timer_interval = 500;
-                }
+	    if (ev->active.state & SDL_APPACTIVE) {
+		if (ev->active.gain) {
+		    /* Back to default interval */
+		    ds->gui_timer_interval = 0;
+		} else {
+		    /* Sleeping interval */
+		    ds->gui_timer_interval = 500;
+		}
+	    }
+            break;
+#ifdef CONFIG_OPENGL
+        case SDL_VIDEORESIZE:
+        {
+            if (ds->shared_buf && opengl_enabled) {
+                SDL_ResizeEvent *rev = &ev->resize;
+                screen = SDL_SetVideoMode(rev->w, rev->h, 0, SDL_OPENGL|SDL_RESIZABLE);
+                opengl_setdata(ds, ds->data);
+                opengl_update(ds, 0, 0, ds->width, ds->height);
             }
             break;
+        }
+#endif
         default:
             break;
         }
     }
 }
 
-static void sdl_fill(DisplayState *ds, int x, int y, int w, int h, uint32_t c)
+static void sdl_cleanup(void) 
 {
-    SDL_Rect dst = { x, y, w, h };
-    SDL_FillRect(screen, &dst, c);
-}
-
-static void sdl_mouse_warp(int x, int y, int on)
-{
-    if (on) {
-        if (!guest_cursor)
-            sdl_show_cursor();
-        if (gui_grab || kbd_mouse_is_absolute() || absolute_enabled) {
-            SDL_SetCursor(guest_sprite);
-            SDL_WarpMouse(x, y);
-        }
-    } else if (gui_grab)
-        sdl_hide_cursor();
-    guest_cursor = on;
-    guest_x = x, guest_y = y;
-}
-
-static void sdl_mouse_define(int width, int height, int bpp,
-                             int hot_x, int hot_y,
-                             uint8_t *image, uint8_t *mask)
-{
-    uint8_t sprite[256], *line;
-    int x, y, dst, bypl, src = 0;
-    if (guest_sprite)
-        SDL_FreeCursor(guest_sprite);
-
-    memset(sprite, 0, 256);
-    bypl = ((width * bpp + 31) >> 5) << 2;
-    for (y = 0, dst = 0; y < height; y ++, image += bypl) {
-        line = image;
-        for (x = 0; x < width; x ++, dst ++) {
-            switch (bpp) {
-            case 24:
-                src = *(line ++); src |= *(line ++); src |= *(line ++);
-                break;
-            case 16:
-            case 15:
-                src = *(line ++); src |= *(line ++);
-                break;
-            case 8:
-                src = *(line ++);
-                break;
-            case 4:
-                src = 0xf & (line[x >> 1] >> ((x & 1)) << 2);
-                break;
-            case 2:
-                src = 3 & (line[x >> 2] >> ((x & 3)) << 1);
-                break;
-            case 1:
-                src = 1 & (line[x >> 3] >> (x & 7));
-                break;
-            }
-            if (!src)
-                sprite[dst >> 3] |= (1 << (~dst & 7)) & mask[dst >> 3];
-        }
-    }
-    guest_sprite = SDL_CreateCursor(sprite, mask, width, height, hot_x, hot_y);
-
-    if (guest_cursor &&
-            (gui_grab || kbd_mouse_is_absolute() || absolute_enabled))
-        SDL_SetCursor(guest_sprite);
-}
-
-static void sdl_cleanup(void)
-{
-    if (guest_sprite)
-        SDL_FreeCursor(guest_sprite);
+#ifdef CONFIG_OPENGL
+    if (texture_ref) glDeleteTextures(1, &texture_ref);
+#endif
     SDL_Quit();
 }
 
-void sdl_display_init(DisplayState *ds, int full_screen, int no_frame)
+void sdl_display_init(DisplayState *ds, int full_screen, int opengl)
 {
     int flags;
     uint8_t data = 0;
+    opengl_enabled = opengl;
 
 #if defined(__APPLE__)
     /* always use generic keymaps */
@@ -615,9 +714,6 @@ void sdl_display_init(DisplayState *ds, int full_screen, int no_frame)
         if (!kbd_layout)
             exit(1);
     }
-
-    if (no_frame)
-        gui_noframe = 1;
 
     flags = SDL_INIT_VIDEO | SDL_INIT_NOPARACHUTE;
     if (SDL_Init (flags)) {
@@ -633,11 +729,10 @@ void sdl_display_init(DisplayState *ds, int full_screen, int no_frame)
     ds->dpy_update = sdl_update;
     ds->dpy_resize = sdl_resize;
     ds->dpy_refresh = sdl_refresh;
-    ds->dpy_fill = sdl_fill;
-    ds->mouse_set = sdl_mouse_warp;
-    ds->cursor_define = sdl_mouse_define;
+    ds->dpy_colourdepth = sdl_colourdepth;
+    ds->dpy_setdata = sdl_setdata;
 
-    sdl_resize(ds, 640, 400);
+    sdl_resize(ds, 640, 400, 640 * 4);
     sdl_update_caption();
     SDL_EnableKeyRepeat(250, 50);
     SDL_EnableUNICODE(1);
