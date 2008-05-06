@@ -428,6 +428,9 @@ static void sdl_update_caption(void)
 
 static void sdl_hide_cursor(void)
 {
+    if (!cursor_hide)
+        return;
+
     if (kbd_mouse_is_absolute()) {
         SDL_ShowCursor(1);
         SDL_SetCursor(sdl_cursor_hidden);
@@ -438,6 +441,9 @@ static void sdl_hide_cursor(void)
 
 static void sdl_show_cursor(void)
 {
+    if (!cursor_hide)
+        return;
+
     if (!kbd_mouse_is_absolute()) {
         SDL_ShowCursor(1);
         SDL_SetCursor(sdl_cursor_normal);
