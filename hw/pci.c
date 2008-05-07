@@ -158,7 +158,8 @@ PCIDevice *pci_register_device(PCIBus *bus, const char *name,
 
     if (devfn < 0) {
         for(devfn = bus->devfn_min ; devfn < 256; devfn += 8) {
-            if (!bus->devices[devfn])
+            if ( !bus->devices[devfn] &&
+                 !( devfn >= PHP_DEVFN_START && devfn < PHP_DEVFN_END ) )
                 goto found;
         }
         return NULL;
@@ -184,8 +185,14 @@ PCIDevice *pci_register_device(PCIBus *bus, const char *name,
     return pci_dev;
 }
 
-void pci_register_io_region(PCIDevice *pci_dev, int region_num,
-                            uint32_t size, int type,
+void pci_hide_device(PCIDevice *pci_dev)
+{
+    PCIBus *bus = pci_dev->bus;
+    bus->devices[pci_dev->devfn] = NULL;
+}
+
+void pci_register_io_region(PCIDevice *pci_dev, int region_num, 
+                            uint32_t size, int type, 
                             PCIMapIORegionFunc *map_func)
 {
     PCIIORegion *r;
@@ -366,6 +373,7 @@ void pci_default_write_config(PCIDevice *d,
             case 0x0b:
             case 0x0e:
             case 0x10 ... 0x27: /* base */
+            case 0x2c ... 0x2f: /* subsystem vendor id, subsystem id */
             case 0x30 ... 0x33: /* rom */
             case 0x3d:
                 can_write = 0;
@@ -398,6 +406,18 @@ void pci_default_write_config(PCIDevice *d,
             break;
         }
         if (can_write) {
+            if( addr == 0x05 ) {
+                /* In Command Register, bits 15:11 are reserved */
+                val &= 0x07; 
+            } else if ( addr == 0x06 ) {
+                /* In Status Register, bits 6, 2:0 are reserved, */
+                /* and bits 7,5,4,3 are read only */
+                val = d->config[addr];
+            } else if ( addr == 0x07 ) {
+                /* In Status Register, bits 10,9 are reserved, */
+                val = (val & ~0x06) | (d->config[addr] & 0x06);
+            }
+
             d->config[addr] = val;
         }
         if (++addr > 0xff)
@@ -636,13 +656,15 @@ void pci_nic_init(PCIBus *bus, NICInfo *nd, int devfn)
         pci_i82559er_init(bus, nd, devfn);
     } else if (strcmp(nd->model, "rtl8139") == 0) {
         pci_rtl8139_init(bus, nd, devfn);
+    } else if (strcmp(nd->model, "e100") == 0) {
+        pci_e100_init(bus, nd);
     } else if (strcmp(nd->model, "e1000") == 0) {
         pci_e1000_init(bus, nd, devfn);
     } else if (strcmp(nd->model, "pcnet") == 0) {
         pci_pcnet_init(bus, nd, devfn);
     } else if (strcmp(nd->model, "?") == 0) {
         fprintf(stderr, "qemu: Supported PCI NICs: i82551 i82557b i82559er"
-                        " ne2k_pci pcnet rtl8139 e1000\n");
+                        " ne2k_pci pcnet rtl8139 e100 e1000\n");
         exit (1);
     } else {
         fprintf(stderr, "qemu: Unsupported NIC: %s\n", nd->model);
