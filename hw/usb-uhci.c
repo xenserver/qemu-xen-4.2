@@ -520,15 +520,13 @@ static int uhci_handle_td(UHCIState *s, UHCI_TD *td, uint32_t *int_mask,
     uint8_t pid;
     int len = 0, max_len, err, ret = 0;
 
-    /* ??? This is wrong for async completion.  */
-    if (td->ctrl & TD_CTRL_IOC) {
-        *int_mask |= 0x01;
-    }
     /* Clear TD's status field explicitly */
     td->ctrl = td->ctrl & (~TD_CTRL_MASK);
 
-    if (!(td->ctrl & TD_CTRL_ACTIVE))
-        return 1;
+    if (!(td->ctrl & TD_CTRL_ACTIVE)) {
+	ret = 1;
+	goto out;
+    }
 
     /* TD is active */
     max_len = ((td->token >> 21) + 1) & 0x7ff;
@@ -586,7 +584,8 @@ static int uhci_handle_td(UHCIState *s, UHCI_TD *td, uint32_t *int_mask,
             /* invalid pid : frame interrupted */
             s->status |= UHCI_STS_HCPERR;
             uhci_update_irq(s);
-            return -1;
+            ret = -1;
+	    goto out;
         }
     }
 
@@ -606,10 +605,12 @@ static int uhci_handle_td(UHCIState *s, UHCI_TD *td, uint32_t *int_mask,
             len < max_len) {
             *int_mask |= 0x02;
             /* short packet: do not update QH */
-            return 1;
+            ret = 1;
+            goto out;
         } else {
             /* success */
-            return 0;
+            ret = 0;
+            goto out;
         }
     } else {
         switch(ret) {
@@ -628,23 +629,34 @@ static int uhci_handle_td(UHCIState *s, UHCI_TD *td, uint32_t *int_mask,
             }
             td->ctrl = (td->ctrl & ~(3 << TD_CTRL_ERROR_SHIFT)) |
                 (err << TD_CTRL_ERROR_SHIFT);
-            return 1;
+            ret = 1;
+            goto out;
         case USB_RET_NAK:
             td->ctrl |= TD_CTRL_NAK;
             if (pid == USB_TOKEN_SETUP)
                 goto do_timeout;
-            return 1;
+            ret = 1;
+            goto out;
         case USB_RET_STALL:
             td->ctrl |= TD_CTRL_STALL;
             td->ctrl &= ~TD_CTRL_ACTIVE;
-            return 1;
+            ret = 1;
+            goto out;
         case USB_RET_BABBLE:
             td->ctrl |= TD_CTRL_BABBLE | TD_CTRL_STALL;
             td->ctrl &= ~TD_CTRL_ACTIVE;
             /* frame interrupted */
-            return -1;
+            ret = -1;
+            goto out;
         }
     }
+   
+out:
+    /* If TD is inactive and IOC bit set to 1 then update int_mask */ 
+    if ((td->ctrl & TD_CTRL_IOC) && (!(td->ctrl & TD_CTRL_ACTIVE))) {
+        *int_mask |= 0x01;
+    }
+    return ret;
 }
 
 static void uhci_async_complete_packet(USBPacket * packet, void *opaque)
