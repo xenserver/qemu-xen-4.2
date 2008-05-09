@@ -43,10 +43,21 @@
 #define USB_TABLET    2
 #define USB_KEYBOARD  3
 
-typedef struct USBMouseState {
-    int dx, dy, dz, buttons_state;
-    int x, y;
-    int mouse_grabbed;
+typedef struct USBPointerEvent {
+    int xdx, ydy; /* relative iff it's a mouse, otherwise absolute */
+    int dz, buttons_state;
+} USBPointerEvent;
+
+#define QUEUELENSHIFT 4 /* 16 events should be enough for a triple-click */
+#define QUEUELEN (1u<<QUEUELENSHIFT)
+#define QUEUEINDEXMASK (QUEUELEN-1u)
+#define QUEUE_INCR(v) ((v)++, (v) &= QUEUEINDEXMASK)
+
+typedef struct USBPointerState {
+    USBPointerEvent queue[QUEUELEN];
+    unsigned head, tail; /* indices into circular queue */
+    
+    int mouse_grabbed, xyrel;
     QEMUPutMouseEntry *eh_entry;
 } USBMouseState;
 
@@ -55,18 +66,18 @@ typedef struct USBKeyboardState {
     uint8_t leds;
     uint8_t key[16];
     int keys;
+    int changed;
 } USBKeyboardState;
 
 typedef struct USBHIDState {
     USBDevice dev;
     union {
-        USBMouseState ptr;
+        USBPointerState ptr;
         USBKeyboardState kbd;
     };
     int kind;
     int protocol;
     int idle;
-    int changed;
 } USBHIDState;
 
 /* mostly the same values as the Bochs USB Mouse device */
@@ -384,30 +395,48 @@ static const uint8_t usb_hid_usage_keys[0x100] = {
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
 };
 
-static void usb_mouse_event(void *opaque,
-                            int dx1, int dy1, int dz1, int buttons_state)
-{
-    USBHIDState *hs = opaque;
-    USBMouseState *s = &hs->ptr;
-
-    s->dx += dx1;
-    s->dy += dy1;
-    s->dz += dz1;
-    s->buttons_state = buttons_state;
-    hs->changed = 1;
+static void usb_pointer_event_clear(USBPointerEvent *e, int buttons) {
+    e->xdx = e->ydy = e->dz = 0;
+    e->buttons_state = buttons;
 }
 
-static void usb_tablet_event(void *opaque,
-			     int x, int y, int dz, int buttons_state)
-{
-    USBHIDState *hs = opaque;
-    USBMouseState *s = &hs->ptr;
+static void usb_pointer_event_combine(USBPointerEvent *e, int xyrel,
+				      int x1,y1,z1) {
+    if (xyrel) {
+	e->xdx += x1;
+	e->ydy += y1;
+    }
+    e->dz += z1;
+}
 
-    s->x = x;
-    s->y = y;
-    s->dz += dz;
-    s->buttons_state = buttons_state;
-    hs->changed = 1;
+static void usb_pointer_event(USBHIDState *hs, USBPointerState *s,
+			      int x1, int y1, int z1, int buttons_state) {
+    /* We combine events where feasible to keep the queue small.
+     * We shouldn't combine anything with the first event with
+     * a particular button state, as that would change the
+     * location of the button state change. */
+     
+    unsigned use_slot= (s->tail-1) & QUEUEINDEXMASK;
+    unsigned previous_slot= (use_slot-1) & QUEUEINDEXMASK;
+
+    if (s->tail == head || use_slot == head ||
+	s->queue[use_slot].buttons_state != buttons_state ||
+	s->queue[previous_slot].buttons_state != buttons_state) {
+	/* can't or shouldn't combine this event with previous one */
+	use_slot= s->tail;
+	QUEUE_INCR(s->tail);
+	if (use_slot == s->head) {
+	    /* queue full, oh well, discard something */
+	    s->head++;  s->head &= QUEUEINDEXMASK;
+	    /* but we preserve the relative motions */
+	    usb_pointer_event_combine(&s->queue[s->head], s->xyrel,
+				      s->queue[use_slot].xdx,
+				      s->queue[use_slot].ydy,
+				      s->queue[use_slot].dz);
+	}
+	usb_pointer_event_clear(&s->queue[use_slot], buttons_state);
+    }
+    usb_pointer_event_combine(&s->queue[use_slot],s->xyrel, x1,y1,z1);
 }
 
 static void usb_keyboard_event(void *opaque, int keycode)
@@ -421,7 +450,7 @@ static void usb_keyboard_event(void *opaque, int keycode)
     hid_code = usb_hid_usage_keys[key | ((s->modifiers >> 1) & (1 << 7))];
     s->modifiers &= ~(1 << 8);
 
-    hs->changed = 1;
+    s->changed = 1;
 
     switch (hid_code) {
     case 0x00:
@@ -468,24 +497,38 @@ static inline int int_clamp(int val, int vmin, int vmax)
         return val;
 }
 
-static int usb_mouse_poll(USBHIDState *hs, uint8_t *buf, int len)
+static int usb_pointer_poll(USBHIDState *hs, uint8_t *buf, int len)
 {
     int dx, dy, dz, b, l;
-    USBMouseState *s = &hs->ptr;
+    USBPointerState *s = &hs->ptr;
+    USBPointerEvent *e;
+
+    if (s->head == s->tail)
+	return USB_RET_NAK;
 
     if (!s->mouse_grabbed) {
-	s->eh_entry = qemu_add_mouse_event_handler(usb_mouse_event, hs,
-                                                  0, "QEMU USB Mouse");
+	s->eh_entry = qemu_add_mouse_event_handler(usb_pointer_event, hs,
+                                                  0, "QEMU USB Pointer");
 	s->mouse_grabbed = 1;
     }
 
-    dx = int_clamp(s->dx, -128, 127);
-    dy = int_clamp(s->dy, -128, 127);
-    dz = int_clamp(s->dz, -128, 127);
+    e = &s->queue[s->head];
 
-    s->dx -= dx;
-    s->dy -= dy;
-    s->dz -= dz;
+    dx = int_clamp(s->xdx, -128, 127);
+    dy = int_clamp(s->ydy, -128, 127);
+    dz = int_clamp(e->dz, -128, 127);
+
+    if (s->xyrel) {
+	e->xdx -= dx;
+	e->ydy -= dy;
+    }
+    e->dz -= dz;
+
+    if (!(e->dz ||
+	  (rel && (e->xdx || e->ydy)))) {
+	/* that deals with this event */
+	QUEUE_INCR(s->head);
+    }
 
     b = 0;
     if (s->buttons_state & MOUSE_EVENT_LBUTTON)
@@ -495,54 +538,45 @@ static int usb_mouse_poll(USBHIDState *hs, uint8_t *buf, int len)
     if (s->buttons_state & MOUSE_EVENT_MBUTTON)
         b |= 0x04;
 
-    buf[0] = b;
-    buf[1] = dx;
-    buf[2] = dy;
-    l = 3;
-    if (len >= 4) {
-        buf[3] = dz;
-        l = 4;
+    switch (s->kind) {
+    case USB_MOUSE:
+	buf[0] = b;
+	buf[1] = dx;
+	buf[2] = dy;
+	l = 3;
+	if (len >= 4) {
+	    buf[3] = dz;
+	    l = 4;
+	}
+	break;
+
+    case USB_TABLET:
+	/* Appears we have to invert the wheel direction */
+	dz = 0 - dz;
+
+	buf[0] = b;
+	buf[1] = s->x & 0xff;
+	buf[2] = s->x >> 8;
+	buf[3] = s->y & 0xff;
+	buf[4] = s->y >> 8;
+	buf[5] = dz;
+	l = 6;
+	break;
+
+    default:
+	abort();
     }
-    return l;
-}
-
-static int usb_tablet_poll(USBHIDState *hs, uint8_t *buf, int len)
-{
-    int dz, b, l;
-    USBMouseState *s = &hs->ptr;
-
-    if (!s->mouse_grabbed) {
-	s->eh_entry = qemu_add_mouse_event_handler(usb_tablet_event, hs,
-                                                  1, "QEMU USB Tablet");
-	s->mouse_grabbed = 1;
-    }
-
-    dz = int_clamp(s->dz, -128, 127);
-    s->dz -= dz;
-
-    /* Appears we have to invert the wheel direction */
-    dz = 0 - dz;
-    b = 0;
-    if (s->buttons_state & MOUSE_EVENT_LBUTTON)
-        b |= 0x01;
-    if (s->buttons_state & MOUSE_EVENT_RBUTTON)
-        b |= 0x02;
-    if (s->buttons_state & MOUSE_EVENT_MBUTTON)
-        b |= 0x04;
-
-    buf[0] = b;
-    buf[1] = s->x & 0xff;
-    buf[2] = s->x >> 8;
-    buf[3] = s->y & 0xff;
-    buf[4] = s->y >> 8;
-    buf[5] = dz;
-    l = 6;
 
     return l;
 }
 
 static int usb_keyboard_poll(USBKeyboardState *s, uint8_t *buf, int len)
 {
+    if (!s->changed)
+	return USB_RET_NAK;
+
+    s->changed= 0;
+
     if (len < 2)
         return 0;
 
@@ -569,16 +603,11 @@ static int usb_keyboard_write(USBKeyboardState *s, uint8_t *buf, int len)
     return 0;
 }
 
-static void usb_mouse_handle_reset(USBDevice *dev)
+static void usb_pointer_handle_reset(USBDevice *dev)
 {
     USBHIDState *s = (USBHIDState *)dev;
 
-    s->ptr.dx = 0;
-    s->ptr.dy = 0;
-    s->ptr.dz = 0;
-    s->ptr.x = 0;
-    s->ptr.y = 0;
-    s->ptr.buttons_state = 0;
+    s->ptr.head= s->ptr.tail = 0;
     s->protocol = 1;
 }
 
@@ -774,13 +803,10 @@ static int usb_hid_handle_data(USBDevice *dev, USBPacket *p)
     case USB_TOKEN_IN:
         if (p->devep == 1) {
             /* TODO: Implement finite idle delays.  */
-            if (!(s->changed || s->idle))
+            if (!s->idle)
                 return USB_RET_NAK;
-            s->changed = 0;
-            if (s->kind == USB_MOUSE)
-                ret = usb_mouse_poll(s, p->data, p->len);
-            else if (s->kind == USB_TABLET)
-                ret = usb_tablet_poll(s, p->data, p->len);
+            if (s->kind == USB_MOUSE || s->kind == USB_TABLET)
+                ret = usb_pointer_poll(s, p->data, p->len);
             else if (s->kind == USB_KEYBOARD)
                 ret = usb_keyboard_poll(&s->kbd, p->data, p->len);
         } else {
@@ -806,7 +832,7 @@ static void usb_hid_handle_destroy(USBDevice *dev)
     qemu_free(s);
 }
 
-USBDevice *usb_tablet_init(void)
+static USBDevice *usb_pointer_init(int kind, int xyrel, const char *devname)
 {
     USBHIDState *s;
 
@@ -816,40 +842,31 @@ USBDevice *usb_tablet_init(void)
     s->dev.speed = USB_SPEED_FULL;
     s->dev.handle_packet = usb_generic_handle_packet;
 
-    s->dev.handle_reset = usb_mouse_handle_reset;
+    s->dev.handle_reset = usb_pointer_handle_reset;
     s->dev.handle_control = usb_hid_handle_control;
     s->dev.handle_data = usb_hid_handle_data;
     s->dev.handle_destroy = usb_hid_handle_destroy;
-    s->kind = USB_TABLET;
+
+    s->kind = kind;
+    s->ptr.xyrel = xyrel;
+    usb_pointer_handle_reset(s);
+
     /* Force poll routine to be run and grab input the first time.  */
-    s->changed = 1;
+    usb_pointer_event_clear(&s->ptr.queue[0], 0);
+    s->ptr.tail = 1;
 
-    pstrcpy(s->dev.devname, sizeof(s->dev.devname), "QEMU USB Tablet");
-
+    pstrcpy(s->dev.devname, sizeof(s->dev.devname), devname);
     return (USBDevice *)s;
+}
+
+USBDevice *usb_tablet_init(void)
+{
+    return usb_pointer_init(USB_TABLET, 0, "QEMU USB Tablet");
 }
 
 USBDevice *usb_mouse_init(void)
 {
-    USBHIDState *s;
-
-    s = qemu_mallocz(sizeof(USBHIDState));
-    if (!s)
-        return NULL;
-    s->dev.speed = USB_SPEED_FULL;
-    s->dev.handle_packet = usb_generic_handle_packet;
-
-    s->dev.handle_reset = usb_mouse_handle_reset;
-    s->dev.handle_control = usb_hid_handle_control;
-    s->dev.handle_data = usb_hid_handle_data;
-    s->dev.handle_destroy = usb_hid_handle_destroy;
-    s->kind = USB_MOUSE;
-    /* Force poll routine to be run and grab input the first time.  */
-    s->changed = 1;
-
-    pstrcpy(s->dev.devname, sizeof(s->dev.devname), "QEMU USB Mouse");
-
-    return (USBDevice *)s;
+    return usb_pointer_init(USB_MOUSE, 1, "QEMU USB Mouse");
 }
 
 USBDevice *usb_keyboard_init(void)
@@ -867,6 +884,7 @@ USBDevice *usb_keyboard_init(void)
     s->dev.handle_data = usb_hid_handle_data;
     s->dev.handle_destroy = usb_hid_handle_destroy;
     s->kind = USB_KEYBOARD;
+    s->kdb.changed= 0;
 
     pstrcpy(s->dev.devname, sizeof(s->dev.devname), "QEMU USB Keyboard");
 
