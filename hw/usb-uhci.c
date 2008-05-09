@@ -49,9 +49,15 @@
 #define TD_CTRL_IOC     (1 << 24)
 #define TD_CTRL_ACTIVE  (1 << 23)
 #define TD_CTRL_STALL   (1 << 22)
+#define TD_CTRL_BUFFER  (1 << 21)
 #define TD_CTRL_BABBLE  (1 << 20)
 #define TD_CTRL_NAK     (1 << 19)
 #define TD_CTRL_TIMEOUT (1 << 18)
+#define TD_CTRL_BITSTUFF                                 \
+                        (1 << 17)
+#define TD_CTRL_MASK                                     \
+    (TD_CTRL_BITSTUFF | TD_CTRL_TIMEOUT | TD_CTRL_NAK    \
+     | TD_CTRL_BABBLE | TD_CTRL_BUFFER | TD_CTRL_STALL)
 
 #define UHCI_PORT_RESET (1 << 9)
 #define UHCI_PORT_LSDA  (1 << 8)
@@ -518,6 +524,8 @@ static int uhci_handle_td(UHCIState *s, UHCI_TD *td, uint32_t *int_mask,
     if (td->ctrl & TD_CTRL_IOC) {
         *int_mask |= 0x01;
     }
+    /* Clear TD's status field explicitly */
+    td->ctrl = td->ctrl & (~TD_CTRL_MASK);
 
     if (!(td->ctrl & TD_CTRL_ACTIVE))
         return 1;
