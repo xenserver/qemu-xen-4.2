@@ -30,6 +30,7 @@
 #include "exec-all.h"
 #include "disas.h"
 #include "tcg-op.h"
+#include "qemu-common.h"
 
 //#define MIPS_DEBUG_DISAS
 //#define MIPS_DEBUG_SIGN_EXTENSIONS
@@ -420,42 +421,159 @@ enum {
     OPC_NMSUB_PS= 0x3E | OPC_CP3,
 };
 
+/* global register indices */
+static TCGv cpu_env, current_tc_gprs, cpu_T[2];
 
+/* The code generator doesn't like lots of temporaries, so maintain our own
+   cache for reuse within a function.  */
+#define MAX_TEMPS 4
+static int num_temps;
+static TCGv temps[MAX_TEMPS];
+
+/* Allocate a temporary variable.  */
+static TCGv new_tmp(void)
+{
+    TCGv tmp;
+    if (num_temps == MAX_TEMPS)
+        abort();
+
+    if (GET_TCGV(temps[num_temps]))
+      return temps[num_temps++];
+
+    tmp = tcg_temp_new(TCG_TYPE_I32);
+    temps[num_temps++] = tmp;
+    return tmp;
+}
+
+/* Release a temporary variable.  */
+static void dead_tmp(TCGv tmp)
+{
+    int i;
+    num_temps--;
+    i = num_temps;
+    if (GET_TCGV(temps[i]) == GET_TCGV(tmp))
+        return;
+
+    /* Shuffle this temp to the last slot.  */
+    while (GET_TCGV(temps[i]) != GET_TCGV(tmp))
+        i--;
+    while (i < num_temps) {
+        temps[i] = temps[i + 1];
+        i++;
+    }
+    temps[i] = tmp;
+}
+
+/* General purpose registers moves */
 const unsigned char *regnames[] =
     { "r0", "at", "v0", "v1", "a0", "a1", "a2", "a3",
       "t0", "t1", "t2", "t3", "t4", "t5", "t6", "t7",
       "s0", "s1", "s2", "s3", "s4", "s5", "s6", "s7",
       "t8", "t9", "k0", "k1", "gp", "sp", "s8", "ra", };
 
-/* Warning: no function for r0 register (hard wired to zero) */
-#define GEN32(func, NAME)                        \
-static GenOpFunc *NAME ## _table [32] = {        \
-NULL,       NAME ## 1, NAME ## 2, NAME ## 3,     \
-NAME ## 4,  NAME ## 5, NAME ## 6, NAME ## 7,     \
-NAME ## 8,  NAME ## 9, NAME ## 10, NAME ## 11,   \
-NAME ## 12, NAME ## 13, NAME ## 14, NAME ## 15,  \
-NAME ## 16, NAME ## 17, NAME ## 18, NAME ## 19,  \
-NAME ## 20, NAME ## 21, NAME ## 22, NAME ## 23,  \
-NAME ## 24, NAME ## 25, NAME ## 26, NAME ## 27,  \
-NAME ## 28, NAME ## 29, NAME ## 30, NAME ## 31,  \
-};                                               \
-static always_inline void func(int n)            \
-{                                                \
-    NAME ## _table[n]();                         \
+static inline void gen_op_load_gpr_TN(int t_index, int reg)
+{
+    tcg_gen_ld_tl(cpu_T[t_index], current_tc_gprs, sizeof(target_ulong) * reg);
 }
 
-/* General purpose registers moves */
-GEN32(gen_op_load_gpr_T0, gen_op_load_gpr_T0_gpr);
-GEN32(gen_op_load_gpr_T1, gen_op_load_gpr_T1_gpr);
-GEN32(gen_op_load_gpr_T2, gen_op_load_gpr_T2_gpr);
+static inline void gen_op_load_gpr_T0(int reg)
+{
+    gen_op_load_gpr_TN(0, reg);
+}
 
-GEN32(gen_op_store_T0_gpr, gen_op_store_T0_gpr_gpr);
-GEN32(gen_op_store_T1_gpr, gen_op_store_T1_gpr_gpr);
+static inline void gen_op_load_gpr_T1(int reg)
+{
+    gen_op_load_gpr_TN(1, reg);
+}
+
+static inline void gen_op_store_gpr_TN(int t_index, int reg)
+{
+    tcg_gen_st_tl(cpu_T[t_index], current_tc_gprs, sizeof(target_ulong) * reg);
+}
+
+static inline void gen_op_store_gpr_T0(int reg)
+{
+    gen_op_store_gpr_TN(0, reg);
+}
+
+static inline void gen_op_store_gpr_T1(int reg)
+{
+    gen_op_store_gpr_TN(1, reg);
+}
 
 /* Moves to/from shadow registers */
-GEN32(gen_op_load_srsgpr_T0, gen_op_load_srsgpr_T0_gpr);
-GEN32(gen_op_store_T0_srsgpr, gen_op_store_T0_srsgpr_gpr);
+static inline void gen_op_load_srsgpr_T0(int reg)
+{
+    int r_tmp = new_tmp();
 
+    tcg_gen_ld_i32(r_tmp, cpu_env, offsetof(CPUState, CP0_SRSCtl));
+    tcg_gen_shri_i32(r_tmp, r_tmp, CP0SRSCtl_PSS);
+    tcg_gen_andi_i32(r_tmp, r_tmp, 0xf);
+    tcg_gen_muli_i32(r_tmp, r_tmp, sizeof(target_ulong) * 32);
+    tcg_gen_add_i32(r_tmp, cpu_env, r_tmp);
+
+    tcg_gen_ld_tl(cpu_T[0], r_tmp, sizeof(target_ulong) * reg);
+    dead_tmp(r_tmp);
+}
+
+static inline void gen_op_store_srsgpr_T0(int reg)
+{
+    int r_tmp = new_tmp();
+
+    tcg_gen_ld_i32(r_tmp, cpu_env, offsetof(CPUState, CP0_SRSCtl));
+    tcg_gen_shri_i32(r_tmp, r_tmp, CP0SRSCtl_PSS);
+    tcg_gen_andi_i32(r_tmp, r_tmp, 0xf);
+    tcg_gen_muli_i32(r_tmp, r_tmp, sizeof(target_ulong) * 32);
+    tcg_gen_add_i32(r_tmp, cpu_env, r_tmp);
+
+    tcg_gen_st_tl(cpu_T[0], r_tmp, sizeof(target_ulong) * reg);
+    dead_tmp(r_tmp);
+}
+
+/* Load immediates, zero being a special case. */
+static inline void gen_op_set_T0(target_ulong arg)
+{
+    tcg_gen_movi_tl(cpu_T[0], arg);
+}
+
+static inline void gen_op_set_T1(target_ulong arg)
+{
+    tcg_gen_movi_tl(cpu_T[1], arg);
+}
+
+static inline void gen_op_reset_T0(void)
+{
+    tcg_gen_movi_tl(cpu_T[0], 0);
+}
+
+static inline void gen_op_reset_T1(void)
+{
+    tcg_gen_movi_tl(cpu_T[1], 0);
+}
+
+/* Moves to/from HI/LO registers. */
+static inline void gen_op_load_HI(int reg)
+{
+    tcg_gen_ld_tl(cpu_T[0], cpu_env, offsetof(CPUState, HI[reg]));
+}
+
+static inline void gen_op_store_HI(int reg)
+{
+    tcg_gen_st_tl(cpu_T[0], cpu_env, offsetof(CPUState, HI[reg]));
+}
+
+static inline void gen_op_load_LO(int reg)
+{
+    tcg_gen_ld_tl(cpu_T[0], cpu_env, offsetof(CPUState, LO[reg]));
+}
+
+static inline void gen_op_store_LO(int reg)
+{
+    tcg_gen_st_tl(cpu_T[0], cpu_env, offsetof(CPUState, LO[reg]));
+}
+
+
+/* Floating point register moves. */
 static const char *fregnames[] =
     { "f0",  "f1",  "f2",  "f3",  "f4",  "f5",  "f6",  "f7",
       "f8",  "f9",  "f10", "f11", "f12", "f13", "f14", "f15",
@@ -598,15 +716,6 @@ do {                                                                          \
     }                                                                         \
 } while (0)
 
-#define GEN_LOAD_REG_T2(Rn)                                                   \
-do {                                                                          \
-    if (Rn == 0) {                                                            \
-        gen_op_reset_T2();                                                    \
-    } else {                                                                  \
-        gen_op_load_gpr_T2(Rn);                                               \
-    }                                                                         \
-} while (0)
-
 #define GEN_LOAD_SRSREG_TN(Tn, Rn)                                            \
 do {                                                                          \
     if (Rn == 0) {                                                            \
@@ -616,18 +725,6 @@ do {                                                                          \
     }                                                                         \
 } while (0)
 
-#if defined(TARGET_MIPS64)
-#define GEN_LOAD_IMM_TN(Tn, Imm)                                              \
-do {                                                                          \
-    if (Imm == 0) {                                                           \
-        glue(gen_op_reset_, Tn)();                                            \
-    } else if ((int32_t)Imm == Imm) {                                         \
-        glue(gen_op_set_, Tn)(Imm);                                           \
-    } else {                                                                  \
-        glue(gen_op_set64_, Tn)(((uint64_t)Imm) >> 32, (uint32_t)Imm);        \
-    }                                                                         \
-} while (0)
-#else
 #define GEN_LOAD_IMM_TN(Tn, Imm)                                              \
 do {                                                                          \
     if (Imm == 0) {                                                           \
@@ -636,12 +733,11 @@ do {                                                                          \
         glue(gen_op_set_, Tn)(Imm);                                           \
     }                                                                         \
 } while (0)
-#endif
 
 #define GEN_STORE_T0_REG(Rn)                                                  \
 do {                                                                          \
     if (Rn != 0) {                                                            \
-        glue(gen_op_store_T0,_gpr)(Rn);                                       \
+        gen_op_store_gpr_T0(Rn);                                              \
         ctx->glue(last_T0,_store) = gen_opc_ptr;                              \
         ctx->glue(last_T0,_gpr) = Rn;                                         \
     }                                                                         \
@@ -650,14 +746,13 @@ do {                                                                          \
 #define GEN_STORE_T1_REG(Rn)                                                  \
 do {                                                                          \
     if (Rn != 0)                                                              \
-        glue(gen_op_store_T1,_gpr)(Rn);                                       \
+        gen_op_store_gpr_T1(Rn);                                              \
 } while (0)
 
 #define GEN_STORE_TN_SRSREG(Rn, Tn)                                           \
 do {                                                                          \
-    if (Rn != 0) {                                                            \
-        glue(glue(gen_op_store_, Tn),_srsgpr)(Rn);                            \
-    }                                                                         \
+    if (Rn != 0)                                                              \
+        glue(gen_op_store_srsgpr_, Tn)(Rn);                                   \
 } while (0)
 
 #define GEN_LOAD_FREG_FTN(FTn, Fn)                                            \
@@ -713,14 +808,9 @@ static always_inline void save_cpu_state (DisasContext *ctx, int do_save_pc)
         ctx->saved_hflags = ctx->hflags;
         switch (ctx->hflags & MIPS_HFLAG_BMASK) {
         case MIPS_HFLAG_BR:
-            gen_op_save_breg_target();
             break;
         case MIPS_HFLAG_BC:
-            gen_op_save_bcond();
-            /* fall through */
         case MIPS_HFLAG_BL:
-            /* bcond was already saved by the BL insn */
-            /* fall through */
         case MIPS_HFLAG_B:
             gen_save_btarget(ctx->btarget);
             break;
@@ -733,17 +823,31 @@ static always_inline void restore_cpu_state (CPUState *env, DisasContext *ctx)
     ctx->saved_hflags = ctx->hflags;
     switch (ctx->hflags & MIPS_HFLAG_BMASK) {
     case MIPS_HFLAG_BR:
-        gen_op_restore_breg_target();
-        break;
-    case MIPS_HFLAG_B:
-        ctx->btarget = env->btarget;
         break;
     case MIPS_HFLAG_BC:
     case MIPS_HFLAG_BL:
+    case MIPS_HFLAG_B:
         ctx->btarget = env->btarget;
-        gen_op_restore_bcond();
         break;
     }
+}
+
+static always_inline void
+generate_tcg_exception_err (DisasContext *ctx, int excp, int err)
+{
+    save_cpu_state(ctx, 1);
+    if (err == 0)
+        gen_op_raise_exception(excp);
+    else
+        gen_op_raise_exception_err(excp, err);
+    gen_op_interrupt_restart();
+    tcg_gen_exit_tb(0);
+}
+
+static always_inline void
+generate_tcg_exception (DisasContext *ctx, int excp)
+{
+    generate_tcg_exception_err (ctx, excp, 0);
 }
 
 static always_inline void generate_exception_err (DisasContext *ctx, int excp, int err)
@@ -829,6 +933,7 @@ static always_inline void check_mips_64(DisasContext *ctx)
         generate_exception(ctx, EXCP_RI);
 }
 
+/* load/store instructions. */
 #if defined(CONFIG_USER_ONLY)
 #define op_ldst(name)        gen_op_##name##_raw()
 #define OP_LD_TABLE(width)
@@ -850,36 +955,111 @@ static GenOpFunc *gen_op_s##width[] = {                                       \
 #endif
 
 #if defined(TARGET_MIPS64)
-OP_LD_TABLE(d);
 OP_LD_TABLE(dl);
 OP_LD_TABLE(dr);
-OP_ST_TABLE(d);
 OP_ST_TABLE(dl);
 OP_ST_TABLE(dr);
-OP_LD_TABLE(ld);
-OP_ST_TABLE(cd);
-OP_LD_TABLE(wu);
 #endif
-OP_LD_TABLE(w);
 OP_LD_TABLE(wl);
 OP_LD_TABLE(wr);
-OP_ST_TABLE(w);
 OP_ST_TABLE(wl);
 OP_ST_TABLE(wr);
-OP_LD_TABLE(h);
-OP_LD_TABLE(hu);
-OP_ST_TABLE(h);
-OP_LD_TABLE(b);
-OP_LD_TABLE(bu);
-OP_ST_TABLE(b);
-OP_LD_TABLE(l);
-OP_ST_TABLE(c);
 OP_LD_TABLE(wc1);
 OP_ST_TABLE(wc1);
 OP_LD_TABLE(dc1);
 OP_ST_TABLE(dc1);
 OP_LD_TABLE(uxc1);
 OP_ST_TABLE(uxc1);
+
+#define OP_LD(insn,fname)                                        \
+void inline op_ldst_##insn(DisasContext *ctx)                    \
+{                                                                \
+    tcg_gen_qemu_##fname(cpu_T[0], cpu_T[0], ctx->mem_idx);      \
+}
+OP_LD(lb,ld8s);
+OP_LD(lbu,ld8u);
+OP_LD(lh,ld16s);
+OP_LD(lhu,ld16u);
+OP_LD(lw,ld32s);
+#if defined(TARGET_MIPS64)
+OP_LD(lwu,ld32u);
+OP_LD(ld,ld64);
+#endif
+#undef OP_LD
+
+#define OP_ST(insn,fname)                                        \
+void inline op_ldst_##insn(DisasContext *ctx)                    \
+{                                                                \
+    tcg_gen_qemu_##fname(cpu_T[1], cpu_T[0], ctx->mem_idx);      \
+}
+OP_ST(sb,st8);
+OP_ST(sh,st16);
+OP_ST(sw,st32);
+#if defined(TARGET_MIPS64)
+OP_ST(sd,st64);
+#endif
+#undef OP_ST
+
+#define OP_LD_ATOMIC(insn,fname)                                        \
+void inline op_ldst_##insn(DisasContext *ctx)                           \
+{                                                                       \
+    tcg_gen_mov_tl(cpu_T[1], cpu_T[0]);                                 \
+    tcg_gen_qemu_##fname(cpu_T[0], cpu_T[0], ctx->mem_idx);             \
+    tcg_gen_st_tl(cpu_T[1], cpu_env, offsetof(CPUState, CP0_LLAddr));   \
+}
+OP_LD_ATOMIC(ll,ld32s);
+#if defined(TARGET_MIPS64)
+OP_LD_ATOMIC(lld,ld64);
+#endif
+#undef OP_LD_ATOMIC
+
+#define OP_ST_ATOMIC(insn,fname,almask)                                 \
+void inline op_ldst_##insn(DisasContext *ctx)                           \
+{                                                                       \
+    int r_tmp = tcg_temp_new(TCG_TYPE_TL);                              \
+    int l1 = gen_new_label();                                           \
+    int l2 = gen_new_label();                                           \
+    int l3 = gen_new_label();                                           \
+                                                                        \
+    tcg_gen_andi_tl(r_tmp, cpu_T[0], almask);                           \
+    tcg_gen_brcond_tl(TCG_COND_EQ, r_tmp, tcg_const_tl(0), l1);         \
+    tcg_gen_st_tl(cpu_T[0], cpu_env, offsetof(CPUState, CP0_BadVAddr)); \
+    generate_tcg_exception(ctx, EXCP_AdES);                             \
+    gen_set_label(l1);                                                  \
+    tcg_gen_ld_tl(r_tmp, cpu_env, offsetof(CPUState, CP0_LLAddr));      \
+    tcg_gen_brcond_tl(TCG_COND_NE, cpu_T[0], r_tmp, l2);                \
+    tcg_gen_qemu_##fname(cpu_T[1], cpu_T[0], ctx->mem_idx);             \
+    tcg_gen_movi_tl(cpu_T[0], 1);                                       \
+    tcg_gen_br(l3);                                                     \
+    gen_set_label(l2);                                                  \
+    tcg_gen_movi_tl(cpu_T[0], 0);                                       \
+    gen_set_label(l3);                                                  \
+}
+OP_ST_ATOMIC(sc,st32,0x3);
+#if defined(TARGET_MIPS64)
+OP_ST_ATOMIC(scd,st64,0x7);
+#endif
+#undef OP_ST_ATOMIC
+
+void inline op_ldst_lwc1(DisasContext *ctx)
+{
+    op_ldst(lwc1);
+}
+
+void inline op_ldst_ldc1(DisasContext *ctx)
+{
+    op_ldst(ldc1);
+}
+
+void inline op_ldst_swc1(DisasContext *ctx)
+{
+    op_ldst(swc1);
+}
+
+void inline op_ldst_sdc1(DisasContext *ctx)
+{
+    op_ldst(sdc1);
+}
 
 /* Load and store */
 static void gen_ldst (DisasContext *ctx, uint32_t opc, int rt,
@@ -901,29 +1081,29 @@ static void gen_ldst (DisasContext *ctx, uint32_t opc, int rt,
     switch (opc) {
 #if defined(TARGET_MIPS64)
     case OPC_LWU:
-        op_ldst(lwu);
+        op_ldst_lwu(ctx);
         GEN_STORE_T0_REG(rt);
         opn = "lwu";
         break;
     case OPC_LD:
-        op_ldst(ld);
+        op_ldst_ld(ctx);
         GEN_STORE_T0_REG(rt);
         opn = "ld";
         break;
     case OPC_LLD:
-        op_ldst(lld);
+        op_ldst_lld(ctx);
         GEN_STORE_T0_REG(rt);
         opn = "lld";
         break;
     case OPC_SD:
         GEN_LOAD_REG_T1(rt);
-        op_ldst(sd);
+        op_ldst_sd(ctx);
         opn = "sd";
         break;
     case OPC_SCD:
         save_cpu_state(ctx, 1);
         GEN_LOAD_REG_T1(rt);
-        op_ldst(scd);
+        op_ldst_scd(ctx);
         GEN_STORE_T0_REG(rt);
         opn = "scd";
         break;
@@ -951,42 +1131,42 @@ static void gen_ldst (DisasContext *ctx, uint32_t opc, int rt,
         break;
 #endif
     case OPC_LW:
-        op_ldst(lw);
+        op_ldst_lw(ctx);
         GEN_STORE_T0_REG(rt);
         opn = "lw";
         break;
     case OPC_SW:
         GEN_LOAD_REG_T1(rt);
-        op_ldst(sw);
+        op_ldst_sw(ctx);
         opn = "sw";
         break;
     case OPC_LH:
-        op_ldst(lh);
+        op_ldst_lh(ctx);
         GEN_STORE_T0_REG(rt);
         opn = "lh";
         break;
     case OPC_SH:
         GEN_LOAD_REG_T1(rt);
-        op_ldst(sh);
+        op_ldst_sh(ctx);
         opn = "sh";
         break;
     case OPC_LHU:
-        op_ldst(lhu);
+        op_ldst_lhu(ctx);
         GEN_STORE_T0_REG(rt);
         opn = "lhu";
         break;
     case OPC_LB:
-        op_ldst(lb);
+        op_ldst_lb(ctx);
         GEN_STORE_T0_REG(rt);
         opn = "lb";
         break;
     case OPC_SB:
         GEN_LOAD_REG_T1(rt);
-        op_ldst(sb);
+        op_ldst_sb(ctx);
         opn = "sb";
         break;
     case OPC_LBU:
-        op_ldst(lbu);
+        op_ldst_lbu(ctx);
         GEN_STORE_T0_REG(rt);
         opn = "lbu";
         break;
@@ -1013,14 +1193,14 @@ static void gen_ldst (DisasContext *ctx, uint32_t opc, int rt,
         opn = "swr";
         break;
     case OPC_LL:
-        op_ldst(ll);
+        op_ldst_ll(ctx);
         GEN_STORE_T0_REG(rt);
         opn = "ll";
         break;
     case OPC_SC:
         save_cpu_state(ctx, 1);
         GEN_LOAD_REG_T1(rt);
-        op_ldst(sc);
+        op_ldst_sc(ctx);
         GEN_STORE_T0_REG(rt);
         opn = "sc";
         break;
@@ -1051,23 +1231,23 @@ static void gen_flt_ldst (DisasContext *ctx, uint32_t opc, int ft,
        memory access. */
     switch (opc) {
     case OPC_LWC1:
-        op_ldst(lwc1);
+        op_ldst_lwc1(ctx);
         GEN_STORE_FTN_FREG(ft, WT0);
         opn = "lwc1";
         break;
     case OPC_SWC1:
         GEN_LOAD_FREG_FTN(WT0, ft);
-        op_ldst(swc1);
+        op_ldst_swc1(ctx);
         opn = "swc1";
         break;
     case OPC_LDC1:
-        op_ldst(ldc1);
+        op_ldst_ldc1(ctx);
         GEN_STORE_FTN_FREG(ft, DT0);
         opn = "ldc1";
         break;
     case OPC_SDC1:
         GEN_LOAD_FREG_FTN(DT0, ft);
-        op_ldst(sdc1);
+        op_ldst_sdc1(ctx);
         opn = "sdc1";
         break;
     default:
@@ -1654,7 +1834,7 @@ static void gen_cl (DisasContext *ctx, uint32_t opc,
         generate_exception(ctx, EXCP_RI);
         return;
     }
-    gen_op_store_T0_gpr(rd);
+    gen_op_store_gpr_T0(rd);
     MIPS_DEBUG("%s %s, %s", opn, regnames[rd], regnames[rs]);
 }
 
@@ -1769,6 +1949,19 @@ static always_inline void gen_goto_tb(DisasContext *ctx, int n, target_ulong des
     }
 }
 
+static inline void tcg_gen_set_bcond(void)
+{
+    tcg_gen_st_tl(cpu_T[0], cpu_env, offsetof(CPUState, bcond));
+}
+
+static inline void tcg_gen_jnz_bcond(int label)
+{
+    int r_tmp = tcg_temp_new(TCG_TYPE_TL);
+
+    tcg_gen_ld_tl(r_tmp, cpu_env, offsetof(CPUState, bcond));
+    tcg_gen_brcond_tl(TCG_COND_NE, r_tmp, tcg_const_tl(0), label);
+}
+
 /* Branches (before delay slot) */
 static void gen_compute_branch (DisasContext *ctx, uint32_t opc,
                                 int rs, int rt, int32_t offset)
@@ -1837,7 +2030,8 @@ static void gen_compute_branch (DisasContext *ctx, uint32_t opc,
             generate_exception(ctx, EXCP_RI);
             return;
         }
-        GEN_LOAD_REG_T2(rs);
+        GEN_LOAD_REG_T1(rs);
+        gen_op_save_breg_target();
         break;
     default:
         MIPS_INVAL("branch/jump");
@@ -1872,12 +2066,12 @@ static void gen_compute_branch (DisasContext *ctx, uint32_t opc,
             return;
         case OPC_BLTZAL:  /* 0 < 0           */
             GEN_LOAD_IMM_TN(T0, ctx->pc + 8);
-            gen_op_store_T0_gpr(31);
+            gen_op_store_gpr_T0(31);
             MIPS_DEBUG("bnever and link");
             return;
         case OPC_BLTZALL: /* 0 < 0 likely */
             GEN_LOAD_IMM_TN(T0, ctx->pc + 8);
-            gen_op_store_T0_gpr(31);
+            gen_op_store_gpr_T0(31);
             /* Skip the instruction in the delay slot */
             MIPS_DEBUG("bnever, link and skip");
             ctx->pc += 4;
@@ -1982,7 +2176,7 @@ static void gen_compute_branch (DisasContext *ctx, uint32_t opc,
             MIPS_DEBUG("bltzal %s, " TARGET_FMT_lx, regnames[rs], btarget);
         not_likely:
             ctx->hflags |= MIPS_HFLAG_BC;
-            gen_op_set_bcond();
+            tcg_gen_set_bcond();
             break;
         case OPC_BLTZALL:
             gen_op_ltz();
@@ -1990,8 +2184,7 @@ static void gen_compute_branch (DisasContext *ctx, uint32_t opc,
             MIPS_DEBUG("bltzall %s, " TARGET_FMT_lx, regnames[rs], btarget);
         likely:
             ctx->hflags |= MIPS_HFLAG_BL;
-            gen_op_set_bcond();
-            gen_op_save_bcond();
+            tcg_gen_set_bcond();
             break;
         default:
             MIPS_INVAL("conditional branch/jump");
@@ -2005,7 +2198,7 @@ static void gen_compute_branch (DisasContext *ctx, uint32_t opc,
     ctx->btarget = btarget;
     if (blink > 0) {
         GEN_LOAD_IMM_TN(T0, ctx->pc + 8);
-        gen_op_store_T0_gpr(blink);
+        gen_op_store_gpr_T0(blink);
     }
 }
 
@@ -4724,7 +4917,7 @@ static void gen_cp0 (CPUState *env, DisasContext *ctx, uint32_t opc, int rt, int
             return;
         }
         gen_mfc0(env, ctx, rd, ctx->opcode & 0x7);
-        gen_op_store_T0_gpr(rt);
+        gen_op_store_gpr_T0(rt);
         opn = "mfc0";
         break;
     case OPC_MTC0:
@@ -4741,7 +4934,7 @@ static void gen_cp0 (CPUState *env, DisasContext *ctx, uint32_t opc, int rt, int
             return;
         }
         gen_dmfc0(env, ctx, rd, ctx->opcode & 0x7);
-        gen_op_store_T0_gpr(rt);
+        gen_op_store_gpr_T0(rt);
         opn = "dmfc0";
         break;
     case OPC_DMTC0:
@@ -4760,7 +4953,7 @@ static void gen_cp0 (CPUState *env, DisasContext *ctx, uint32_t opc, int rt, int
         }
         gen_mftr(env, ctx, rt, (ctx->opcode >> 5) & 1,
                  ctx->opcode & 0x7, (ctx->opcode >> 4) & 1);
-        gen_op_store_T0_gpr(rd);
+        gen_op_store_gpr_T0(rd);
         opn = "mftr";
         break;
     case OPC_MTTR:
@@ -4862,8 +5055,7 @@ static void gen_compute_branch1 (CPUState *env, DisasContext *ctx, uint32_t op,
         opn = "bc1tl";
     likely:
         ctx->hflags |= MIPS_HFLAG_BL;
-        gen_op_set_bcond();
-        gen_op_save_bcond();
+        tcg_gen_set_bcond();
         break;
     case OPC_BC1FANY2:
         gen_op_bc1any2f(cc);
@@ -4882,7 +5074,7 @@ static void gen_compute_branch1 (CPUState *env, DisasContext *ctx, uint32_t op,
         opn = "bc1any4t";
     not_likely:
         ctx->hflags |= MIPS_HFLAG_BC;
-        gen_op_set_bcond();
+        tcg_gen_set_bcond();
         break;
     default:
         MIPS_INVAL(opn);
@@ -5826,14 +6018,14 @@ static void gen_flt3_ldst (DisasContext *ctx, uint32_t opc,
     switch (opc) {
     case OPC_LWXC1:
         check_cop1x(ctx);
-        op_ldst(lwc1);
+        op_ldst_lwc1(ctx);
         GEN_STORE_FTN_FREG(fd, WT0);
         opn = "lwxc1";
         break;
     case OPC_LDXC1:
         check_cop1x(ctx);
         check_cp1_registers(ctx, fd);
-        op_ldst(ldc1);
+        op_ldst_ldc1(ctx);
         GEN_STORE_FTN_FREG(fd, DT0);
         opn = "ldxc1";
         break;
@@ -5846,7 +6038,7 @@ static void gen_flt3_ldst (DisasContext *ctx, uint32_t opc,
     case OPC_SWXC1:
         check_cop1x(ctx);
         GEN_LOAD_FREG_FTN(WT0, fs);
-        op_ldst(swc1);
+        op_ldst_swc1(ctx);
         opn = "swxc1";
         store = 1;
         break;
@@ -5854,7 +6046,7 @@ static void gen_flt3_ldst (DisasContext *ctx, uint32_t opc,
         check_cop1x(ctx);
         check_cp1_registers(ctx, fs);
         GEN_LOAD_FREG_FTN(DT0, fs);
-        op_ldst(sdc1);
+        op_ldst_sdc1(ctx);
         opn = "sdxc1";
         store = 1;
         break;
@@ -6055,7 +6247,7 @@ static void decode_opc (CPUState *env, DisasContext *ctx)
         /* Handle blikely not taken case */
         MIPS_DEBUG("blikely condition (" TARGET_FMT_lx ")", ctx->pc + 4);
         l1 = gen_new_label();
-        gen_op_jnz_T2(l1);
+        tcg_gen_jnz_bcond(l1);
         gen_op_save_state(ctx->hflags & ~MIPS_HFLAG_BMASK);
         gen_goto_tb(ctx, 1, ctx->pc + 4);
         gen_set_label(l1);
@@ -6611,7 +6803,7 @@ static void decode_opc (CPUState *env, DisasContext *ctx)
             {
               int l1;
               l1 = gen_new_label();
-              gen_op_jnz_T2(l1);
+              tcg_gen_jnz_bcond(l1);
               gen_goto_tb(ctx, 1, ctx->pc + 4);
               gen_set_label(l1);
               gen_goto_tb(ctx, 0, ctx->btarget);
@@ -6810,8 +7002,13 @@ void fpu_dump_state(CPUState *env, FILE *f,
 void dump_fpu (CPUState *env)
 {
     if (loglevel) {
-       fprintf(logfile, "pc=0x" TARGET_FMT_lx " HI=0x" TARGET_FMT_lx " LO=0x" TARGET_FMT_lx " ds %04x " TARGET_FMT_lx " %d\n",
-               env->PC[env->current_tc], env->HI[env->current_tc][0], env->LO[env->current_tc][0], env->hflags, env->btarget, env->bcond);
+        fprintf(logfile,
+                "pc=0x" TARGET_FMT_lx " HI=0x" TARGET_FMT_lx
+                " LO=0x" TARGET_FMT_lx " ds %04x " TARGET_FMT_lx
+                " %04x\n",
+                env->PC[env->current_tc], env->HI[env->current_tc][0],
+                env->LO[env->current_tc][0], env->hflags, env->btarget,
+                env->bcond);
        fpu_dump_state(env, logfile, fprintf, 0);
     }
 }
@@ -6876,6 +7073,32 @@ void cpu_dump_state (CPUState *env, FILE *f,
 #endif
 }
 
+static void mips_tcg_init(void)
+{
+    static int inited;
+
+    /* Initialize various static tables. */
+    if (inited)
+	return;
+
+    cpu_env = tcg_global_reg_new(TCG_TYPE_PTR, TCG_AREG0, "env");
+    current_tc_gprs = tcg_global_mem_new(TCG_TYPE_PTR,
+                                         TCG_AREG0,
+                                         offsetof(CPUState, current_tc_gprs),
+                                         "current_tc_gprs");
+#if TARGET_LONG_BITS > HOST_LONG_BITS
+    cpu_T[0] = tcg_global_mem_new(TCG_TYPE_TL,
+                                  TCG_AREG0, offsetof(CPUState, t0), "T0");
+    cpu_T[1] = tcg_global_mem_new(TCG_TYPE_TL,
+                                  TCG_AREG0, offsetof(CPUState, t1), "T1");
+#else
+    cpu_T[0] = tcg_global_reg_new(TCG_TYPE_TL, TCG_AREG1, "T0");
+    cpu_T[1] = tcg_global_reg_new(TCG_TYPE_TL, TCG_AREG2, "T1");
+#endif
+
+    inited = 1;
+}
+
 #include "translate_init.c"
 
 CPUMIPSState *cpu_mips_init (const char *cpu_model)
@@ -6893,6 +7116,7 @@ CPUMIPSState *cpu_mips_init (const char *cpu_model)
 
     cpu_exec_init(env);
     env->cpu_model_str = cpu_model;
+    mips_tcg_init();
     cpu_reset(env);
     return env;
 }
@@ -6941,4 +7165,12 @@ void cpu_reset (CPUMIPSState *env)
     env->hflags = MIPS_HFLAG_CP0;
 #endif
     cpu_mips_register(env, env->cpu_model);
+}
+
+void gen_pc_load(CPUState *env, TranslationBlock *tb,
+                unsigned long searched_pc, int pc_pos, void *puc)
+{
+    env->PC[env->current_tc] = gen_opc_pc[pc_pos];
+    env->hflags &= ~MIPS_HFLAG_BMASK;
+    env->hflags |= gen_opc_hflags[pc_pos];
 }

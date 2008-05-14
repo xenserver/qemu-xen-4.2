@@ -744,6 +744,32 @@ static void do_memory_save(unsigned int valh, unsigned int vall,
     fclose(f);
 }
 
+static void do_physical_memory_save(unsigned int valh, unsigned int vall,
+                                    uint32_t size, const char *filename)
+{
+    FILE *f;
+    uint32_t l;
+    uint8_t buf[1024];
+    target_phys_addr_t addr = GET_TPHYSADDR(valh, vall); 
+
+    f = fopen(filename, "wb");
+    if (!f) {
+        term_printf("could not open '%s'\n", filename);
+        return;
+    }
+    while (size != 0) {
+        l = sizeof(buf);
+        if (l > size)
+            l = size;
+        cpu_physical_memory_rw(addr, buf, l, 0);
+        fwrite(buf, 1, l, f);
+        fflush(f);
+        addr += l;
+        size -= l;
+    }
+    fclose(f);
+}
+
 static void do_sum(uint32_t start, uint32_t size)
 {
     uint32_t addr;
@@ -991,6 +1017,21 @@ static void do_ioport_read(int count, int format, int size, int addr, int has_in
     }
     term_printf("port%c[0x%04x] = %#0*x\n",
                 suffix, addr, size * 2, val);
+}
+
+static void do_boot_set(const char *bootdevice)
+{
+    int res;
+
+    if (qemu_boot_set_handler)  {
+        res = qemu_boot_set_handler(bootdevice);
+        if (res == 0)
+            term_printf("boot device list now set to %s\n", bootdevice);
+        else
+            term_printf("setting boot device list failed with error %i\n", res);
+    } else {
+        term_printf("no function defined to set boot device list for this architecture\n");
+    }
 }
 
 static void do_system_reset(void)
@@ -1257,6 +1298,19 @@ static void do_wav_capture (const char *path,
 }
 #endif
 
+#if defined(TARGET_I386)
+static void do_inject_nmi(int cpu_index)
+{
+    CPUState *env;
+
+    for (env = first_cpu; env != NULL; env = env->next_cpu)
+        if (env->cpu_index == cpu_index) {
+            cpu_interrupt(env, CPU_INTERRUPT_NMI);
+            break;
+        }
+}
+#endif
+
 static term_cmd_t term_cmds[] = {
     { "help|?", "s?", do_help,
       "[cmd]", "show the help" },
@@ -1328,6 +1382,14 @@ static term_cmd_t term_cmds[] = {
        "capture index", "stop capture" },
     { "memsave", "lis", do_memory_save,
       "addr size file", "save to disk virtual memory dump starting at 'addr' of size 'size'", },
+    { "pmemsave", "lis", do_physical_memory_save,
+      "addr size file", "save to disk physical memory dump starting at 'addr' of size 'size'", },
+    { "boot_set", "s", do_boot_set,
+      "bootdevice", "define new values for the boot device list" },
+#if defined(TARGET_I386)
+    { "nmi", "i", do_inject_nmi,
+      "cpu", "inject an NMI on the given CPU", },
+#endif
     { NULL, NULL, },
 };
 

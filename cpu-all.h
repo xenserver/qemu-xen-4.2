@@ -20,7 +20,7 @@
 #ifndef CPU_ALL_H
 #define CPU_ALL_H
 
-#if defined(__arm__) || defined(__sparc__) || defined(__mips__)
+#if defined(__arm__) || defined(__sparc__) || defined(__mips__) || defined(__hppa__)
 #define WORDS_ALIGNED
 #endif
 
@@ -38,6 +38,7 @@
  */
 
 #include "bswap.h"
+#include "softfloat.h"
 
 #if defined(WORDS_BIGENDIAN) != defined(TARGET_WORDS_BIGENDIAN)
 #define BSWAP_NEEDED
@@ -451,7 +452,7 @@ static inline uint64_t ldq_be_p(void *ptr)
 {
     uint32_t a,b;
     a = ldl_be_p(ptr);
-    b = ldl_be_p(ptr+4);
+    b = ldl_be_p((uint8_t *)ptr + 4);
     return (((uint64_t)a<<32)|b);
 }
 
@@ -488,7 +489,7 @@ static inline void stl_be_p(void *ptr, int v)
 static inline void stq_be_p(void *ptr, uint64_t v)
 {
     stl_be_p(ptr, v >> 32);
-    stl_be_p(ptr + 4, v);
+    stl_be_p((uint8_t *)ptr + 4, v);
 }
 
 /* float access */
@@ -517,7 +518,7 @@ static inline float64 ldfq_be_p(void *ptr)
 {
     CPU_DoubleU u;
     u.l.upper = ldl_be_p(ptr);
-    u.l.lower = ldl_be_p(ptr + 4);
+    u.l.lower = ldl_be_p((uint8_t *)ptr + 4);
     return u.d;
 }
 
@@ -526,7 +527,7 @@ static inline void stfq_be_p(void *ptr, float64 v)
     CPU_DoubleU u;
     u.d = v;
     stl_be_p(ptr, u.l.upper);
-    stl_be_p(ptr + 4, u.l.lower);
+    stl_be_p((uint8_t *)ptr + 4, u.l.lower);
 }
 
 #else
@@ -742,7 +743,6 @@ void cpu_abort(CPUState *env, const char *fmt, ...)
     __attribute__ ((__noreturn__));
 extern CPUState *first_cpu;
 extern CPUState *cpu_single_env;
-extern int code_copy_enabled;
 
 #define CPU_INTERRUPT_EXIT   0x01 /* wants exit from main loop */
 #define CPU_INTERRUPT_HARD   0x02 /* hardware interrupt pending */
@@ -753,6 +753,7 @@ extern int code_copy_enabled;
 #define CPU_INTERRUPT_SMI    0x40 /* (x86 only) SMI interrupt pending */
 #define CPU_INTERRUPT_DEBUG  0x80 /* Debug event occured.  */
 #define CPU_INTERRUPT_VIRQ   0x100 /* virtual interrupt pending.  */
+#define CPU_INTERRUPT_NMI    0x200 /* NMI pending. */
 
 void cpu_interrupt(CPUState *s, int mask);
 void cpu_reset_interrupt(CPUState *env, int mask);
@@ -761,6 +762,11 @@ int cpu_watchpoint_insert(CPUState *env, target_ulong addr);
 int cpu_watchpoint_remove(CPUState *env, target_ulong addr);
 int cpu_breakpoint_insert(CPUState *env, target_ulong pc);
 int cpu_breakpoint_remove(CPUState *env, target_ulong pc);
+
+#define SSTEP_ENABLE  0x1  /* Enable simulated HW single stepping */
+#define SSTEP_NOIRQ   0x2  /* Do not use IRQ while single stepping */
+#define SSTEP_NOTIMER 0x4  /* Do not Timers while single stepping */
+
 void cpu_single_step(CPUState *env, int enabled);
 void cpu_reset(CPUState *s);
 
@@ -805,12 +811,20 @@ int cpu_inw(CPUState *env, int addr);
 int cpu_inl(CPUState *env, int addr);
 #endif
 
+/* address in the RAM (different from a physical address) */
+#ifdef USE_KQEMU
+typedef uint32_t ram_addr_t;
+#else
+typedef unsigned long ram_addr_t;
+#endif
+
 /* memory API */
 
-extern int phys_ram_size;
+extern ram_addr_t phys_ram_size;
 extern int phys_ram_fd;
 extern uint8_t *phys_ram_base;
 extern uint8_t *phys_ram_dirty;
+extern ram_addr_t ram_size;
 
 /* physical memory access */
 #define TLB_INVALID_MASK   (1 << 3)
@@ -832,10 +846,10 @@ typedef void CPUWriteMemoryFunc(void *opaque, target_phys_addr_t addr, uint32_t 
 typedef uint32_t CPUReadMemoryFunc(void *opaque, target_phys_addr_t addr);
 
 void cpu_register_physical_memory(target_phys_addr_t start_addr,
-                                  unsigned long size,
-                                  unsigned long phys_offset);
-uint32_t cpu_get_physical_page_desc(target_phys_addr_t addr);
-ram_addr_t qemu_ram_alloc(unsigned int size);
+                                  ram_addr_t size,
+                                  ram_addr_t phys_offset);
+ram_addr_t cpu_get_physical_page_desc(target_phys_addr_t addr);
+ram_addr_t qemu_ram_alloc(ram_addr_t);
 void qemu_ram_free(ram_addr_t addr);
 int cpu_register_io_memory(int io_index,
                            CPUReadMemoryFunc **mem_read,
@@ -949,6 +963,15 @@ static inline int64_t cpu_get_real_ticks(void)
     val = high;
     val <<= 32;
     val |= low;
+    return val;
+}
+
+#elif defined(__hppa__)
+
+static inline int64_t cpu_get_real_ticks(void)
+{
+    int val;
+    asm volatile ("mfctl %%cr16, %0" : "=r"(val));
     return val;
 }
 

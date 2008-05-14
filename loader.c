@@ -59,7 +59,7 @@ int load_image(const char *filename, uint8_t *addr)
 /* return the amount read, just like fread.  0 may mean error or eof */
 int fread_targphys(target_phys_addr_t dst_addr, size_t nbytes, FILE *f)
 {
-    unsigned char buf[4096];
+    uint8_t buf[4096];
     target_phys_addr_t dst_begin = dst_addr;
     size_t want, did;
 
@@ -67,8 +67,8 @@ int fread_targphys(target_phys_addr_t dst_addr, size_t nbytes, FILE *f)
 	want = nbytes > sizeof(buf) ? sizeof(buf) : nbytes;
 	did = fread(buf, 1, want, f);
 	if (did != want) break;
-	
-	cpu_physical_memory_write(dst_addr, buf, did);
+
+	cpu_physical_memory_write_rom(dst_addr, buf, did);
 	dst_addr += did;
 	nbytes -= did;
     }
@@ -81,6 +81,25 @@ int fread_targphys_ok(target_phys_addr_t dst_addr, size_t nbytes, FILE *f)
     return fread_targphys(dst_addr, nbytes, f) == nbytes;
 }
     
+/* read()-like version */
+int read_targphys(int fd, target_phys_addr_t dst_addr, size_t nbytes)
+{
+    uint8_t buf[4096];
+    target_phys_addr_t dst_begin = dst_addr;
+    size_t want, did;
+
+    while (nbytes) {
+	want = nbytes > sizeof(buf) ? sizeof(buf) : nbytes;
+	did = read(fd, buf, want);
+	if (did != want) break;
+
+	cpu_physical_memory_write_rom(dst_addr, buf, did);
+	dst_addr += did;
+	nbytes -= did;
+    }
+    return dst_addr - dst_begin;
+}
+
 /* return the size or -1 if error */
 int load_image_targphys(const char *filename,
 			target_phys_addr_t addr, int max_sz)
@@ -148,7 +167,7 @@ static void bswap_ahdr(struct exec *e)
      : (_N_SEGMENT_ROUND (_N_TXTENDADDR(x))))
 
 
-int load_aout(const char *filename, uint8_t *addr)
+int load_aout(const char *filename, target_phys_addr_t addr, int max_sz)
 {
     int fd, size, ret;
     struct exec e;
@@ -168,17 +187,21 @@ int load_aout(const char *filename, uint8_t *addr)
     case ZMAGIC:
     case QMAGIC:
     case OMAGIC:
+        if (e.a_text + e.a_data > max_sz)
+            goto fail;
 	lseek(fd, N_TXTOFF(e), SEEK_SET);
-	size = qemu_read(fd, addr, e.a_text + e.a_data);
+	size = read_targphys(fd, addr, e.a_text + e.a_data);
 	if (size != e.a_text + e.a_data)
 	    goto fail;
 	break;
     case NMAGIC:
+        if (N_DATADDR(e) + e.a_data > max_sz)
+            goto fail;
 	lseek(fd, N_TXTOFF(e), SEEK_SET);
-	size = qemu_read(fd, addr, e.a_text);
+	size = read_targphys(fd, addr, e.a_text);
 	if (size != e.a_text)
 	    goto fail;
-	ret = qemu_read(fd, addr + N_DATADDR(e), e.a_data);
+	ret = read_targphys(fd, addr + N_DATADDR(e), e.a_data);
 	if (ret != e.a_data)
 	    goto fail;
 	size += ret;

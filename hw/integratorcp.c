@@ -231,7 +231,7 @@ static CPUWriteMemoryFunc *integratorcm_writefn[] = {
    integratorcm_write
 };
 
-static void integratorcm_init(int memsz, uint32_t flash_offset)
+static void integratorcm_init(int memsz)
 {
     int iomemtype;
     integratorcm_state *s;
@@ -258,7 +258,7 @@ static void integratorcm_init(int memsz, uint32_t flash_offset)
     }
     memcpy(integrator_spd + 73, "QEMU-MEMORY", 11);
     s->cm_init = 0x00000112;
-    s->flash_offset = flash_offset;
+    s->flash_offset = qemu_ram_alloc(0x100000);
 
     iomemtype = cpu_register_io_memory(0, integratorcm_readfn,
                                        integratorcm_writefn, s);
@@ -469,13 +469,18 @@ static void icp_control_init(uint32_t base)
 
 /* Board init.  */
 
-static void integratorcp_init(int ram_size, int vga_ram_size,
+static struct arm_boot_info integrator_binfo = {
+    .loader_start = 0x0,
+    .board_id = 0x113,
+};
+
+static void integratorcp_init(ram_addr_t ram_size, int vga_ram_size,
                      const char *boot_device, DisplayState *ds,
                      const char *kernel_filename, const char *kernel_cmdline,
                      const char *initrd_filename, const char *cpu_model)
 {
     CPUState *env;
-    uint32_t bios_offset;
+    uint32_t ram_offset;
     qemu_irq *pic;
     qemu_irq *cpu_pic;
     int sd;
@@ -487,15 +492,15 @@ static void integratorcp_init(int ram_size, int vga_ram_size,
         fprintf(stderr, "Unable to find CPU definition\n");
         exit(1);
     }
-    bios_offset = ram_size + vga_ram_size;
+    ram_offset = qemu_ram_alloc(ram_size);
     /* ??? On a real system the first 1Mb is mapped as SSRAM or boot flash.  */
     /* ??? RAM shoud repeat to fill physical memory space.  */
     /* SDRAM at address zero*/
-    cpu_register_physical_memory(0, ram_size, IO_MEM_RAM);
+    cpu_register_physical_memory(0, ram_size, ram_offset | IO_MEM_RAM);
     /* And again at address 0x80000000 */
-    cpu_register_physical_memory(0x80000000, ram_size, IO_MEM_RAM);
+    cpu_register_physical_memory(0x80000000, ram_size, ram_offset | IO_MEM_RAM);
 
-    integratorcm_init(ram_size >> 20, bios_offset);
+    integratorcm_init(ram_size >> 20);
     cpu_pic = arm_pic_init_cpu(env);
     pic = icp_pic_init(0x14000000, cpu_pic[ARM_PIC_CPU_IRQ],
                        cpu_pic[ARM_PIC_CPU_FIQ]);
@@ -527,12 +532,16 @@ static void integratorcp_init(int ram_size, int vga_ram_size,
     }
     pl110_init(ds, 0xc0000000, pic[22], 0);
 
-    arm_load_kernel(env, ram_size, kernel_filename, kernel_cmdline,
-                    initrd_filename, 0x113, 0x0);
+    integrator_binfo.ram_size = ram_size;
+    integrator_binfo.kernel_filename = kernel_filename;
+    integrator_binfo.kernel_cmdline = kernel_cmdline;
+    integrator_binfo.initrd_filename = initrd_filename;
+    arm_load_kernel(env, &integrator_binfo);
 }
 
 QEMUMachine integratorcp_machine = {
     "integratorcp",
     "ARM Integrator/CP (ARM926EJ-S)",
     integratorcp_init,
+    0x100000,
 };

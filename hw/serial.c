@@ -32,6 +32,7 @@
 #include "qemu-char.h"
 #include "isa.h"
 #include "pc.h"
+#include "qemu-timer.h"
 
 //#define DEBUG_SERIAL
 
@@ -132,6 +133,7 @@ struct SerialState {
     int last_break_enable;
     target_phys_addr_t base;
     int it_shift;
+    int baudbase;
     int tsr_retry;
 
     uint64_t last_xmit_ts;              /* Time when the last byte was successfully sent out of the tsr */
@@ -259,9 +261,10 @@ static void serial_update_parameters(SerialState *s)
         stop_bits = 1;
 
     data_bits = (s->lcr & 0x03) + 5;
+    if (s->divider == 0)
+        return;
     frame_size += data_bits + stop_bits;
-
-    speed = 115200 / s->divider;
+    speed = s->baudbase / s->divider;
     ssp.speed = speed;
     ssp.parity = parity;
     ssp.data_bits = data_bits;
@@ -774,7 +777,8 @@ static void serial_reset(void *opaque)
 }
 
 /* If fd is zero, it means that the serial device uses the console */
-SerialState *serial_init(int base, qemu_irq irq, CharDriverState *chr)
+SerialState *serial_init(int base, qemu_irq irq, int baudbase,
+                         CharDriverState *chr)
 {
     SerialState *s;
 
@@ -782,6 +786,11 @@ SerialState *serial_init(int base, qemu_irq irq, CharDriverState *chr)
     if (!s)
         return NULL;
     s->irq = irq;
+    s->baudbase = baudbase;
+
+    s->tx_timer = qemu_new_timer(vm_clock, serial_tx_done, s);
+    if (!s->tx_timer)
+        return NULL;
 
     s->modem_status_poll = qemu_new_timer(vm_clock, ( QEMUTimerCB *) serial_update_msl, s); 
  
@@ -962,8 +971,8 @@ static CPUWriteMemoryFunc *serial_mm_write[] = {
 };
 
 SerialState *serial_mm_init (target_phys_addr_t base, int it_shift,
-                             qemu_irq irq, CharDriverState *chr,
-                             int ioregister)
+                             qemu_irq irq, int baudbase,
+                             CharDriverState *chr, int ioregister)
 {
     SerialState *s;
     int s_io_memory;
@@ -974,6 +983,11 @@ SerialState *serial_mm_init (target_phys_addr_t base, int it_shift,
     s->irq = irq;
     s->base = base;
     s->it_shift = it_shift;
+    s->baudbase= baudbase;
+
+    s->tx_timer = qemu_new_timer(vm_clock, serial_tx_done, s);
+    if (!s->tx_timer)
+        return NULL;
 
     qemu_register_reset(serial_reset, s);
     serial_reset(s);

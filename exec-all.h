@@ -30,11 +30,17 @@
 struct TranslationBlock;
 
 /* XXX: make safe guess about sizes */
-#define MAX_OP_PER_INSTR 32
+#define MAX_OP_PER_INSTR 64
 /* A Call op needs up to 6 + 2N parameters (N = number of arguments).  */
 #define MAX_OPC_PARAM 10
 #define OPC_BUF_SIZE 512
 #define OPC_MAX_SIZE (OPC_BUF_SIZE - MAX_OP_PER_INSTR)
+
+/* Maximum size a TCG op can expand to.  This is complicated because a
+   single op may require several host instructions and regirster reloads.
+   For now take a wild guess at 128 bytes, which should allow at least
+   a couple of fixup instructions per argument.  */
+#define TCG_MAX_OP_SIZE 128
 
 #define OPPARAM_BUF_SIZE (OPC_BUF_SIZE * MAX_OPC_PARAM)
 
@@ -61,6 +67,9 @@ extern int loglevel;
 
 int gen_intermediate_code(CPUState *env, struct TranslationBlock *tb);
 int gen_intermediate_code_pc(CPUState *env, struct TranslationBlock *tb);
+void gen_pc_load(CPUState *env, struct TranslationBlock *tb,
+                 unsigned long searched_pc, int pc_pos, void *puc);
+
 unsigned long code_gen_max_block_size(void);
 void cpu_gen_init(void);
 int cpu_gen_code(CPUState *env, struct TranslationBlock *tb,
@@ -68,15 +77,13 @@ int cpu_gen_code(CPUState *env, struct TranslationBlock *tb,
 int cpu_restore_state(struct TranslationBlock *tb,
                       CPUState *env, unsigned long searched_pc,
                       void *puc);
-int cpu_gen_code_copy(CPUState *env, struct TranslationBlock *tb,
-                      int max_code_size, int *gen_code_size_ptr);
 int cpu_restore_state_copy(struct TranslationBlock *tb,
                            CPUState *env, unsigned long searched_pc,
                            void *puc);
 void cpu_resume_from_signal(CPUState *env1, void *puc);
 void cpu_exec_init(CPUState *env);
 int page_unprotect(target_ulong address, unsigned long pc, void *puc);
-void tb_invalidate_phys_page_range(target_ulong start, target_ulong end,
+void tb_invalidate_phys_page_range(target_phys_addr_t start, target_phys_addr_t end,
                                    int is_cpu_write_access);
 void tb_invalidate_page_range(target_ulong start, target_ulong end);
 void tlb_flush_page(CPUState *env, target_ulong addr);
@@ -84,13 +91,13 @@ void tlb_flush(CPUState *env, int flush_global);
 int tlb_set_page_exec(CPUState *env, target_ulong vaddr,
                       target_phys_addr_t paddr, int prot,
                       int mmu_idx, int is_softmmu);
-static inline int tlb_set_page(CPUState *env, target_ulong vaddr,
+static inline int tlb_set_page(CPUState *env1, target_ulong vaddr,
                                target_phys_addr_t paddr, int prot,
                                int mmu_idx, int is_softmmu)
 {
     if (prot & PAGE_READ)
         prot |= PAGE_EXEC;
-    return tlb_set_page_exec(env, vaddr, paddr, prot, mmu_idx, is_softmmu);
+    return tlb_set_page_exec(env1, vaddr, paddr, prot, mmu_idx, is_softmmu);
 }
 
 #define CODE_GEN_ALIGN           16 /* must be >= of the size of a icache line */
@@ -149,7 +156,6 @@ typedef struct TranslationBlock {
     uint16_t size;      /* size of target code for this block (1 <=
                            size <= TARGET_PAGE_SIZE) */
     uint16_t cflags;    /* compile flags */
-#define CF_CODE_COPY   0x0001 /* block was generated in code copy mode */
 #define CF_TB_FP_USED  0x0002 /* fp ops are used in the TB */
 #define CF_FP_USED     0x0004 /* fp ops are used in the TB or in a chained TB */
 #define CF_SINGLE_INSN 0x0008 /* compile only a single instruction */
@@ -182,15 +188,15 @@ static inline unsigned int tb_jmp_cache_hash_page(target_ulong pc)
 {
     target_ulong tmp;
     tmp = pc ^ (pc >> (TARGET_PAGE_BITS - TB_JMP_PAGE_BITS));
-    return (tmp >> TB_JMP_PAGE_BITS) & TB_JMP_PAGE_MASK;
+    return (tmp >> (TARGET_PAGE_BITS - TB_JMP_PAGE_BITS)) & TB_JMP_PAGE_MASK;
 }
 
 static inline unsigned int tb_jmp_cache_hash_func(target_ulong pc)
 {
     target_ulong tmp;
     tmp = pc ^ (pc >> (TARGET_PAGE_BITS - TB_JMP_PAGE_BITS));
-    return (((tmp >> TB_JMP_PAGE_BITS) & TB_JMP_PAGE_MASK) |
-	    (tmp & TB_JMP_ADDR_MASK));
+    return (((tmp >> (TARGET_PAGE_BITS - TB_JMP_PAGE_BITS)) & TB_JMP_PAGE_MASK)
+	    | (tmp & TB_JMP_ADDR_MASK));
 }
 
 static inline unsigned int tb_phys_hash_func(unsigned long pc)
@@ -297,6 +303,30 @@ extern CPUWriteMemoryFunc *io_mem_write[IO_MEM_NB_ENTRIES][4];
 extern CPUReadMemoryFunc *io_mem_read[IO_MEM_NB_ENTRIES][4];
 extern void *io_mem_opaque[IO_MEM_NB_ENTRIES];
 
+#if defined(__hppa__)
+
+typedef int spinlock_t[4];
+
+#define SPIN_LOCK_UNLOCKED { 1, 1, 1, 1 }
+
+static inline void resetlock (spinlock_t *p)
+{
+    (*p)[0] = (*p)[1] = (*p)[2] = (*p)[3] = 1;
+}
+
+#else
+
+typedef int spinlock_t;
+
+#define SPIN_LOCK_UNLOCKED 0
+
+static inline void resetlock (spinlock_t *p)
+{
+    *p = SPIN_LOCK_UNLOCKED;
+}
+
+#endif
+
 #if defined(__powerpc__)
 static inline int testandset (int *p)
 {
@@ -396,6 +426,33 @@ static inline int testandset (int *p)
                          : "cc","memory");
     return ret;
 }
+#elif defined(__hppa__)
+
+/* Because malloc only guarantees 8-byte alignment for malloc'd data,
+   and GCC only guarantees 8-byte alignment for stack locals, we can't
+   be assured of 16-byte alignment for atomic lock data even if we
+   specify "__attribute ((aligned(16)))" in the type declaration.  So,
+   we use a struct containing an array of four ints for the atomic lock
+   type and dynamically select the 16-byte aligned int from the array
+   for the semaphore.  */
+#define __PA_LDCW_ALIGNMENT 16
+static inline void *ldcw_align (void *p) {
+    unsigned long a = (unsigned long)p;
+    a = (a + __PA_LDCW_ALIGNMENT - 1) & ~(__PA_LDCW_ALIGNMENT - 1);
+    return (void *)a;
+}
+
+static inline int testandset (spinlock_t *p)
+{
+    unsigned int ret;
+    p = ldcw_align(p);
+    __asm__ __volatile__("ldcw 0(%1),%0"
+                         : "=r" (ret)
+                         : "r" (p)
+                         : "memory" );
+    return !ret;
+}
+
 #elif defined(__ia64)
 
 #include <ia64intrin.h>
@@ -428,10 +485,6 @@ static inline int testandset (int *p)
 #error unimplemented CPU support
 #endif
 
-typedef int spinlock_t;
-
-#define SPIN_LOCK_UNLOCKED 0
-
 #if defined(CONFIG_USER_ONLY)
 static inline void spin_lock(spinlock_t *lock)
 {
@@ -440,7 +493,7 @@ static inline void spin_lock(spinlock_t *lock)
 
 static inline void spin_unlock(spinlock_t *lock)
 {
-    *lock = 0;
+    resetlock(lock);
 }
 
 static inline int spin_trylock(spinlock_t *lock)
@@ -494,7 +547,7 @@ void tlb_fill(target_ulong addr, int is_write, int mmu_idx,
 #endif
 
 #if defined(CONFIG_USER_ONLY)
-static inline target_ulong get_phys_addr_code(CPUState *env, target_ulong addr)
+static inline target_ulong get_phys_addr_code(CPUState *env1, target_ulong addr)
 {
     return addr;
 }
@@ -502,25 +555,25 @@ static inline target_ulong get_phys_addr_code(CPUState *env, target_ulong addr)
 /* NOTE: this function can trigger an exception */
 /* NOTE2: the returned address is not exactly the physical address: it
    is the offset relative to phys_ram_base */
-static inline target_ulong get_phys_addr_code(CPUState *env, target_ulong addr)
+static inline target_ulong get_phys_addr_code(CPUState *env1, target_ulong addr)
 {
-    int mmu_idx, index, pd;
+    int mmu_idx, page_index, pd;
 
-    index = (addr >> TARGET_PAGE_BITS) & (CPU_TLB_SIZE - 1);
-    mmu_idx = cpu_mmu_index(env);
-    if (__builtin_expect(env->tlb_table[mmu_idx][index].addr_code !=
+    page_index = (addr >> TARGET_PAGE_BITS) & (CPU_TLB_SIZE - 1);
+    mmu_idx = cpu_mmu_index(env1);
+    if (__builtin_expect(env1->tlb_table[mmu_idx][page_index].addr_code !=
                          (addr & TARGET_PAGE_MASK), 0)) {
         ldub_code(addr);
     }
-    pd = env->tlb_table[mmu_idx][index].addr_code & ~TARGET_PAGE_MASK;
+    pd = env1->tlb_table[mmu_idx][page_index].addr_code & ~TARGET_PAGE_MASK;
     if (pd > IO_MEM_ROM && !(pd & IO_MEM_ROMD)) {
 #if defined(TARGET_SPARC) || defined(TARGET_MIPS)
         do_unassigned_access(addr, 0, 1, 0);
 #else
-        cpu_abort(env, "Trying to execute code outside RAM or ROM at 0x" TARGET_FMT_lx "\n", addr);
+        cpu_abort(env1, "Trying to execute code outside RAM or ROM at 0x" TARGET_FMT_lx "\n", addr);
 #endif
     }
-    return addr + env->tlb_table[mmu_idx][index].addend - (unsigned long)phys_ram_base;
+    return addr + env1->tlb_table[mmu_idx][page_index].addend - (unsigned long)phys_ram_base;
 }
 #endif
 

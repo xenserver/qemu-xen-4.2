@@ -957,8 +957,18 @@ static void free_queue(VncState *vs)
 static int vnc_client_io_error(VncState *vs, int ret, int last_errno)
 {
     if (ret == 0 || ret == -1) {
-	if (ret == -1 && (last_errno == EINTR || last_errno == EAGAIN))
-	    return 0;
+        if (ret == -1) {
+            switch (last_errno) {
+                case EINTR:
+                case EAGAIN:
+#ifdef _WIN32
+                case WSAEWOULDBLOCK:
+#endif
+                    return 0;
+                default:
+                    break;
+            }
+        }
 
 	VNC_DEBUG("Closing down client sock %d %d\n", ret, ret < 0 ? last_errno : 0);
 	qemu_set_fd_handler2(vs->csock, NULL, NULL, NULL, NULL);
@@ -2616,12 +2626,12 @@ int vnc_display_open(DisplayState *ds, const char *display, int find_unused)
     struct sockaddr_in iaddr;
 #ifndef NO_UNIX_SOCKETS
     struct sockaddr_un uaddr;
+    const char *p;
 #endif
 #ifndef CONFIG_STUBDOM
     int reuse_addr, ret;
 #endif
     socklen_t addrlen;
-    const char *p;
     VncState *vs = ds ? (VncState *)ds->opaque : vnc_state;
     const char *options;
     int password = 0;

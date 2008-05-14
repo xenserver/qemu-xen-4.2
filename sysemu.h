@@ -73,7 +73,6 @@ int tap_win32_init(VLANState *vlan, const char *ifname);
 /* SLIRP */
 void do_info_slirp(void);
 
-extern int ram_size;
 extern int bios_size;
 extern int cirrus_vga_enabled;
 extern int vmsvga_enabled;
@@ -108,8 +107,6 @@ extern const char *prom_envs[MAX_PROM_ENVS];
 extern unsigned int nb_prom_envs;
 #endif
 
-/* XXX: make it dynamic */
-#define MAX_BIOS_SIZE (4 * 1024 * 1024)
 #if defined (TARGET_PPC)
 #define BIOS_SIZE (1024 * 1024)
 #elif defined (TARGET_SPARC64)
@@ -133,8 +130,8 @@ typedef struct DriveInfo {
 #define MAX_SCSI_DEVS	7
 #define MAX_DRIVES 32
 
-int nb_drives;
-DriveInfo drives_table[MAX_DRIVES+1];
+extern int nb_drives;
+extern DriveInfo drives_table[MAX_DRIVES+1];
 
 extern int drive_get_index(BlockInterfaceType type, int bus, int unit);
 extern int drive_get_max_bus(BlockInterfaceType type);
@@ -158,12 +155,12 @@ int load_image(const char *filename, uint8_t *addr); /* deprecated */
 int load_image_targphys(const char *filename, target_phys_addr_t, int max_sz);
 int load_elf(const char *filename, int64_t virt_to_phys_addend,
              uint64_t *pentry, uint64_t *lowaddr, uint64_t *highaddr);
-int load_aout(const char *filename, uint8_t *addr);
+int load_aout(const char *filename, target_phys_addr_t addr, int max_sz);
 int load_uboot(const char *filename, target_ulong *ep, int *is_linux);
 
 int fread_targphys(target_phys_addr_t dst_addr, size_t nbytes, FILE *f);
 int fread_targphys_ok(target_phys_addr_t dst_addr, size_t nbytes, FILE *f);
-
+int read_targphys(int fd, target_phys_addr_t dst_addr, size_t nbytes);
 #endif
 
 #ifdef HAS_AUDIO

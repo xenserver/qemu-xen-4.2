@@ -118,6 +118,13 @@
 #define elf_check_arch(x) ((x) == EM_68K)
 #define ELF_USES_RELOCA
 
+#elif defined(HOST_HPPA)
+
+#define ELF_CLASS   ELFCLASS32
+#define ELF_ARCH    EM_PARISC
+#define elf_check_arch(x) ((x) == EM_PARISC)
+#define ELF_USES_RELOCA
+
 #elif defined(HOST_MIPS)
 
 #define ELF_CLASS	ELFCLASS32
@@ -1224,7 +1231,7 @@ int get_reloc_expr(char *name, int name_size, const char *sym_name)
         snprintf(name, name_size, "param%s", p);
         return 1;
     } else {
-#ifdef HOST_SPARC
+#if defined(HOST_SPARC) || defined(HOST_HPPA)
         if (sym_name[0] == '.')
             snprintf(name, name_size,
                      "(long)(&__dot_%s)",
@@ -1662,6 +1669,43 @@ void gen_code(const char *name, host_ulong offset, host_ulong size,
             error("rts expected at the end of %s", name);
         copy_size = p - p_start;
     }
+#elif defined(HOST_HPPA)
+    {
+        uint8_t *p;
+        p = p_start;
+        while (p < p_end) {
+            uint32_t insn = get32((uint32_t *)p);
+            if (insn == 0x6bc23fd9 ||                /* stw rp,-14(sp) */
+                insn == 0x08030241 ||                /* copy r3,r1 */
+                insn == 0x081e0243 ||                /* copy sp,r3 */
+                (insn & 0xffffc000) == 0x37de0000 || /* ldo x(sp),sp */
+                (insn & 0xffffc000) == 0x6fc10000)   /* stwm r1,x(sp) */
+                p += 4;
+            else
+                break;
+        }
+        start_offset += p - p_start;
+        p_start = p;
+        p = p_end - 4;
+
+        while (p > p_start) {
+            uint32_t insn = get32((uint32_t *)p);
+            if ((insn & 0xffffc000) == 0x347e0000 || /* ldo x(r3),sp */
+                (insn & 0xffe0c000) == 0x4fc00000 || /* ldwm x(sp),rx */
+                (insn & 0xffffc000) == 0x37de0000 || /* ldo x(sp),sp */
+                insn == 0x48623fd9 ||                /* ldw -14(r3),rp */
+                insn == 0xe840c000 ||                /* bv r0(rp) */
+                insn == 0xe840c002)                  /* bv,n r0(rp) */
+                p -= 4;
+            else
+                break;
+        }
+        p += 4;
+        if (p <= p_start)
+            error("empty code for %s", name);
+
+        copy_size = p - p_start;
+    }
 #elif defined(HOST_MIPS) || defined(HOST_MIPS64)
     {
 #define INSN_RETURN     0x03e00008
@@ -1716,7 +1760,36 @@ void gen_code(const char *name, host_ulong offset, host_ulong size,
     }
 
     if (gen_switch == 2) {
-        fprintf(outfile, "DEF(%s, %d, %d)\n", name + 3, nb_args, copy_size);
+
+#if defined(HOST_HPPA)
+	int op_size = copy_size;
+	int has_stubs = 0;
+	char relname[256];
+	int type, is_label;
+
+	for (i = 0, rel = relocs; i < nb_relocs; i++, rel++) {
+	    if (rel->r_offset >= start_offset &&
+		rel->r_offset < start_offset + copy_size) {
+		sym_name = get_rel_sym_name(rel);
+		sym_name = strtab + symtab[ELF32_R_SYM(rel->r_info)].st_name;
+		is_label = get_reloc_expr(relname, sizeof(relname), sym_name);
+		type = ELF32_R_TYPE(rel->r_info);
+
+		if (!is_label && type == R_PARISC_PCREL17F) {
+		    has_stubs = 1;
+		    op_size += 8; /* ldil and be,n instructions */
+		}
+	    }
+	}
+
+	if (has_stubs)
+	    op_size += 4; /* b,l,n instruction, to skip past the stubs */
+
+	fprintf(outfile, "DEF(%s, %d, %d)\n", name + 3, nb_args, op_size);
+#else
+	fprintf(outfile, "DEF(%s, %d, %d)\n", name + 3, nb_args, copy_size);
+#endif
+
     } else if (gen_switch == 1) {
 
         /* output C code */
@@ -1747,7 +1820,7 @@ void gen_code(const char *name, host_ulong offset, host_ulong size,
                     !strstart(sym_name, "__op_param", NULL) &&
                     !strstart(sym_name, "__op_jmp", NULL) &&
                     !strstart(sym_name, "__op_gen_label", NULL)) {
-#if defined(HOST_SPARC)
+#if defined(HOST_SPARC) || defined(HOST_HPPA)
 		    if (sym_name[0] == '.') {
 			fprintf(outfile,
 				"extern char __dot_%s __asm__(\"%s\");\n",
@@ -1775,8 +1848,13 @@ void gen_code(const char *name, host_ulong offset, host_ulong size,
             }
         }
 
+#ifdef __hppa__
+        fprintf(outfile, "    memcpy(gen_code_ptr, (void *)((char *)__canonicalize_funcptr_for_compare(%s)+%d), %d);\n",
+					name, (int)(start_offset - offset), copy_size);
+#else
         fprintf(outfile, "    memcpy(gen_code_ptr, (void *)((char *)&%s+%d), %d);\n",
 					name, (int)(start_offset - offset), copy_size);
+#endif
 
         /* emit code offset information */
         {
@@ -2578,6 +2656,82 @@ void gen_code(const char *name, host_ulong offset, host_ulong size,
                         break;
                     default:
                         error("unsupported m68k relocation (%d)", type);
+                    }
+                }
+                }
+            }
+#elif defined(HOST_HPPA)
+            {
+                char relname[256];
+                int type, is_label;
+                int addend;
+                int reloc_offset;
+                for (i = 0, rel = relocs; i < nb_relocs; i++, rel++) {
+                if (rel->r_offset >= start_offset &&
+                    rel->r_offset < start_offset + copy_size) {
+                    sym_name = get_rel_sym_name(rel);
+                    sym_name = strtab + symtab[ELF32_R_SYM(rel->r_info)].st_name;
+                    is_label = get_reloc_expr(relname, sizeof(relname), sym_name);
+                    type = ELF32_R_TYPE(rel->r_info);
+                    addend = rel->r_addend;
+                    reloc_offset = rel->r_offset - start_offset;
+
+                    if (is_label) {
+                        switch (type) {
+                        case R_PARISC_PCREL17F:
+                            fprintf(outfile,
+"    tcg_out_reloc(s, gen_code_ptr + %d, %d, %s, %d);\n",
+                                    reloc_offset, type, relname, addend);
+                            break;
+                        default:
+                            error("unsupported hppa label relocation (%d)", type);
+                        }
+                    } else {
+                        switch (type) {
+                        case R_PARISC_DIR21L:
+                            fprintf(outfile,
+"    hppa_patch21l((uint32_t *)(gen_code_ptr + %d), %s, %d);\n",
+                                    reloc_offset, relname, addend);
+                            break;
+                        case R_PARISC_DIR14R:
+                            fprintf(outfile,
+"    hppa_patch14r((uint32_t *)(gen_code_ptr + %d), %s, %d);\n",
+                                    reloc_offset, relname, addend);
+                            break;
+                        case R_PARISC_PCREL17F:
+                            if (strstart(sym_name, "__op_gen_label", NULL)) {
+                                fprintf(outfile,
+"    hppa_patch17f((uint32_t *)(gen_code_ptr + %d), %s, %d);\n",
+                                        reloc_offset, relname, addend);
+                            } else {
+                                fprintf(outfile,
+"    HPPA_RECORD_BRANCH(hppa_stubs, (uint32_t *)(gen_code_ptr + %d), %s);\n",
+                                        reloc_offset, relname);
+                            }
+                            break;
+                        case R_PARISC_DPREL21L:
+                            if (strstart(sym_name, "__op_param", &p))
+                                fprintf(outfile,
+"    hppa_load_imm21l((uint32_t *)(gen_code_ptr + %d), param%s, %d);\n",
+                                        reloc_offset, p, addend);
+                            else
+                                fprintf(outfile,
+"    hppa_patch21l_dprel((uint32_t *)(gen_code_ptr + %d), %s, %d);\n",
+                                        reloc_offset, relname, addend);
+                            break;
+                        case R_PARISC_DPREL14R:
+                            if (strstart(sym_name, "__op_param", &p))
+                                fprintf(outfile,
+"    hppa_load_imm14r((uint32_t *)(gen_code_ptr + %d), param%s, %d);\n",
+                                        reloc_offset, p, addend);
+                            else
+                                fprintf(outfile,
+"    hppa_patch14r_dprel((uint32_t *)(gen_code_ptr + %d), %s, %d);\n",
+                                        reloc_offset, relname, addend);
+                            break;
+                        default:
+                            error("unsupported hppa relocation (%d)", type);
+                        }
                     }
                 }
                 }

@@ -7,10 +7,11 @@ struct cris_mmu_result_t
 {
 	uint32_t phy;
 	uint32_t pfn;
+	int prot;
 	int bf_vec;
 };
 
-target_ulong cris_mmu_tlb_latest_update(CPUState *env, uint32_t new_lo);
+void cris_mmu_flush_pid(CPUState *env, uint32_t pid);
 int cris_mmu_translate(struct cris_mmu_result_t *res,
 		       CPUState *env, uint32_t vaddr,
 		       int rw, int mmu_idx);

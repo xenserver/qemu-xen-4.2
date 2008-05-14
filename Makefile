@@ -51,11 +51,17 @@ OBJS+=block.o
 
 OBJS+=irq.o
 OBJS+=i2c.o smbus.o smbus_eeprom.o max7310.o max111x.o wm8750.o
-OBJS+=ssd0303.o ssd0323.o ads7846.o stellaris_input.o
+OBJS+=ssd0303.o ssd0323.o ads7846.o stellaris_input.o twl92230.o
+OBJS+=tmp105.o lm832x.o
 OBJS+=scsi-disk.o cdrom.o
 OBJS+=scsi-generic.o
 OBJS+=usb.o usb-hub.o usb-linux.o usb-hid.o usb-msd.o usb-wacom.o usb-serial.o
 OBJS+=sd.o ssi-sd.o
+
+ifdef CONFIG_BRLAPI
+OBJS+= baum.o
+LIBS+=-lbrlapi
+endif
 
 ifdef CONFIG_WIN32
 OBJS+=tap-win32.o
@@ -126,7 +132,7 @@ vnc.o: vnc.c keymaps.c sdl_keysym.h vnchextile.h d3des.c d3des.h
 	$(CC) $(CFLAGS) $(CPPFLAGS) $(CONFIG_VNC_TLS_CFLAGS) -c -o $@ $<
 
 curses.o: curses.c keymaps.c curses_keys.h
-	$(CC) $(CFLAGS) $(CPPFLAGS) $(BASE_CFLAGS) -c -o $@ $<
+	$(CC) $(CFLAGS) $(CPPFLAGS) -c -o $@ $<
 
 audio/sdlaudio.o: audio/sdlaudio.c
 	$(CC) $(CFLAGS) $(CPPFLAGS) $(SDL_CFLAGS) -c -o $@ $<
@@ -194,7 +200,7 @@ ifneq ($(TOOLS),)
 endif
 	mkdir -p "$(DESTDIR)$(datadir)"
 	set -e; for x in bios.bin vgabios.bin vgabios-cirrus.bin ppc_rom.bin \
-		video.x openbios-sparc32 pxe-ne2k_pci.bin \
+		video.x openbios-sparc32 openbios-sparc64 pxe-ne2k_pci.bin \
 		pxe-rtl8139.bin pxe-pcnet.bin; do \
 		$(INSTALL) -m 644 $(SRC_PATH)/pc-bios/$$x "$(DESTDIR)$(datadir)"; \
 	done
@@ -251,7 +257,7 @@ FILE = qemu-$(VERSION)
 tar:
 	rm -rf /tmp/$(FILE)
 	cp -r . /tmp/$(FILE)
-	cd /tmp && tar zcvf ~/$(FILE).tar.gz $(FILE) --exclude CVS
+	cd /tmp && tar zcvf ~/$(FILE).tar.gz $(FILE) --exclude CVS --exclude .git --exclude .svn
 	rm -rf /tmp/$(FILE)
 
 # generate a binary distribution
@@ -296,6 +302,7 @@ tarbin:
 	$(datadir)/ppc_rom.bin \
 	$(datadir)/video.x \
 	$(datadir)/openbios-sparc32 \
+	$(datadir)/openbios-sparc64 \
         $(datadir)/pxe-ne2k_pci.bin \
 	$(datadir)/pxe-rtl8139.bin \
         $(datadir)/pxe-pcnet.bin \

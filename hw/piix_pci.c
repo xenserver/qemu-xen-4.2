@@ -64,7 +64,7 @@ static int pci_slot_get_pirq(PCIDevice *pci_dev, int irq_num)
 #endif /* !CONFIG_DM */
 }
 
-static uint32_t isa_page_descs[384 / 4];
+static target_phys_addr_t isa_page_descs[384 / 4];
 static uint8_t smm_enabled;
 static int pci_irq_levels[4];
 
@@ -268,6 +268,9 @@ static void piix3_reset(PCIDevice *d)
     pci_conf[0x4e] = 0x03;
     pci_conf[0x4f] = 0x00;
     pci_conf[0x60] = 0x80;
+    pci_conf[0x61] = 0x80;
+    pci_conf[0x62] = 0x80;
+    pci_conf[0x63] = 0x80;
     pci_conf[0x69] = 0x02;
     pci_conf[0x70] = 0x80;
     pci_conf[0x76] = 0x0c;

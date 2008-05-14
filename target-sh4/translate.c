@@ -32,6 +32,7 @@
 #include "exec-all.h"
 #include "disas.h"
 #include "tcg-op.h"
+#include "qemu-common.h"
 
 typedef struct DisasContext {
     struct TranslationBlock *tb;
@@ -255,7 +256,11 @@ void _decode_opc(DisasContext * ctx)
 	gen_op_clrt();
 	return;
     case 0x0038:		/* ldtlb */
+#if defined(CONFIG_USER_ONLY)
 	assert(0);		/* XXXXX */
+#else
+	gen_op_ldtlb();
+#endif
 	return;
     case 0x002b:		/* rte */
 	CHECK_NOT_DELAY_SLOT gen_op_rte();
@@ -1301,4 +1306,11 @@ int gen_intermediate_code(CPUState * env, struct TranslationBlock *tb)
 int gen_intermediate_code_pc(CPUState * env, struct TranslationBlock *tb)
 {
     return gen_intermediate_code_internal(env, tb, 1);
+}
+
+void gen_pc_load(CPUState *env, TranslationBlock *tb,
+                unsigned long searched_pc, int pc_pos, void *puc)
+{
+    env->pc = gen_opc_pc[pc_pos];
+    env->flags = gen_opc_hflags[pc_pos];
 }

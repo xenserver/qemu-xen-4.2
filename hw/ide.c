@@ -204,13 +204,14 @@
 
 #ifdef CONFIG_STUBDOM
 #include <xen/io/blkif.h>
-#define IDE_DMA_BUF_SIZE (BLKIF_MAX_SEGMENTS_PER_REQUEST * TARGET_PAGE_SIZE)
+#define IDE_DMA_BUF_SECTORS \
+ ((BLKIF_MAX_SEGMENTS_PER_REQUEST * TARGET_PAGE_SIZE) / 512)
 #else
-#define IDE_DMA_BUF_SIZE 131072
+#define IDE_DMA_BUF_SECTORS 256
 #endif
 
-#if (IDE_DMA_BUF_SIZE < MAX_MULT_SECTORS * 512)
-#error "IDE_DMA_BUF_SIZE must be bigger or equal to MAX_MULT_SECTORS * 512"
+#if (IDE_DMA_BUF_SECTORS < MAX_MULT_SECTORS)
+#error "IDE_DMA_BUF_SECTORS must be bigger or equal to MAX_MULT_SECTORS"
 #endif
 
 /* ATAPI defines */
@@ -940,8 +941,8 @@ static void ide_read_dma_cb(void *opaque, int ret)
 
     /* launch next transfer */
     n = s->nsector;
-    if (n > IDE_DMA_BUF_SIZE / 512)
-        n = IDE_DMA_BUF_SIZE / 512;
+    if (n > IDE_DMA_BUF_SECTORS)
+        n = IDE_DMA_BUF_SECTORS;
     s->io_buffer_index = 0;
     s->io_buffer_size = n * 512;
 #ifdef DEBUG_AIO
@@ -1067,8 +1068,8 @@ static void ide_write_dma_cb(void *opaque, int ret)
 
     /* launch next transfer */
     n = s->nsector;
-    if (n > IDE_DMA_BUF_SIZE / 512)
-        n = IDE_DMA_BUF_SIZE / 512;
+    if (n > IDE_DMA_BUF_SECTORS)
+        n = IDE_DMA_BUF_SECTORS;
     s->io_buffer_index = 0;
     s->io_buffer_size = n * 512;
 
@@ -1393,8 +1394,8 @@ static void ide_atapi_cmd_read_dma_cb(void *opaque, int ret)
         data_offset = 16;
     } else {
         n = s->packet_transfer_size >> 11;
-        if (n > (IDE_DMA_BUF_SIZE / 2048))
-            n = (IDE_DMA_BUF_SIZE / 2048);
+        if (n > (IDE_DMA_BUF_SECTORS / 4))
+            n = (IDE_DMA_BUF_SECTORS / 4);
         s->io_buffer_size = n * 2048;
         data_offset = 0;
     }
@@ -2635,7 +2636,7 @@ static void ide_init2(IDEState *ide_state,
 
     for(i = 0; i < 2; i++) {
         s = ide_state + i;
-        s->io_buffer = qemu_memalign(512, IDE_DMA_BUF_SIZE + 4);
+        s->io_buffer = qemu_memalign(512, IDE_DMA_BUF_SECTORS*512 + 4);
         if (i == 0)
             s->bs = hd0;
         else
@@ -2947,6 +2948,52 @@ static void bmdma_writeb(void *opaque, uint32_t addr, uint32_t val)
     }
 }
 
+static uint32_t bmdma_addr_readb(void *opaque, uint32_t addr)
+{
+    BMDMAState *bm = opaque;
+    uint32_t val;
+    val = (bm->addr >> ((addr & 3) * 8)) & 0xff;
+#ifdef DEBUG_IDE
+    printf("%s: 0x%08x\n", __func__, val);
+#endif
+    return val;
+}
+
+static void bmdma_addr_writeb(void *opaque, uint32_t addr, uint32_t val)
+{
+    BMDMAState *bm = opaque;
+    int shift = (addr & 3) * 8;
+#ifdef DEBUG_IDE
+    printf("%s: 0x%08x\n", __func__, val);
+#endif
+    bm->addr &= ~(0xFF << shift);
+    bm->addr |= ((val & 0xFF) << shift) & ~3;
+    bm->cur_addr = bm->addr;
+}
+
+static uint32_t bmdma_addr_readw(void *opaque, uint32_t addr)
+{
+    BMDMAState *bm = opaque;
+    uint32_t val;
+    val = (bm->addr >> ((addr & 3) * 8)) & 0xffff;
+#ifdef DEBUG_IDE
+    printf("%s: 0x%08x\n", __func__, val);
+#endif
+    return val;
+}
+
+static void bmdma_addr_writew(void *opaque, uint32_t addr, uint32_t val)
+{
+    BMDMAState *bm = opaque;
+    int shift = (addr & 3) * 8;
+#ifdef DEBUG_IDE
+    printf("%s: 0x%08x\n", __func__, val);
+#endif
+    bm->addr &= ~(0xFFFF << shift);
+    bm->addr |= ((val & 0xFFFF) << shift) & ~3;
+    bm->cur_addr = bm->addr;
+}
+
 static uint32_t bmdma_addr_readl(void *opaque, uint32_t addr)
 {
     BMDMAState *bm = opaque;
@@ -2985,6 +3032,10 @@ static void bmdma_map(PCIDevice *pci_dev, int region_num,
         register_ioport_write(addr + 1, 3, 1, bmdma_writeb, bm);
         register_ioport_read(addr, 4, 1, bmdma_readb, bm);
 
+        register_ioport_write(addr + 4, 4, 1, bmdma_addr_writeb, bm);
+        register_ioport_read(addr + 4, 4, 1, bmdma_addr_readb, bm);
+        register_ioport_write(addr + 4, 4, 2, bmdma_addr_writew, bm);
+        register_ioport_read(addr + 4, 4, 2, bmdma_addr_readw, bm);
         register_ioport_write(addr + 4, 4, 4, bmdma_addr_writel, bm);
         register_ioport_read(addr + 4, 4, 4, bmdma_addr_readl, bm);
         addr += 8;

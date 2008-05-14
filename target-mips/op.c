@@ -48,104 +48,6 @@
         func(arg0, arg1, arg2, arg3)
 #endif
 
-#define REG 1
-#include "op_template.c"
-#undef REG
-#define REG 2
-#include "op_template.c"
-#undef REG
-#define REG 3
-#include "op_template.c"
-#undef REG
-#define REG 4
-#include "op_template.c"
-#undef REG
-#define REG 5
-#include "op_template.c"
-#undef REG
-#define REG 6
-#include "op_template.c"
-#undef REG
-#define REG 7
-#include "op_template.c"
-#undef REG
-#define REG 8
-#include "op_template.c"
-#undef REG
-#define REG 9
-#include "op_template.c"
-#undef REG
-#define REG 10
-#include "op_template.c"
-#undef REG
-#define REG 11
-#include "op_template.c"
-#undef REG
-#define REG 12
-#include "op_template.c"
-#undef REG
-#define REG 13
-#include "op_template.c"
-#undef REG
-#define REG 14
-#include "op_template.c"
-#undef REG
-#define REG 15
-#include "op_template.c"
-#undef REG
-#define REG 16
-#include "op_template.c"
-#undef REG
-#define REG 17
-#include "op_template.c"
-#undef REG
-#define REG 18
-#include "op_template.c"
-#undef REG
-#define REG 19
-#include "op_template.c"
-#undef REG
-#define REG 20
-#include "op_template.c"
-#undef REG
-#define REG 21
-#include "op_template.c"
-#undef REG
-#define REG 22
-#include "op_template.c"
-#undef REG
-#define REG 23
-#include "op_template.c"
-#undef REG
-#define REG 24
-#include "op_template.c"
-#undef REG
-#define REG 25
-#include "op_template.c"
-#undef REG
-#define REG 26
-#include "op_template.c"
-#undef REG
-#define REG 27
-#include "op_template.c"
-#undef REG
-#define REG 28
-#include "op_template.c"
-#undef REG
-#define REG 29
-#include "op_template.c"
-#undef REG
-#define REG 30
-#include "op_template.c"
-#undef REG
-#define REG 31
-#include "op_template.c"
-#undef REG
-
-#define TN
-#include "op_template.c"
-#undef TN
-
 #define FREG 0
 #include "fop_template.c"
 #undef FREG
@@ -246,36 +148,6 @@
 #define FTN
 #include "fop_template.c"
 #undef FTN
-
-void op_dup_T0 (void)
-{
-    T2 = T0;
-    FORCE_RET();
-}
-
-void op_load_HI (void)
-{
-    T0 = env->HI[env->current_tc][PARAM1];
-    FORCE_RET();
-}
-
-void op_store_HI (void)
-{
-    env->HI[env->current_tc][PARAM1] = T0;
-    FORCE_RET();
-}
-
-void op_load_LO (void)
-{
-    T0 = env->LO[env->current_tc][PARAM1];
-    FORCE_RET();
-}
-
-void op_store_LO (void)
-{
-    env->LO[env->current_tc][PARAM1] = T0;
-    FORCE_RET();
-}
 
 /* Load and store */
 #define MEMSUFFIX _raw
@@ -1096,19 +968,13 @@ OP_COND(ltz, (target_long)T0 < 0);
 /* Branch to register */
 void op_save_breg_target (void)
 {
-    env->btarget = T2;
-    FORCE_RET();
-}
-
-void op_restore_breg_target (void)
-{
-    T2 = env->btarget;
+    env->btarget = T1;
     FORCE_RET();
 }
 
 void op_breg (void)
 {
-    env->PC[env->current_tc] = T2;
+    env->PC[env->current_tc] = env->btarget;
     FORCE_RET();
 }
 
@@ -1129,25 +995,13 @@ void op_save_btarget64 (void)
 /* Conditional branch */
 void op_set_bcond (void)
 {
-    T2 = T0;
+    env->bcond = T0;
     FORCE_RET();
 }
 
-void op_save_bcond (void)
+void op_jnz_bcond (void)
 {
-    env->bcond = T2;
-    FORCE_RET();
-}
-
-void op_restore_bcond (void)
-{
-    T2 = env->bcond;
-    FORCE_RET();
-}
-
-void op_jnz_T2 (void)
-{
-    if (T2)
+    if (env->bcond)
         GOTO_LABEL_PARAM(1);
     FORCE_RET();
 }
@@ -2300,7 +2154,7 @@ void op_mftgpr(void)
 {
     int other_tc = env->CP0_VPEControl & (0xff << CP0VPECo_TargTC);
 
-    T0 = env->gpr[PARAM1][other_tc];
+    T0 = env->gpr[other_tc][PARAM1];
     FORCE_RET();
 }
 
@@ -2308,7 +2162,7 @@ void op_mftlo(void)
 {
     int other_tc = env->CP0_VPEControl & (0xff << CP0VPECo_TargTC);
 
-    T0 = env->LO[PARAM1][other_tc];
+    T0 = env->LO[other_tc][PARAM1];
     FORCE_RET();
 }
 
@@ -2316,7 +2170,7 @@ void op_mfthi(void)
 {
     int other_tc = env->CP0_VPEControl & (0xff << CP0VPECo_TargTC);
 
-    T0 = env->HI[PARAM1][other_tc];
+    T0 = env->HI[other_tc][PARAM1];
     FORCE_RET();
 }
 
@@ -2324,7 +2178,7 @@ void op_mftacx(void)
 {
     int other_tc = env->CP0_VPEControl & (0xff << CP0VPECo_TargTC);
 
-    T0 = env->ACX[PARAM1][other_tc];
+    T0 = env->ACX[other_tc][PARAM1];
     FORCE_RET();
 }
 
@@ -2340,7 +2194,7 @@ void op_mttgpr(void)
 {
     int other_tc = env->CP0_VPEControl & (0xff << CP0VPECo_TargTC);
 
-    T0 = env->gpr[PARAM1][other_tc];
+    T0 = env->gpr[other_tc][PARAM1];
     FORCE_RET();
 }
 
@@ -2348,7 +2202,7 @@ void op_mttlo(void)
 {
     int other_tc = env->CP0_VPEControl & (0xff << CP0VPECo_TargTC);
 
-    T0 = env->LO[PARAM1][other_tc];
+    T0 = env->LO[other_tc][PARAM1];
     FORCE_RET();
 }
 
@@ -2356,7 +2210,7 @@ void op_mtthi(void)
 {
     int other_tc = env->CP0_VPEControl & (0xff << CP0VPECo_TargTC);
 
-    T0 = env->HI[PARAM1][other_tc];
+    T0 = env->HI[other_tc][PARAM1];
     FORCE_RET();
 }
 
@@ -2364,7 +2218,7 @@ void op_mttacx(void)
 {
     int other_tc = env->CP0_VPEControl & (0xff << CP0VPECo_TargTC);
 
-    T0 = env->ACX[PARAM1][other_tc];
+    T0 = env->ACX[other_tc][PARAM1];
     FORCE_RET();
 }
 
@@ -3113,12 +2967,6 @@ void op_trap (void)
 void op_debug (void)
 {
     CALL_FROM_TB1(do_raise_exception, EXCP_DEBUG);
-    FORCE_RET();
-}
-
-void op_set_lladdr (void)
-{
-    env->CP0_LLAddr = T2;
     FORCE_RET();
 }
 

@@ -97,6 +97,14 @@ time_t mktimegm(struct tm *tm);
    * char, which is safe for the ctype macros directly.  Or test separately.
    * Obviously don't use this for floating point things like isnan! */
 
+void *qemu_malloc(size_t size);
+void *qemu_mallocz(size_t size);
+void qemu_free(void *ptr);
+char *qemu_strdup(const char *str);
+
+void *get_mmap_addr(unsigned long size);
+
+
 /* Error handling.  */
 
 void hw_error(const char *fmt, ...)
