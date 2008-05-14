@@ -1896,6 +1896,7 @@ static int pcnet_load(QEMUFile *f, void *opaque, int version_id)
 
 static void pcnet_common_init(PCNetState *d, NICInfo *nd, const char *info_str)
 {
+    int instance;
     d->poll_timer = qemu_new_timer(vm_clock, pcnet_poll_timer, d);
 
     d->nd = nd;
@@ -1916,7 +1917,8 @@ static void pcnet_common_init(PCNetState *d, NICInfo *nd, const char *info_str)
         d->vc = NULL;
     }
     pcnet_h_reset(d);
-    register_savevm("pcnet", 0, 2, pcnet_save, pcnet_load, d);
+    instance = pci_bus_num(d->dev.bus) << 8 | d->dev.devfn;
+    register_savevm("pcnet", instance, 2, pcnet_save, pcnet_load, d);
 }
 
 /* PCI interface */
