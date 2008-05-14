@@ -341,6 +341,8 @@ static void channel_run (int ncont, int ichan)
 #endif
 
     r = dma_controllers[ncont].regs + ichan;
+    if (r->transfer_handler == NULL)
+	return;
     n = r->transfer_handler (r->opaque, ichan + (ncont << 2),
                              r->now[COUNT], (r->base[COUNT] + 1) << ncont);
     r->now[COUNT] = n;
@@ -437,6 +439,13 @@ static void dma_reset(void *opaque)
 {
     struct dma_cont *d = opaque;
     write_cont (d, (0x0d << d->dshift), 0);
+}
+
+static int dma_phony_handler (void *opaque, int nchan, int dma_pos, int dma_len)
+{
+    dolog ("unregistered DMA channel used nchan=%d dma_pos=%d dma_len=%d\n",
+           nchan, dma_pos, dma_len);
+    return dma_pos;
 }
 
 static int dma_phony_handler (void *opaque, int nchan, int dma_pos, int dma_len)
