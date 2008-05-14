@@ -484,6 +484,176 @@ typedef struct PCIIDEState {
     int type; /* see IDE_TYPE_xxx */
 } PCIIDEState;
 
+
+#if defined(__ia64__)
+#include <xen/hvm/ioreq.h>
+
+struct buffered_piopage *buffered_pio_page;
+
+static inline struct pio_buffer *
+piobuf_by_addr(uint32_t addr)
+{
+    if (addr == 0x1F0)
+        return &buffered_pio_page->pio[PIO_BUFFER_IDE_PRIMARY];
+    if (addr == 0x170)
+        return &buffered_pio_page->pio[PIO_BUFFER_IDE_SECONDARY];
+    return NULL;
+}
+
+static void
+buffered_pio_init(void)
+{
+    struct pio_buffer *p1, *p2;
+    uint32_t off1, off2;
+
+    if (!buffered_pio_page)
+        return;
+
+    p1 = &buffered_pio_page->pio[PIO_BUFFER_IDE_PRIMARY];
+    p2 = &buffered_pio_page->pio[PIO_BUFFER_IDE_SECONDARY];
+    off1 = offsetof(struct buffered_piopage, buffer);
+    off2 = (off1 + TARGET_PAGE_SIZE)/2;
+
+    p1->buf_size = off2 - off1;
+    p1->page_offset = off1;
+
+    p2->buf_size = TARGET_PAGE_SIZE - off2;
+    p2->page_offset = off2;
+}
+
+static inline void
+__buffered_pio_flush(struct pio_buffer *piobuf, IDEState *s, uint32_t pointer)
+{
+    uint8_t *buf = (uint8_t *)buffered_pio_page + piobuf->page_offset;
+    memcpy(s->data_ptr, buf, pointer);
+    s->data_ptr += pointer;
+}
+
+static inline void
+buffered_pio_flush(struct pio_buffer *piobuf)
+{
+    IDEState *s = piobuf->opaque;
+    uint32_t pointer = piobuf->pointer;
+
+    if (s != NULL && pointer > 0)
+        __buffered_pio_flush(piobuf, s, pointer);
+}
+
+static inline void
+buffered_pio_reset(IDEState *s)
+{
+    struct pio_buffer *piobuf;
+
+    if ((unsigned)s->drive_serial - 1 < 2)      /* 1,2 */
+        piobuf = &buffered_pio_page->pio[PIO_BUFFER_IDE_PRIMARY];
+    else if ((unsigned)s->drive_serial - 3 < 2) /* 3,4 */
+        piobuf = &buffered_pio_page->pio[PIO_BUFFER_IDE_SECONDARY];
+    else
+        return;
+    buffered_pio_flush(piobuf);
+    piobuf->pointer = 0;
+    piobuf->data_end = 0;
+    piobuf->opaque = NULL;
+}
+
+static inline void
+buffered_pio_write(IDEState *s, uint32_t addr, int size)
+{
+    struct pio_buffer *piobuf = piobuf_by_addr(addr);
+    int data_end;
+
+    if (!piobuf)
+        return;
+    buffered_pio_flush(piobuf);
+    data_end = s->data_end - s->data_ptr - size;
+    if (data_end <= 0)
+        data_end = 0;
+    else if (data_end > piobuf->buf_size)
+        data_end = piobuf->buf_size;
+    piobuf->pointer = 0;
+    piobuf->data_end = data_end;
+    piobuf->opaque = s;
+}
+
+static inline void
+buffered_pio_read(IDEState *s, uint32_t addr, int size)
+{
+    struct pio_buffer *piobuf = piobuf_by_addr(addr);
+    int data_end;
+
+    if (!piobuf)
+        return;
+    s->data_ptr += piobuf->pointer;
+    data_end = s->data_end - s->data_ptr - size;
+    if (data_end <= 0) {
+        data_end = 0;
+    } else {
+	uint8_t *buf = (uint8_t *)buffered_pio_page + piobuf->page_offset;
+        if (data_end > piobuf->buf_size)
+            data_end = piobuf->buf_size;
+        memcpy(buf, s->data_ptr + size, data_end);
+    }
+    piobuf->pointer = 0;
+    piobuf->data_end = data_end;
+    piobuf->opaque = NULL;
+}
+
+/*
+ * buffered pio reads are undone. It results in normal pio when the domain
+ * is restored.
+ * buffered pio writes are handled before saving domain.
+ * However currently pci_ide_save/load() just discards a pending transfer. XXX
+ */
+static void
+__handle_buffered_pio(struct pio_buffer *piobuf)
+{
+    IDEState *s = piobuf->opaque;
+    uint32_t pointer = piobuf->pointer;
+
+    
+    if (pointer == 0)
+        return;/* no buffered pio */
+
+    if (s != NULL) {
+        /* written data are pending in pio_buffer. process it */
+        __buffered_pio_flush(piobuf, s, pointer);
+    } else {
+        /* data are buffered for pio read in pio_buffer.
+         * undone buffering by buffered_pio_read()
+         */
+        if (pointer > s->data_ptr - s->io_buffer)
+            pointer = s->data_ptr - s->io_buffer;
+        s->data_ptr -= pointer;
+    }
+	
+    piobuf->pointer = 0;
+    piobuf->data_end = 0;
+    piobuf->opaque = NULL;
+}
+
+void
+handle_buffered_pio(void)
+{
+    struct pio_buffer *p1, *p2;
+
+    if (!buffered_pio_page)
+        return;
+
+    p1 = &buffered_pio_page->pio[PIO_BUFFER_IDE_PRIMARY];
+    p2 = &buffered_pio_page->pio[PIO_BUFFER_IDE_SECONDARY];
+
+    __handle_buffered_pio(p1);
+    __handle_buffered_pio(p2);
+}
+
+#else /* !__ia64__ */
+#define buffered_pio_init()         do {} while (0)
+#define buffered_pio_reset(I)       do {} while (0)
+#define buffered_pio_write(I,A,S)   do {} while (0)
+#define buffered_pio_read(I,A,S)    do {} while (0)
+#endif
+
+
 static void ide_dma_start(IDEState *s, BlockDriverCompletionFunc *dma_cb);
 static void ide_atapi_cmd_read_dma_cb(void *opaque, int ret);
 
@@ -748,6 +918,7 @@ static void ide_transfer_start(IDEState *s, uint8_t *buf, int size,
     s->data_end = buf + size;
     if (!(s->status & ERR_STAT))
         s->status |= DRQ_STAT;
+    buffered_pio_reset(s);
 }
 
 static void ide_transfer_stop(IDEState *s)
@@ -756,6 +927,7 @@ static void ide_transfer_stop(IDEState *s)
     s->data_ptr = s->io_buffer;
     s->data_end = s->io_buffer;
     s->status &= ~DRQ_STAT;
+    buffered_pio_reset(s);
 }
 
 static int64_t ide_get_sector(IDEState *s)
@@ -2019,6 +2191,7 @@ static void ide_ioport_write(void *opaque, uint32_t addr, uint32_t val)
         ide_if[0].select = (val & ~0x10) | 0xa0;
         ide_if[1].select = (val | 0x10) | 0xa0;
         /* select drive */
+        buffered_pio_reset(ide_if->cur_drive);
         unit = (val >> 4) & 1;
         s = ide_if + unit;
         ide_if->cur_drive = s;
@@ -2492,6 +2665,7 @@ static void ide_data_writew(void *opaque, uint32_t addr, uint32_t val)
     IDEState *s = ((IDEState *)opaque)->cur_drive;
     uint8_t *p;
 
+    buffered_pio_write(s, addr, 2);
     p = s->data_ptr;
     *(uint16_t *)p = le16_to_cpu(val);
     p += 2;
@@ -2505,6 +2679,7 @@ static uint32_t ide_data_readw(void *opaque, uint32_t addr)
     IDEState *s = ((IDEState *)opaque)->cur_drive;
     uint8_t *p;
     int ret;
+    buffered_pio_read(s, addr, 2);
     p = s->data_ptr;
     ret = cpu_to_le16(*(uint16_t *)p);
     p += 2;
@@ -2519,6 +2694,7 @@ static void ide_data_writel(void *opaque, uint32_t addr, uint32_t val)
     IDEState *s = ((IDEState *)opaque)->cur_drive;
     uint8_t *p;
 
+    buffered_pio_write(s, addr, 4);
     p = s->data_ptr;
     *(uint32_t *)p = le32_to_cpu(val);
     p += 4;
@@ -2533,6 +2709,7 @@ static uint32_t ide_data_readl(void *opaque, uint32_t addr)
     uint8_t *p;
     int ret;
 
+    buffered_pio_read(s, addr, 4);
     p = s->data_ptr;
     ret = cpu_to_le32(*(uint32_t *)p);
     p += 4;
@@ -3232,6 +3409,8 @@ void pci_piix3_ide_init(PCIBus *bus, BlockDriverState **hd_table, int devfn,
     ide_init_ioport(&d->ide_if[0], 0x1f0, 0x3f6);
     ide_init_ioport(&d->ide_if[2], 0x170, 0x376);
 
+    buffered_pio_init();
+
     register_savevm("ide", 0, 2, pci_ide_save, pci_ide_load, d);
 }
 
@@ -3269,6 +3448,8 @@ void pci_piix4_ide_init(PCIBus *bus, BlockDriverState **hd_table, int devfn,
     ide_init2(&d->ide_if[2], hd_table[2], hd_table[3], pic[15]);
     ide_init_ioport(&d->ide_if[0], 0x1f0, 0x3f6);
     ide_init_ioport(&d->ide_if[2], 0x170, 0x376);
+
+    buffered_pio_init();
 
     register_savevm("ide", 0, 2, pci_ide_save, pci_ide_load, d);
 }
