@@ -303,7 +303,11 @@ extern CPUWriteMemoryFunc *io_mem_write[IO_MEM_NB_ENTRIES][4];
 extern CPUReadMemoryFunc *io_mem_read[IO_MEM_NB_ENTRIES][4];
 extern void *io_mem_opaque[IO_MEM_NB_ENTRIES];
 
-#if defined(__hppa__)
+#if defined(CONFIG_STUBDOM)
+
+#include <spinlock.h>
+
+#elif defined(__hppa__)
 
 typedef int spinlock_t[4];
 
@@ -519,7 +523,7 @@ extern spinlock_t tb_lock;
 
 extern int tb_invalidated_flag;
 
-#if !defined(CONFIG_USER_ONLY)
+#if !defined(CONFIG_USER_ONLY) && !defined(CONFIG_DM)
 
 void tlb_fill(target_ulong addr, int is_write, int mmu_idx,
               void *retaddr);
@@ -546,7 +550,7 @@ void tlb_fill(target_ulong addr, int is_write, int mmu_idx,
 
 #endif
 
-#if defined(CONFIG_USER_ONLY)
+#if defined(CONFIG_USER_ONLY) || defined(CONFIG_DM)
 static inline target_ulong get_phys_addr_code(CPUState *env1, target_ulong addr)
 {
     return addr;
