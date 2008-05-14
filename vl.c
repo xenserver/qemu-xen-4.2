@@ -26,9 +26,9 @@
 #include "hw/usb.h"
 #include "hw/pcmcia.h"
 #include "hw/pc.h"
-#include "hw/fdc.h"
 #include "hw/audiodev.h"
 #include "hw/isa.h"
+#include "hw/baum.h"
 #include "net.h"
 #include "console.h"
 #include "sysemu.h"
@@ -142,8 +142,6 @@ int inet_aton(const char *cp, struct in_addr *ia);
 //#define DEBUG_UNUSED_IOPORT
 //#define DEBUG_IOPORT
 
-#define PHYS_RAM_MAX_SIZE (2047 * 1024 * 1024)
-
 #ifdef TARGET_PPC
 #define DEFAULT_RAM_SIZE 144
 #else
@@ -175,7 +173,7 @@ int nographic;
 int curses;
 const char* keyboard_layout = NULL;
 int64_t ticks_per_sec;
-int ram_size;
+ram_addr_t ram_size;
 int pit_min_timer_count = 0;
 int nb_nics;
 NICInfo nd_table[MAX_NICS];
@@ -215,6 +213,7 @@ const char *vnc_display;
 int acpi_enabled = 1;
 int fd_bootchk = 1;
 int no_reboot = 0;
+int no_shutdown = 0;
 int cursor_hide = 1;
 int graphic_rotate = 0;
 int daemonize = 0;
@@ -2250,28 +2249,78 @@ static CharDriverState *qemu_chr_open_stdio(void)
     return chr;
 }
 
+#ifdef __sun__
+/* Once Solaris has openpty(), this is going to be removed. */
+int openpty(int *amaster, int *aslave, char *name,
+            struct termios *termp, struct winsize *winp)
+{
+        const char *slave;
+        int mfd = -1, sfd = -1;
+
+        *amaster = *aslave = -1;
+
+        mfd = open("/dev/ptmx", O_RDWR | O_NOCTTY);
+        if (mfd < 0)
+                goto err;
+
+        if (grantpt(mfd) == -1 || unlockpt(mfd) == -1)
+                goto err;
+
+        if ((slave = ptsname(mfd)) == NULL)
+                goto err;
+
+        if ((sfd = open(slave, O_RDONLY | O_NOCTTY)) == -1)
+                goto err;
+
+        if (ioctl(sfd, I_PUSH, "ptem") == -1 ||
+            (termp != NULL && tcgetattr(sfd, termp) < 0))
+                goto err;
+
+        if (amaster)
+                *amaster = mfd;
+        if (aslave)
+                *aslave = sfd;
+        if (winp)
+                ioctl(sfd, TIOCSWINSZ, winp);
+
+        return 0;
+
+err:
+        if (sfd != -1)
+                close(sfd);
+        close(mfd);
+        return -1;
+}
+
+void cfmakeraw (struct termios *termios_p)
+{
+        termios_p->c_iflag &=
+                ~(IGNBRK|BRKINT|PARMRK|ISTRIP|INLCR|IGNCR|ICRNL|IXON);
+        termios_p->c_oflag &= ~OPOST;
+        termios_p->c_lflag &= ~(ECHO|ECHONL|ICANON|ISIG|IEXTEN);
+        termios_p->c_cflag &= ~(CSIZE|PARENB);
+        termios_p->c_cflag |= CS8;
+
+        termios_p->c_cc[VMIN] = 0;
+        termios_p->c_cc[VTIME] = 0;
+}
+#endif
+
 #if defined(__linux__) || defined(__sun__)
 static CharDriverState *qemu_chr_open_pty(void)
 {
     struct termios tty;
-    char slave_name[1024];
     int master_fd, slave_fd;
 
-#if defined(__linux__)
-    /* Not satisfying */
-    if (openpty(&master_fd, &slave_fd, slave_name, NULL, NULL) < 0) {
+    if (openpty(&master_fd, &slave_fd, NULL, NULL, NULL) < 0) {
         return NULL;
     }
-#endif
 
-    /* Disabling local echo and line-buffered output */
-    tcgetattr (master_fd, &tty);
-    tty.c_lflag &= ~(ECHO|ICANON|ISIG);
-    tty.c_cc[VMIN] = 1;
-    tty.c_cc[VTIME] = 0;
-    tcsetattr (master_fd, TCSAFLUSH, &tty);
+    /* Set raw attributes on the pty. */
+    cfmakeraw(&tty);
+    tcsetattr(slave_fd, TCSAFLUSH, &tty);
 
-    fprintf(stderr, "char device redirected to %s\n", slave_name);
+    fprintf(stderr, "char device redirected to %s\n", ptsname(master_fd));
     return qemu_chr_open_fd(master_fd, master_fd);
 }
 
@@ -3450,7 +3499,12 @@ CharDriverState *qemu_chr_open(const char *filename)
     } else
     if (strstart(filename, "file:", &p)) {
         return qemu_chr_open_win_file_out(p);
-    }
+    } else
+#endif
+#ifdef CONFIG_BRLAPI
+    if (!strcmp(filename, "braille")) {
+        return chr_baum_init();
+    } else
 #endif
     {
         return NULL;
@@ -4921,6 +4975,11 @@ int drive_get_max_bus(BlockInterfaceType type)
     return max_bus;
 }
 
+static void bdrv_format_print(void *opaque, const char *name)
+{
+    fprintf(stderr, " %s", name);
+}
+
 static int drive_init(struct drive_opt *arg, int snapshot,
                       QEMUMachine *machine)
 {
@@ -4933,6 +4992,7 @@ static int drive_init(struct drive_opt *arg, int snapshot,
     int bus_id, unit_id;
     int cyls, heads, secs, translation;
     BlockDriverState *bdrv;
+    BlockDriver *drv = NULL;
     int max_devs;
     int index;
     int cache;
@@ -4940,7 +5000,7 @@ static int drive_init(struct drive_opt *arg, int snapshot,
     char *str = arg->opt;
     char *params[] = { "bus", "unit", "if", "index", "cyls", "heads",
                        "secs", "trans", "media", "snapshot", "file",
-                       "cache", NULL };
+                       "cache", "format", NULL };
 
     if (check_params(buf, sizeof(buf), params, str) < 0) {
          fprintf(stderr, "qemu: unknown parameter '%s' in '%s'\n",
@@ -5108,6 +5168,20 @@ static int drive_init(struct drive_opt *arg, int snapshot,
         }
     }
 
+    if (get_param_value(buf, sizeof(buf), "format", str)) {
+       if (strcmp(buf, "?") == 0) {
+            fprintf(stderr, "qemu: Supported formats:");
+            bdrv_iterate_format(bdrv_format_print, NULL);
+            fprintf(stderr, "\n");
+	    return -1;
+        }
+        drv = bdrv_find_format(buf);
+        if (!drv) {
+            fprintf(stderr, "qemu: '%s' invalid format\n", buf);
+            return -1;
+        }
+    }
+
     if (arg->file == NULL)
         get_param_value(file, sizeof(file), "file", str);
     else
@@ -5210,7 +5284,7 @@ static int drive_init(struct drive_opt *arg, int snapshot,
         bdrv_flags |= BDRV_O_SNAPSHOT;
     if (!cache)
         bdrv_flags |= BDRV_O_DIRECT;
-    if (bdrv_open(bdrv, file, bdrv_flags) < 0 || qemu_key_check(bdrv, file)) {
+    if (bdrv_open2(bdrv, file, bdrv_flags, drv) < 0 || qemu_key_check(bdrv, file)) {
         fprintf(stderr, "qemu: could not open disk image %s\n",
                         file);
         return -1;
@@ -5258,6 +5332,10 @@ static int usb_device_add(const char *devname)
         dev = usb_wacom_init();
     } else if (strstart(devname, "serial:", &p)) {
         dev = usb_serial_init(p);
+#ifdef CONFIG_BRLAPI
+    } else if (!strcmp(devname, "braille")) {
+        dev = usb_baum_init();
+#endif
     } else {
         return -1;
     }
@@ -6268,557 +6346,6 @@ void do_info_snapshots(void)
 }
 
 /***********************************************************/
-/* cpu save/restore */
-
-#if defined(TARGET_I386)
-
-static void cpu_put_seg(QEMUFile *f, SegmentCache *dt)
-{
-    qemu_put_be32(f, dt->selector);
-    qemu_put_betl(f, dt->base);
-    qemu_put_be32(f, dt->limit);
-    qemu_put_be32(f, dt->flags);
-}
-
-static void cpu_get_seg(QEMUFile *f, SegmentCache *dt)
-{
-    dt->selector = qemu_get_be32(f);
-    dt->base = qemu_get_betl(f);
-    dt->limit = qemu_get_be32(f);
-    dt->flags = qemu_get_be32(f);
-}
-
-void cpu_save(QEMUFile *f, void *opaque)
-{
-    CPUState *env = opaque;
-    uint16_t fptag, fpus, fpuc, fpregs_format;
-    uint32_t hflags;
-    int i;
-
-    for(i = 0; i < CPU_NB_REGS; i++)
-        qemu_put_betls(f, &env->regs[i]);
-    qemu_put_betls(f, &env->eip);
-    qemu_put_betls(f, &env->eflags);
-    hflags = env->hflags; /* XXX: suppress most of the redundant hflags */
-    qemu_put_be32s(f, &hflags);
-
-    /* FPU */
-    fpuc = env->fpuc;
-    fpus = (env->fpus & ~0x3800) | (env->fpstt & 0x7) << 11;
-    fptag = 0;
-    for(i = 0; i < 8; i++) {
-        fptag |= ((!env->fptags[i]) << i);
-    }
-
-    qemu_put_be16s(f, &fpuc);
-    qemu_put_be16s(f, &fpus);
-    qemu_put_be16s(f, &fptag);
-
-#ifdef USE_X86LDOUBLE
-    fpregs_format = 0;
-#else
-    fpregs_format = 1;
-#endif
-    qemu_put_be16s(f, &fpregs_format);
-
-    for(i = 0; i < 8; i++) {
-#ifdef USE_X86LDOUBLE
-        {
-            uint64_t mant;
-            uint16_t exp;
-            /* we save the real CPU data (in case of MMX usage only 'mant'
-               contains the MMX register */
-            cpu_get_fp80(&mant, &exp, env->fpregs[i].d);
-            qemu_put_be64(f, mant);
-            qemu_put_be16(f, exp);
-        }
-#else
-        /* if we use doubles for float emulation, we save the doubles to
-           avoid losing information in case of MMX usage. It can give
-           problems if the image is restored on a CPU where long
-           doubles are used instead. */
-        qemu_put_be64(f, env->fpregs[i].mmx.MMX_Q(0));
-#endif
-    }
-
-    for(i = 0; i < 6; i++)
-        cpu_put_seg(f, &env->segs[i]);
-    cpu_put_seg(f, &env->ldt);
-    cpu_put_seg(f, &env->tr);
-    cpu_put_seg(f, &env->gdt);
-    cpu_put_seg(f, &env->idt);
-
-    qemu_put_be32s(f, &env->sysenter_cs);
-    qemu_put_be32s(f, &env->sysenter_esp);
-    qemu_put_be32s(f, &env->sysenter_eip);
-
-    qemu_put_betls(f, &env->cr[0]);
-    qemu_put_betls(f, &env->cr[2]);
-    qemu_put_betls(f, &env->cr[3]);
-    qemu_put_betls(f, &env->cr[4]);
-
-    for(i = 0; i < 8; i++)
-        qemu_put_betls(f, &env->dr[i]);
-
-    /* MMU */
-    qemu_put_be32s(f, &env->a20_mask);
-
-    /* XMM */
-    qemu_put_be32s(f, &env->mxcsr);
-    for(i = 0; i < CPU_NB_REGS; i++) {
-        qemu_put_be64s(f, &env->xmm_regs[i].XMM_Q(0));
-        qemu_put_be64s(f, &env->xmm_regs[i].XMM_Q(1));
-    }
-
-#ifdef TARGET_X86_64
-    qemu_put_be64s(f, &env->efer);
-    qemu_put_be64s(f, &env->star);
-    qemu_put_be64s(f, &env->lstar);
-    qemu_put_be64s(f, &env->cstar);
-    qemu_put_be64s(f, &env->fmask);
-    qemu_put_be64s(f, &env->kernelgsbase);
-#endif
-    qemu_put_be32s(f, &env->smbase);
-}
-
-#ifdef USE_X86LDOUBLE
-/* XXX: add that in a FPU generic layer */
-union x86_longdouble {
-    uint64_t mant;
-    uint16_t exp;
-};
-
-#define MANTD1(fp)	(fp & ((1LL << 52) - 1))
-#define EXPBIAS1 1023
-#define EXPD1(fp)	((fp >> 52) & 0x7FF)
-#define SIGND1(fp)	((fp >> 32) & 0x80000000)
-
-static void fp64_to_fp80(union x86_longdouble *p, uint64_t temp)
-{
-    int e;
-    /* mantissa */
-    p->mant = (MANTD1(temp) << 11) | (1LL << 63);
-    /* exponent + sign */
-    e = EXPD1(temp) - EXPBIAS1 + 16383;
-    e |= SIGND1(temp) >> 16;
-    p->exp = e;
-}
-#endif
-
-int cpu_load(QEMUFile *f, void *opaque, int version_id)
-{
-    CPUState *env = opaque;
-    int i, guess_mmx;
-    uint32_t hflags;
-    uint16_t fpus, fpuc, fptag, fpregs_format;
-
-    if (version_id != 3 && version_id != 4)
-        return -EINVAL;
-    for(i = 0; i < CPU_NB_REGS; i++)
-        qemu_get_betls(f, &env->regs[i]);
-    qemu_get_betls(f, &env->eip);
-    qemu_get_betls(f, &env->eflags);
-    qemu_get_be32s(f, &hflags);
-
-    qemu_get_be16s(f, &fpuc);
-    qemu_get_be16s(f, &fpus);
-    qemu_get_be16s(f, &fptag);
-    qemu_get_be16s(f, &fpregs_format);
-
-    /* NOTE: we cannot always restore the FPU state if the image come
-       from a host with a different 'USE_X86LDOUBLE' define. We guess
-       if we are in an MMX state to restore correctly in that case. */
-    guess_mmx = ((fptag == 0xff) && (fpus & 0x3800) == 0);
-    for(i = 0; i < 8; i++) {
-        uint64_t mant;
-        uint16_t exp;
-
-        switch(fpregs_format) {
-        case 0:
-            mant = qemu_get_be64(f);
-            exp = qemu_get_be16(f);
-#ifdef USE_X86LDOUBLE
-            env->fpregs[i].d = cpu_set_fp80(mant, exp);
-#else
-            /* difficult case */
-            if (guess_mmx)
-                env->fpregs[i].mmx.MMX_Q(0) = mant;
-            else
-                env->fpregs[i].d = cpu_set_fp80(mant, exp);
-#endif
-            break;
-        case 1:
-            mant = qemu_get_be64(f);
-#ifdef USE_X86LDOUBLE
-            {
-                union x86_longdouble *p;
-                /* difficult case */
-                p = (void *)&env->fpregs[i];
-                if (guess_mmx) {
-                    p->mant = mant;
-                    p->exp = 0xffff;
-                } else {
-                    fp64_to_fp80(p, mant);
-                }
-            }
-#else
-            env->fpregs[i].mmx.MMX_Q(0) = mant;
-#endif
-            break;
-        default:
-            return -EINVAL;
-        }
-    }
-
-    env->fpuc = fpuc;
-    /* XXX: restore FPU round state */
-    env->fpstt = (fpus >> 11) & 7;
-    env->fpus = fpus & ~0x3800;
-    fptag ^= 0xff;
-    for(i = 0; i < 8; i++) {
-        env->fptags[i] = (fptag >> i) & 1;
-    }
-
-    for(i = 0; i < 6; i++)
-        cpu_get_seg(f, &env->segs[i]);
-    cpu_get_seg(f, &env->ldt);
-    cpu_get_seg(f, &env->tr);
-    cpu_get_seg(f, &env->gdt);
-    cpu_get_seg(f, &env->idt);
-
-    qemu_get_be32s(f, &env->sysenter_cs);
-    qemu_get_be32s(f, &env->sysenter_esp);
-    qemu_get_be32s(f, &env->sysenter_eip);
-
-    qemu_get_betls(f, &env->cr[0]);
-    qemu_get_betls(f, &env->cr[2]);
-    qemu_get_betls(f, &env->cr[3]);
-    qemu_get_betls(f, &env->cr[4]);
-
-    for(i = 0; i < 8; i++)
-        qemu_get_betls(f, &env->dr[i]);
-
-    /* MMU */
-    qemu_get_be32s(f, &env->a20_mask);
-
-    qemu_get_be32s(f, &env->mxcsr);
-    for(i = 0; i < CPU_NB_REGS; i++) {
-        qemu_get_be64s(f, &env->xmm_regs[i].XMM_Q(0));
-        qemu_get_be64s(f, &env->xmm_regs[i].XMM_Q(1));
-    }
-
-#ifdef TARGET_X86_64
-    qemu_get_be64s(f, &env->efer);
-    qemu_get_be64s(f, &env->star);
-    qemu_get_be64s(f, &env->lstar);
-    qemu_get_be64s(f, &env->cstar);
-    qemu_get_be64s(f, &env->fmask);
-    qemu_get_be64s(f, &env->kernelgsbase);
-#endif
-    if (version_id >= 4)
-        qemu_get_be32s(f, &env->smbase);
-
-    /* XXX: compute hflags from scratch, except for CPL and IIF */
-    env->hflags = hflags;
-    tlb_flush(env, 1);
-    return 0;
-}
-
-#elif defined(TARGET_PPC)
-void cpu_save(QEMUFile *f, void *opaque)
-{
-}
-
-int cpu_load(QEMUFile *f, void *opaque, int version_id)
-{
-    return 0;
-}
-
-#elif defined(TARGET_MIPS)
-void cpu_save(QEMUFile *f, void *opaque)
-{
-}
-
-int cpu_load(QEMUFile *f, void *opaque, int version_id)
-{
-    return 0;
-}
-
-#elif defined(TARGET_SPARC)
-void cpu_save(QEMUFile *f, void *opaque)
-{
-    CPUState *env = opaque;
-    int i;
-    uint32_t tmp;
-
-    for(i = 0; i < 8; i++)
-        qemu_put_betls(f, &env->gregs[i]);
-    for(i = 0; i < NWINDOWS * 16; i++)
-        qemu_put_betls(f, &env->regbase[i]);
-
-    /* FPU */
-    for(i = 0; i < TARGET_FPREGS; i++) {
-        union {
-            float32 f;
-            uint32_t i;
-        } u;
-        u.f = env->fpr[i];
-        qemu_put_be32(f, u.i);
-    }
-
-    qemu_put_betls(f, &env->pc);
-    qemu_put_betls(f, &env->npc);
-    qemu_put_betls(f, &env->y);
-    tmp = GET_PSR(env);
-    qemu_put_be32(f, tmp);
-    qemu_put_betls(f, &env->fsr);
-    qemu_put_betls(f, &env->tbr);
-#ifndef TARGET_SPARC64
-    qemu_put_be32s(f, &env->wim);
-    /* MMU */
-    for(i = 0; i < 16; i++)
-        qemu_put_be32s(f, &env->mmuregs[i]);
-#endif
-}
-
-int cpu_load(QEMUFile *f, void *opaque, int version_id)
-{
-    CPUState *env = opaque;
-    int i;
-    uint32_t tmp;
-
-    for(i = 0; i < 8; i++)
-        qemu_get_betls(f, &env->gregs[i]);
-    for(i = 0; i < NWINDOWS * 16; i++)
-        qemu_get_betls(f, &env->regbase[i]);
-
-    /* FPU */
-    for(i = 0; i < TARGET_FPREGS; i++) {
-        union {
-            float32 f;
-            uint32_t i;
-        } u;
-        u.i = qemu_get_be32(f);
-        env->fpr[i] = u.f;
-    }
-
-    qemu_get_betls(f, &env->pc);
-    qemu_get_betls(f, &env->npc);
-    qemu_get_betls(f, &env->y);
-    tmp = qemu_get_be32(f);
-    env->cwp = 0; /* needed to ensure that the wrapping registers are
-                     correctly updated */
-    PUT_PSR(env, tmp);
-    qemu_get_betls(f, &env->fsr);
-    qemu_get_betls(f, &env->tbr);
-#ifndef TARGET_SPARC64
-    qemu_get_be32s(f, &env->wim);
-    /* MMU */
-    for(i = 0; i < 16; i++)
-        qemu_get_be32s(f, &env->mmuregs[i]);
-#endif
-    tlb_flush(env, 1);
-    return 0;
-}
-
-#elif defined(TARGET_ARM)
-
-void cpu_save(QEMUFile *f, void *opaque)
-{
-    int i;
-    CPUARMState *env = (CPUARMState *)opaque;
-
-    for (i = 0; i < 16; i++) {
-        qemu_put_be32(f, env->regs[i]);
-    }
-    qemu_put_be32(f, cpsr_read(env));
-    qemu_put_be32(f, env->spsr);
-    for (i = 0; i < 6; i++) {
-        qemu_put_be32(f, env->banked_spsr[i]);
-        qemu_put_be32(f, env->banked_r13[i]);
-        qemu_put_be32(f, env->banked_r14[i]);
-    }
-    for (i = 0; i < 5; i++) {
-        qemu_put_be32(f, env->usr_regs[i]);
-        qemu_put_be32(f, env->fiq_regs[i]);
-    }
-    qemu_put_be32(f, env->cp15.c0_cpuid);
-    qemu_put_be32(f, env->cp15.c0_cachetype);
-    qemu_put_be32(f, env->cp15.c1_sys);
-    qemu_put_be32(f, env->cp15.c1_coproc);
-    qemu_put_be32(f, env->cp15.c1_xscaleauxcr);
-    qemu_put_be32(f, env->cp15.c2_base0);
-    qemu_put_be32(f, env->cp15.c2_base1);
-    qemu_put_be32(f, env->cp15.c2_mask);
-    qemu_put_be32(f, env->cp15.c2_data);
-    qemu_put_be32(f, env->cp15.c2_insn);
-    qemu_put_be32(f, env->cp15.c3);
-    qemu_put_be32(f, env->cp15.c5_insn);
-    qemu_put_be32(f, env->cp15.c5_data);
-    for (i = 0; i < 8; i++) {
-        qemu_put_be32(f, env->cp15.c6_region[i]);
-    }
-    qemu_put_be32(f, env->cp15.c6_insn);
-    qemu_put_be32(f, env->cp15.c6_data);
-    qemu_put_be32(f, env->cp15.c9_insn);
-    qemu_put_be32(f, env->cp15.c9_data);
-    qemu_put_be32(f, env->cp15.c13_fcse);
-    qemu_put_be32(f, env->cp15.c13_context);
-    qemu_put_be32(f, env->cp15.c13_tls1);
-    qemu_put_be32(f, env->cp15.c13_tls2);
-    qemu_put_be32(f, env->cp15.c13_tls3);
-    qemu_put_be32(f, env->cp15.c15_cpar);
-
-    qemu_put_be32(f, env->features);
-
-    if (arm_feature(env, ARM_FEATURE_VFP)) {
-        for (i = 0;  i < 16; i++) {
-            CPU_DoubleU u;
-            u.d = env->vfp.regs[i];
-            qemu_put_be32(f, u.l.upper);
-            qemu_put_be32(f, u.l.lower);
-        }
-        for (i = 0; i < 16; i++) {
-            qemu_put_be32(f, env->vfp.xregs[i]);
-        }
-
-        /* TODO: Should use proper FPSCR access functions.  */
-        qemu_put_be32(f, env->vfp.vec_len);
-        qemu_put_be32(f, env->vfp.vec_stride);
-
-        if (arm_feature(env, ARM_FEATURE_VFP3)) {
-            for (i = 16;  i < 32; i++) {
-                CPU_DoubleU u;
-                u.d = env->vfp.regs[i];
-                qemu_put_be32(f, u.l.upper);
-                qemu_put_be32(f, u.l.lower);
-            }
-        }
-    }
-
-    if (arm_feature(env, ARM_FEATURE_IWMMXT)) {
-        for (i = 0; i < 16; i++) {
-            qemu_put_be64(f, env->iwmmxt.regs[i]);
-        }
-        for (i = 0; i < 16; i++) {
-            qemu_put_be32(f, env->iwmmxt.cregs[i]);
-        }
-    }
-
-    if (arm_feature(env, ARM_FEATURE_M)) {
-        qemu_put_be32(f, env->v7m.other_sp);
-        qemu_put_be32(f, env->v7m.vecbase);
-        qemu_put_be32(f, env->v7m.basepri);
-        qemu_put_be32(f, env->v7m.control);
-        qemu_put_be32(f, env->v7m.current_sp);
-        qemu_put_be32(f, env->v7m.exception);
-    }
-}
-
-int cpu_load(QEMUFile *f, void *opaque, int version_id)
-{
-    CPUARMState *env = (CPUARMState *)opaque;
-    int i;
-
-    if (version_id != ARM_CPU_SAVE_VERSION)
-        return -EINVAL;
-
-    for (i = 0; i < 16; i++) {
-        env->regs[i] = qemu_get_be32(f);
-    }
-    cpsr_write(env, qemu_get_be32(f), 0xffffffff);
-    env->spsr = qemu_get_be32(f);
-    for (i = 0; i < 6; i++) {
-        env->banked_spsr[i] = qemu_get_be32(f);
-        env->banked_r13[i] = qemu_get_be32(f);
-        env->banked_r14[i] = qemu_get_be32(f);
-    }
-    for (i = 0; i < 5; i++) {
-        env->usr_regs[i] = qemu_get_be32(f);
-        env->fiq_regs[i] = qemu_get_be32(f);
-    }
-    env->cp15.c0_cpuid = qemu_get_be32(f);
-    env->cp15.c0_cachetype = qemu_get_be32(f);
-    env->cp15.c1_sys = qemu_get_be32(f);
-    env->cp15.c1_coproc = qemu_get_be32(f);
-    env->cp15.c1_xscaleauxcr = qemu_get_be32(f);
-    env->cp15.c2_base0 = qemu_get_be32(f);
-    env->cp15.c2_base1 = qemu_get_be32(f);
-    env->cp15.c2_mask = qemu_get_be32(f);
-    env->cp15.c2_data = qemu_get_be32(f);
-    env->cp15.c2_insn = qemu_get_be32(f);
-    env->cp15.c3 = qemu_get_be32(f);
-    env->cp15.c5_insn = qemu_get_be32(f);
-    env->cp15.c5_data = qemu_get_be32(f);
-    for (i = 0; i < 8; i++) {
-        env->cp15.c6_region[i] = qemu_get_be32(f);
-    }
-    env->cp15.c6_insn = qemu_get_be32(f);
-    env->cp15.c6_data = qemu_get_be32(f);
-    env->cp15.c9_insn = qemu_get_be32(f);
-    env->cp15.c9_data = qemu_get_be32(f);
-    env->cp15.c13_fcse = qemu_get_be32(f);
-    env->cp15.c13_context = qemu_get_be32(f);
-    env->cp15.c13_tls1 = qemu_get_be32(f);
-    env->cp15.c13_tls2 = qemu_get_be32(f);
-    env->cp15.c13_tls3 = qemu_get_be32(f);
-    env->cp15.c15_cpar = qemu_get_be32(f);
-
-    env->features = qemu_get_be32(f);
-
-    if (arm_feature(env, ARM_FEATURE_VFP)) {
-        for (i = 0;  i < 16; i++) {
-            CPU_DoubleU u;
-            u.l.upper = qemu_get_be32(f);
-            u.l.lower = qemu_get_be32(f);
-            env->vfp.regs[i] = u.d;
-        }
-        for (i = 0; i < 16; i++) {
-            env->vfp.xregs[i] = qemu_get_be32(f);
-        }
-
-        /* TODO: Should use proper FPSCR access functions.  */
-        env->vfp.vec_len = qemu_get_be32(f);
-        env->vfp.vec_stride = qemu_get_be32(f);
-
-        if (arm_feature(env, ARM_FEATURE_VFP3)) {
-            for (i = 0;  i < 16; i++) {
-                CPU_DoubleU u;
-                u.l.upper = qemu_get_be32(f);
-                u.l.lower = qemu_get_be32(f);
-                env->vfp.regs[i] = u.d;
-            }
-        }
-    }
-
-    if (arm_feature(env, ARM_FEATURE_IWMMXT)) {
-        for (i = 0; i < 16; i++) {
-            env->iwmmxt.regs[i] = qemu_get_be64(f);
-        }
-        for (i = 0; i < 16; i++) {
-            env->iwmmxt.cregs[i] = qemu_get_be32(f);
-        }
-    }
-
-    if (arm_feature(env, ARM_FEATURE_M)) {
-        env->v7m.other_sp = qemu_get_be32(f);
-        env->v7m.vecbase = qemu_get_be32(f);
-        env->v7m.basepri = qemu_get_be32(f);
-        env->v7m.control = qemu_get_be32(f);
-        env->v7m.current_sp = qemu_get_be32(f);
-        env->v7m.exception = qemu_get_be32(f);
-    }
-
-    return 0;
-}
-
-#else
-
-//#warning No CPU save/restore functions
-
-#endif
-
-/***********************************************************/
 /* ram save/restore */
 
 static int ram_get_page(QEMUFile *f, uint8_t *buf, int len)
@@ -6843,7 +6370,8 @@ static int ram_get_page(QEMUFile *f, uint8_t *buf, int len)
 
 static int ram_load_v1(QEMUFile *f, void *opaque)
 {
-    int i, ret;
+    int ret;
+    ram_addr_t i;
 
     if (qemu_get_be32(f) != phys_ram_size)
         return -EINVAL;
@@ -6979,7 +6507,7 @@ static void ram_decompress_close(RamDecompressState *s)
 
 static void ram_save(QEMUFile *f, void *opaque)
 {
-    int i;
+    ram_addr_t i;
     RamCompressState s1, *s = &s1;
     uint8_t buf[10];
 
@@ -7024,7 +6552,7 @@ static int ram_load(QEMUFile *f, void *opaque, int version_id)
 {
     RamDecompressState s1, *s = &s1;
     uint8_t buf[10];
-    int i;
+    ram_addr_t i;
 
     if (version_id == 1)
         return ram_load_v1(f, opaque);
@@ -7041,7 +6569,7 @@ static int ram_load(QEMUFile *f, void *opaque, int version_id)
         }
         if (buf[0] == 0) {
             if (ram_decompress_buf(s, phys_ram_base + i, BDRV_HASH_BLOCK_SIZE) < 0) {
-                fprintf(stderr, "Error while reading ram block address=0x%08x", i);
+                fprintf(stderr, "Error while reading ram block address=0x%08" PRIx64, (uint64_t)i);
                 goto error;
             }
         } else
@@ -7353,6 +6881,14 @@ void qemu_system_powerdown_request(void)
         cpu_interrupt(cpu_single_env, CPU_INTERRUPT_EXIT);
 }
 
+/* boot_set handler */
+QEMUBootSetHandler *qemu_boot_set_handler = NULL;
+
+void qemu_register_boot_set(QEMUBootSetHandler *func)
+{
+	qemu_boot_set_handler = func;
+}
+
 void main_loop_wait(int timeout)
 {
     IOHandlerRecord *ioh;
@@ -7472,6 +7008,7 @@ void main_loop_wait(int timeout)
     qemu_aio_poll();
 
     if (vm_running) {
+        if (!(cur_cpu->singlestep_enabled & SSTEP_NOTIMER))
         qemu_run_timers(&active_timers[QEMU_TIMER_VIRTUAL],
                         qemu_get_clock(vm_clock));
         /* run dma transfers, if any */
@@ -7479,6 +7016,7 @@ void main_loop_wait(int timeout)
     }
 
     /* real time timers */
+    if (!(cur_cpu->singlestep_enabled & SSTEP_NOTIMER))
     qemu_run_timers(&active_timers[QEMU_TIMER_REALTIME],
                     qemu_get_clock(rt_clock));
 
@@ -7517,7 +7055,7 @@ static int main_loop(void)
                 qemu_time += profile_getclock() - ti;
 #endif
                 next_cpu = env->next_cpu ?: first_cpu;
-                if (event_pending) {
+                if (event_pending && likely(ret != EXCP_DEBUG)) {
                     ret = EXCP_INTERRUPT;
                     event_pending = 0;
                     break;
@@ -7537,7 +7075,12 @@ static int main_loop(void)
 
             if (shutdown_requested) {
                 ret = EXCP_INTERRUPT;
-                break;
+                if (no_shutdown) {
+                    vm_stop(0);
+                    no_shutdown = 0;
+                }
+                else
+                    break;
             }
             if (reset_requested) {
                 reset_requested = 0;
@@ -7549,7 +7092,7 @@ static int main_loop(void)
 		qemu_system_powerdown();
                 ret = EXCP_INTERRUPT;
             }
-            if (ret == EXCP_DEBUG) {
+            if (unlikely(ret == EXCP_DEBUG)) {
                 vm_stop(EXCP_DEBUG);
             }
             /* If all cpus are halted then wait until the next IRQ */
@@ -7587,9 +7130,9 @@ static void help(int exitcode)
            "-hda/-hdb file  use 'file' as IDE hard disk 0/1 image\n"
            "-hdc/-hdd file  use 'file' as IDE hard disk 2/3 image\n"
            "-cdrom file     use 'file' as IDE cdrom image (cdrom is ide1 master)\n"
-	   "-drive [file=file][,if=type][,bus=n][,unit=m][,media=d][index=i]\n"
-           "       [,cyls=c,heads=h,secs=s[,trans=t]][snapshot=on|off]"
-           "       [,cache=on|off]\n"
+	   "-drive [file=file][,if=type][,bus=n][,unit=m][,media=d][,index=i]\n"
+           "       [,cyls=c,heads=h,secs=s[,trans=t]][,snapshot=on|off]\n"
+           "       [,cache=on|off][,format=f]\n"
 	   "                use 'file' as a drive image\n"
            "-mtdblock file  use 'file' as on-board Flash memory image\n"
            "-sd file        use 'file' as SecureDigital card image\n"
@@ -7696,7 +7239,8 @@ static void help(int exitcode)
            "-curses         use a curses/ncurses interface instead of SDL\n"
 #endif
            "-no-reboot      exit instead of rebooting\n"
-           "-loadvm file    start right away with a saved state (loadvm in monitor)\n"
+           "-no-shutdown    stop before shutdown\n"
+           "-loadvm [tag|id]  start right away with a saved state (loadvm in monitor)\n"
 	   "-vnc display    start a VNC server on display\n"
 #ifndef _WIN32
 	   "-daemonize      daemonize QEMU after initializing\n"
@@ -7775,7 +7319,6 @@ enum {
     QEMU_OPTION_hdachs,
     QEMU_OPTION_L,
     QEMU_OPTION_bios,
-    QEMU_OPTION_no_code_copy,
     QEMU_OPTION_k,
     QEMU_OPTION_localtime,
     QEMU_OPTION_cirrusvga,
@@ -7802,6 +7345,7 @@ enum {
     QEMU_OPTION_no_acpi,
     QEMU_OPTION_curses,
     QEMU_OPTION_no_reboot,
+    QEMU_OPTION_no_shutdown,
     QEMU_OPTION_show_cursor,
     QEMU_OPTION_daemonize,
     QEMU_OPTION_option_rom,
@@ -7871,7 +7415,6 @@ const QEMUOption qemu_options[] = {
     { "hdachs", HAS_ARG, QEMU_OPTION_hdachs },
     { "L", HAS_ARG, QEMU_OPTION_L },
     { "bios", HAS_ARG, QEMU_OPTION_bios },
-    { "no-code-copy", 0, QEMU_OPTION_no_code_copy },
 #ifdef USE_KQEMU
     { "no-kqemu", 0, QEMU_OPTION_no_kqemu },
     { "kernel-kqemu", 0, QEMU_OPTION_kernel_kqemu },
@@ -7907,6 +7450,7 @@ const QEMUOption qemu_options[] = {
     { "vmwarevga", 0, QEMU_OPTION_vmsvga },
     { "no-acpi", 0, QEMU_OPTION_no_acpi },
     { "no-reboot", 0, QEMU_OPTION_no_reboot },
+    { "no-shutdown", 0, QEMU_OPTION_no_shutdown },
     { "show-cursor", 0, QEMU_OPTION_show_cursor },
     { "daemonize", 0, QEMU_OPTION_daemonize },
     { "option-rom", HAS_ARG, QEMU_OPTION_option_rom },
@@ -7964,75 +7508,10 @@ static void read_passwords(void)
     }
 }
 
-/* XXX: currently we cannot use simultaneously different CPUs */
-static void register_machines(void)
-{
-#if defined(TARGET_I386)
-    qemu_register_machine(&pc_machine);
-    qemu_register_machine(&isapc_machine);
-#elif defined(TARGET_PPC)
-    qemu_register_machine(&heathrow_machine);
-    qemu_register_machine(&core99_machine);
-    qemu_register_machine(&prep_machine);
-    qemu_register_machine(&ref405ep_machine);
-    qemu_register_machine(&taihu_machine);
-#elif defined(TARGET_MIPS)
-    qemu_register_machine(&mips_machine);
-    qemu_register_machine(&mips_malta_machine);
-    qemu_register_machine(&mips_pica61_machine);
-    qemu_register_machine(&mips_mipssim_machine);
-#elif defined(TARGET_SPARC)
-#ifdef TARGET_SPARC64
-    qemu_register_machine(&sun4u_machine);
-#else
-    qemu_register_machine(&ss5_machine);
-    qemu_register_machine(&ss10_machine);
-    qemu_register_machine(&ss600mp_machine);
-    qemu_register_machine(&ss20_machine);
-    qemu_register_machine(&ss2_machine);
-    qemu_register_machine(&voyager_machine);
-    qemu_register_machine(&ss_lx_machine);
-    qemu_register_machine(&ss4_machine);
-    qemu_register_machine(&scls_machine);
-    qemu_register_machine(&sbook_machine);
-    qemu_register_machine(&ss1000_machine);
-    qemu_register_machine(&ss2000_machine);
-#endif
-#elif defined(TARGET_ARM)
-    qemu_register_machine(&integratorcp_machine);
-    qemu_register_machine(&versatilepb_machine);
-    qemu_register_machine(&versatileab_machine);
-    qemu_register_machine(&realview_machine);
-    qemu_register_machine(&akitapda_machine);
-    qemu_register_machine(&spitzpda_machine);
-    qemu_register_machine(&borzoipda_machine);
-    qemu_register_machine(&terrierpda_machine);
-    qemu_register_machine(&palmte_machine);
-    qemu_register_machine(&lm3s811evb_machine);
-    qemu_register_machine(&lm3s6965evb_machine);
-    qemu_register_machine(&connex_machine);
-    qemu_register_machine(&verdex_machine);
-    qemu_register_machine(&mainstone2_machine);
-#elif defined(TARGET_SH4)
-    qemu_register_machine(&shix_machine);
-    qemu_register_machine(&r2d_machine);
-#elif defined(TARGET_ALPHA)
-    /* XXX: TODO */
-#elif defined(TARGET_M68K)
-    qemu_register_machine(&mcf5208evb_machine);
-    qemu_register_machine(&an5206_machine);
-    qemu_register_machine(&dummy_m68k_machine);
-#elif defined(TARGET_CRIS)
-    qemu_register_machine(&bareetraxfs_machine);
-#else
-#error unsupported CPU
-#endif
-}
-
 #ifdef HAS_AUDIO
 struct soundhw soundhw[] = {
 #ifdef HAS_AUDIO_CHOICE
-#ifdef TARGET_I386
+#if defined(TARGET_I386) || defined(TARGET_MIPS)
     {
         "pcspk",
         "PC speaker",
@@ -8178,21 +7657,21 @@ int main(int argc, char **argv)
     const char *boot_devices = "";
     DisplayState *ds = &display_state;
     int cyls, heads, secs, translation;
-    char net_clients[MAX_NET_CLIENTS][256];
+    const char *net_clients[MAX_NET_CLIENTS];
     int nb_net_clients;
     int hda_index;
     int optind;
     const char *r, *optarg;
     CharDriverState *monitor_hd;
-    char monitor_device[128];
-    char serial_devices[MAX_SERIAL_PORTS][128];
+    const char *monitor_device;
+    const char *serial_devices[MAX_SERIAL_PORTS];
     int serial_device_index;
-    char parallel_devices[MAX_PARALLEL_PORTS][128];
+    const char *parallel_devices[MAX_PARALLEL_PORTS];
     int parallel_device_index;
     const char *loadvm = NULL;
     QEMUMachine *machine;
     const char *cpu_model;
-    char usb_devices[MAX_USB_CMDLINE][128];
+    const char *usb_devices[MAX_USB_CMDLINE];
     int usb_devices_index;
     int fds[2];
     const char *pid_file = NULL;
@@ -8233,7 +7712,7 @@ int main(int argc, char **argv)
     machine = first_machine;
     cpu_model = NULL;
     initrd_filename = NULL;
-    ram_size = DEFAULT_RAM_SIZE * 1024 * 1024;
+    ram_size = 0;
     vga_ram_size = VGA_RAM_SIZE;
 #ifdef CONFIG_GDBSTUB
     use_gdbstub = 0;
@@ -8246,16 +7725,16 @@ int main(int argc, char **argv)
     kernel_cmdline = "";
     cyls = heads = secs = 0;
     translation = BIOS_ATA_TRANSLATION_AUTO;
-    pstrcpy(monitor_device, sizeof(monitor_device), "vc");
+    monitor_device = "vc:800x600";
 
-    pstrcpy(serial_devices[0], sizeof(serial_devices[0]), "vc");
+    serial_devices[0] = "vc:80Cx24C";
     for(i = 1; i < MAX_SERIAL_PORTS; i++)
-        serial_devices[i][0] = '\0';
+        serial_devices[i] = NULL;
     serial_device_index = 0;
 
-    pstrcpy(parallel_devices[0], sizeof(parallel_devices[0]), "vc");
+    parallel_devices[0] = "vc:640x480";
     for(i = 1; i < MAX_PARALLEL_PORTS; i++)
-        parallel_devices[i][0] = '\0';
+        parallel_devices[i] = NULL;
     parallel_device_index = 0;
 
     usb_devices_index = 0;
@@ -8411,9 +7890,9 @@ int main(int argc, char **argv)
                 }
                 break;
             case QEMU_OPTION_nographic:
-                pstrcpy(serial_devices[0], sizeof(serial_devices[0]), "stdio");
-                pstrcpy(parallel_devices[0], sizeof(parallel_devices[0]), "null");
-                pstrcpy(monitor_device, sizeof(monitor_device), "stdio");
+                serial_devices[0] = "stdio";
+                parallel_devices[0] = "null";
+                monitor_device = "stdio";
                 nographic = 1;
                 break;
 #ifdef CONFIG_CURSES
@@ -8473,17 +7952,12 @@ int main(int argc, char **argv)
                 fd_bootchk = 0;
                 break;
 #endif
-            case QEMU_OPTION_no_code_copy:
-                code_copy_enabled = 0;
-                break;
             case QEMU_OPTION_net:
                 if (nb_net_clients >= MAX_NET_CLIENTS) {
                     fprintf(stderr, "qemu: too many network clients\n");
                     exit(1);
                 }
-                pstrcpy(net_clients[nb_net_clients],
-                        sizeof(net_clients[0]),
-                        optarg);
+                net_clients[nb_net_clients] = optarg;
                 nb_net_clients++;
                 break;
 #ifdef CONFIG_SLIRP
@@ -8514,16 +7988,39 @@ int main(int argc, char **argv)
             case QEMU_OPTION_h:
                 help(0);
                 break;
-            case QEMU_OPTION_m:
-                ram_size = atoi(optarg) * 1024 * 1024;
-                if (ram_size <= 0)
-                    help(1);
-                if (ram_size > PHYS_RAM_MAX_SIZE) {
-                    fprintf(stderr, "qemu: at most %d MB RAM can be simulated\n",
-                            PHYS_RAM_MAX_SIZE / (1024 * 1024));
+            case QEMU_OPTION_m: {
+                uint64_t value;
+                char *ptr;
+
+                value = strtoul(optarg, &ptr, 10);
+                switch (*ptr) {
+                case 0: case 'M': case 'm':
+                    value <<= 20;
+                    break;
+                case 'G': case 'g':
+                    value <<= 30;
+                    break;
+                default:
+                    fprintf(stderr, "qemu: invalid ram size: %s\n", optarg);
                     exit(1);
                 }
+
+                /* On 32-bit hosts, QEMU is limited by virtual address space */
+                if (value > (2047 << 20)
+#ifndef USE_KQEMU
+                    && HOST_LONG_BITS == 32
+#endif
+                    ) {
+                    fprintf(stderr, "qemu: at most 2047 MB RAM can be simulated\n");
+                    exit(1);
+                }
+                if (value != (uint64_t)(ram_addr_t)value) {
+                    fprintf(stderr, "qemu: ram size too large\n");
+                    exit(1);
+                }
+                ram_size = value;
                 break;
+            }
             case QEMU_OPTION_d:
                 {
                     int mask;
@@ -8618,15 +8115,14 @@ int main(int argc, char **argv)
                     break;
                 }
             case QEMU_OPTION_monitor:
-                pstrcpy(monitor_device, sizeof(monitor_device), optarg);
+                monitor_device = optarg;
                 break;
             case QEMU_OPTION_serial:
                 if (serial_device_index >= MAX_SERIAL_PORTS) {
                     fprintf(stderr, "qemu: too many serial ports\n");
                     exit(1);
                 }
-                pstrcpy(serial_devices[serial_device_index],
-                        sizeof(serial_devices[0]), optarg);
+                serial_devices[serial_device_index] = optarg;
                 serial_device_index++;
                 break;
             case QEMU_OPTION_parallel:
@@ -8634,8 +8130,7 @@ int main(int argc, char **argv)
                     fprintf(stderr, "qemu: too many parallel ports\n");
                     exit(1);
                 }
-                pstrcpy(parallel_devices[parallel_device_index],
-                        sizeof(parallel_devices[0]), optarg);
+                parallel_devices[parallel_device_index] = optarg;
                 parallel_device_index++;
                 break;
 	    case QEMU_OPTION_loadvm:
@@ -8680,9 +8175,7 @@ int main(int argc, char **argv)
                     fprintf(stderr, "Too many USB devices\n");
                     exit(1);
                 }
-                pstrcpy(usb_devices[usb_devices_index],
-                        sizeof(usb_devices[usb_devices_index]),
-                        optarg);
+                usb_devices[usb_devices_index] = optarg;
                 usb_devices_index++;
                 break;
             case QEMU_OPTION_smp:
@@ -8700,6 +8193,9 @@ int main(int argc, char **argv)
                 break;
             case QEMU_OPTION_no_reboot:
                 no_reboot = 1;
+                break;
+            case QEMU_OPTION_no_shutdown:
+                no_shutdown = 1;
                 break;
             case QEMU_OPTION_show_cursor:
                 cursor_hide = 0;
@@ -8870,10 +8366,8 @@ int main(int argc, char **argv)
     /* init network clients */
     if (nb_net_clients == 0) {
         /* if no clients, we use a default config */
-        pstrcpy(net_clients[0], sizeof(net_clients[0]),
-                "nic");
-        pstrcpy(net_clients[1], sizeof(net_clients[0]),
-                "user");
+        net_clients[0] = "nic";
+        net_clients[1] = "user";
         nb_net_clients = 2;
     }
 
@@ -8924,7 +8418,25 @@ int main(int argc, char **argv)
 #endif
 
     /* init the memory */
-    phys_ram_size = ram_size + vga_ram_size + MAX_BIOS_SIZE;
+    phys_ram_size = machine->ram_require & ~RAMSIZE_FIXED;
+
+    if (machine->ram_require & RAMSIZE_FIXED) {
+        if (ram_size > 0) {
+            if (ram_size < phys_ram_size) {
+                fprintf(stderr, "Machine `%s' requires %llu bytes of memory\n",
+                                machine->name, (unsigned long long) phys_ram_size);
+                exit(-1);
+            }
+
+            phys_ram_size = ram_size;
+        } else
+            ram_size = phys_ram_size;
+    } else {
+        if (ram_size == 0)
+            ram_size = DEFAULT_RAM_SIZE * 1024 * 1024;
+
+        phys_ram_size += ram_size;
+    }
 
     phys_ram_base = qemu_vmalloc(phys_ram_size);
     if (!phys_ram_base) {
@@ -8992,17 +8504,18 @@ int main(int argc, char **argv)
     /* Maintain compatibility with multiple stdio monitors */
     if (!strcmp(monitor_device,"stdio")) {
         for (i = 0; i < MAX_SERIAL_PORTS; i++) {
-            if (!strcmp(serial_devices[i],"mon:stdio")) {
-                monitor_device[0] = '\0';
+            const char *devname = serial_devices[i];
+            if (devname && !strcmp(devname,"mon:stdio")) {
+                monitor_device = NULL;
                 break;
-            } else if (!strcmp(serial_devices[i],"stdio")) {
-                monitor_device[0] = '\0';
-                pstrcpy(serial_devices[0], sizeof(serial_devices[0]), "mon:stdio");
+            } else if (devname && !strcmp(devname,"stdio")) {
+                monitor_device = NULL;
+                serial_devices[i] = "mon:stdio";
                 break;
             }
         }
     }
-    if (monitor_device[0] != '\0') {
+    if (monitor_device) {
         monitor_hd = qemu_chr_open(monitor_device);
         if (!monitor_hd) {
             fprintf(stderr, "qemu: could not open monitor device '%s'\n", monitor_device);
@@ -9013,7 +8526,7 @@ int main(int argc, char **argv)
 
     for(i = 0; i < MAX_SERIAL_PORTS; i++) {
         const char *devname = serial_devices[i];
-        if (devname[0] != '\0' && strcmp(devname, "none")) {
+        if (devname && strcmp(devname, "none")) {
             serial_hds[i] = qemu_chr_open(devname);
             if (!serial_hds[i]) {
                 fprintf(stderr, "qemu: could not open serial device '%s'\n",
@@ -9027,7 +8540,7 @@ int main(int argc, char **argv)
 
     for(i = 0; i < MAX_PARALLEL_PORTS; i++) {
         const char *devname = parallel_devices[i];
-        if (devname[0] != '\0' && strcmp(devname, "none")) {
+        if (devname && strcmp(devname, "none")) {
             parallel_hds[i] = qemu_chr_open(devname);
             if (!parallel_hds[i]) {
                 fprintf(stderr, "qemu: could not open parallel device '%s'\n",

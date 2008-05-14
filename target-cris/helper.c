@@ -61,7 +61,7 @@ static void cris_shift_ccs(CPUState *env)
 	uint32_t ccs;
 	/* Apply the ccs shift.  */
 	ccs = env->pregs[PR_CCS];
-	ccs = (ccs & 0xc0000000) | ((ccs << 12) >> 2);
+	ccs = ((ccs & 0xc0000000) | ((ccs << 12) >> 2)) & ~0x3ff;
 	env->pregs[PR_CCS] = ccs;
 }
 
@@ -73,12 +73,18 @@ int cpu_cris_handle_mmu_fault (CPUState *env, target_ulong address, int rw,
 	int r = -1;
 	target_ulong phy;
 
-	D(printf ("%s addr=%x pc=%x\n", __func__, address, env->pc));
+	D(printf ("%s addr=%x pc=%x rw=%x\n", __func__, address, env->pc, rw));
 	address &= TARGET_PAGE_MASK;
 	prot = PAGE_READ | PAGE_WRITE | PAGE_EXEC;
 	miss = cris_mmu_translate(&res, env, address, rw, mmu_idx);
 	if (miss)
 	{
+		if (env->exception_index == EXCP_MMU_FAULT)
+			cpu_abort(env, 
+				  "CRIS: Illegal recursive bus fault."
+				  "addr=%x rw=%d\n",
+				  address, rw);
+
 		env->exception_index = EXCP_MMU_FAULT;
 		env->fault_vector = res.bf_vec;
 		r = 1;
@@ -86,12 +92,15 @@ int cpu_cris_handle_mmu_fault (CPUState *env, target_ulong address, int rw,
 	else
 	{
 		phy = res.phy;
-		prot = PAGE_READ | PAGE_WRITE | PAGE_EXEC;
+		prot = res.prot;
+		address &= TARGET_PAGE_MASK;
 		r = tlb_set_page(env, address, phy, prot, mmu_idx, is_softmmu);
 	}
-	D(printf("%s returns %d irqreq=%x addr=%x ismmu=%d\n", 
-			__func__, r, env->interrupt_request, 
-			address, is_softmmu));
+	if (r > 0)
+		D(fprintf(logfile, "%s returns %d irqreq=%x addr=%x"
+			  " phy=%x ismmu=%d vec=%x pc=%x\n", 
+			  __func__, r, env->interrupt_request, 
+			  address, res.phy, is_softmmu, res.bf_vec, env->pc));
 	return r;
 }
 
@@ -99,9 +108,9 @@ void do_interrupt(CPUState *env)
 {
 	int ex_vec = -1;
 
-	D(fprintf (stderr, "exception index=%d interrupt_req=%d\n",
-		 env->exception_index,
-		 env->interrupt_request));
+	D(fprintf (logfile, "exception index=%d interrupt_req=%d\n",
+		   env->exception_index,
+		   env->interrupt_request));
 
 	switch (env->exception_index)
 	{
@@ -113,40 +122,53 @@ void do_interrupt(CPUState *env)
 			break;
 
 		case EXCP_MMU_FAULT:
-			/* ERP is already setup by translate-all.c through
-			   re-translation of the aborted TB combined with 
-			   pc searching.  */
 			ex_vec = env->fault_vector;
+			env->pregs[PR_ERP] = env->pc;
 			break;
 
 		default:
-		{
-			/* Maybe the irq was acked by sw before we got a
-			   change to take it.  */
-			if (env->interrupt_request & CPU_INTERRUPT_HARD) {
-				/* Vectors below 0x30 are internal
-				   exceptions, i.e not interrupt requests
-				   from the interrupt controller.  */
-				if (env->interrupt_vector < 0x30)
-					return;
-				/* Is the core accepting interrupts?  */
-				if (!(env->pregs[PR_CCS] & I_FLAG)) {
-					return;
-				}
-				/* The interrupt controller gives us the
-				   vector.  */
-				ex_vec = env->interrupt_vector;
-				/* Normal interrupts are taken between
-				   TB's.  env->pc is valid here.  */
-				env->pregs[PR_ERP] = env->pc;
-			}
-		}
-		break;
+			/* Is the core accepting interrupts?  */
+			if (!(env->pregs[PR_CCS] & I_FLAG))
+				return;
+			/* The interrupt controller gives us the
+			   vector.  */
+			ex_vec = env->interrupt_vector;
+			/* Normal interrupts are taken between
+			   TB's.  env->pc is valid here.  */
+			env->pregs[PR_ERP] = env->pc;
+			break;
 	}
+
+	if (env->dslot) {
+		D(fprintf(logfile, "excp isr=%x PC=%x ds=%d SP=%x"
+			  " ERP=%x pid=%x ccs=%x cc=%d %x\n",
+			  ex_vec, env->pc, env->dslot,
+			  env->regs[R_SP],
+			  env->pregs[PR_ERP], env->pregs[PR_PID],
+			  env->pregs[PR_CCS],
+			  env->cc_op, env->cc_mask));
+		/* We loose the btarget, btaken state here so rexec the
+		   branch.  */
+		env->pregs[PR_ERP] -= env->dslot;
+		/* Exception starts with dslot cleared.  */
+		env->dslot = 0;
+	}
+	
 	env->pc = ldl_code(env->pregs[PR_EBP] + ex_vec * 4);
-	/* Apply the CRIS CCS shift.  */
+
+	if (env->pregs[PR_CCS] & U_FLAG) {
+		/* Swap stack pointers.  */
+		env->pregs[PR_USP] = env->regs[R_SP];
+		env->regs[R_SP] = env->ksp;
+	}
+
+	/* Apply the CRIS CCS shift. Clears U if set.  */
 	cris_shift_ccs(env);
-	D(printf ("%s ebp=%x isr=%x vec=%x\n", __func__, ebp, isr, ex_vec));
+	D(fprintf (logfile, "%s isr=%x vec=%x ccs=%x pid=%d erp=%x\n", 
+		   __func__, env->pc, ex_vec, 
+		   env->pregs[PR_CCS],
+		   env->pregs[PR_PID], 
+		   env->pregs[PR_ERP]));
 }
 
 target_phys_addr_t cpu_get_phys_page_debug(CPUState * env, target_ulong addr)

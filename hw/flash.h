@@ -11,9 +11,10 @@ pflash_t *pflash_cfi01_register(target_phys_addr_t base, ram_addr_t off,
 /* pflash_cfi02.c */
 pflash_t *pflash_cfi02_register(target_phys_addr_t base, ram_addr_t off,
                                 BlockDriverState *bs, uint32_t sector_len,
-                                int nb_blocs, int width,
+                                int nb_blocs, int nb_mappings, int width,
                                 uint16_t id0, uint16_t id1,
-                                uint16_t id2, uint16_t id3);
+                                uint16_t id2, uint16_t id3,
+                                uint16_t unlock_addr0, uint16_t unlock_addr1);
 
 /* nand.c */
 struct nand_flash_s;
@@ -33,6 +34,11 @@ uint8_t nand_getio(struct nand_flash_s *s);
 #define NAND_MFR_STMICRO	0x20
 #define NAND_MFR_HYNIX		0xad
 #define NAND_MFR_MICRON		0x2c
+
+/* onenand.c */
+void onenand_base_update(void *opaque, target_phys_addr_t new);
+void onenand_base_unmap(void *opaque);
+void *onenand_init(uint32_t id, int regshift, qemu_irq irq);
 
 /* ecc.c */
 struct ecc_state_s {

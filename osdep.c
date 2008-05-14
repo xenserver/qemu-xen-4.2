@@ -141,7 +141,6 @@ static void *kqemu_vmalloc(size_t size)
             int64_t free_space;
             int ram_mb;
 
-            extern int ram_size;
             free_space = (int64_t)stfs.f_bavail * stfs.f_bsize;
             if ((ram_size + 8192 * 1024) >= free_space) {
                 ram_mb = (ram_size / (1024 * 1024));
@@ -150,8 +149,7 @@ static void *kqemu_vmalloc(size_t size)
                         tmpdir, ram_mb);
                 if (strcmp(tmpdir, "/dev/shm") == 0) {
                     fprintf(stderr, "To have more space available provided you have enough RAM and swap, do as root:\n"
-                            "umount /dev/shm\n"
-                            "mount -t tmpfs -o size=%dm none /dev/shm\n",
+                            "mount -o remount,size=%dm /dev/shm\n",
                             ram_mb + 16);
                 } else {
                     fprintf(stderr,
@@ -244,26 +242,6 @@ void qemu_vfree(void *ptr)
 }
 
 #endif
-
-void *qemu_mallocz(size_t size)
-{
-    void *ptr;
-    ptr = qemu_malloc(size);
-    if (!ptr)
-        return NULL;
-    memset(ptr, 0, size);
-    return ptr;
-}
-
-char *qemu_strdup(const char *str)
-{
-    char *ptr;
-    ptr = qemu_malloc(strlen(str) + 1);
-    if (!ptr)
-        return NULL;
-    strcpy(ptr, str);
-    return ptr;
-}
 
 int qemu_create_pidfile(const char *filename)
 {

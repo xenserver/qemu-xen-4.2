@@ -5,8 +5,8 @@
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License as
- * published by the Free Software Foundation; either version 2 of
- * the License, or (at your option) any later version.
+ * published by the Free Software Foundation; either version 2 or
+ * (at your option) version 3 of the License.
  *
  * This program is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
@@ -25,6 +25,7 @@
 #include "omap.h"
 #include "boards.h"
 #include "arm-misc.h"
+#include "devices.h"
 
 static uint32_t static_readb(void *opaque, target_phys_addr_t offset)
 {
@@ -32,12 +33,14 @@ static uint32_t static_readb(void *opaque, target_phys_addr_t offset)
     return *val >> ((offset & 3) << 3);
 }
 
-static uint32_t static_readh(void *opaque, target_phys_addr_t offset) {
+static uint32_t static_readh(void *opaque, target_phys_addr_t offset)
+{
     uint32_t *val = (uint32_t *) opaque;
     return *val >> ((offset & 1) << 3);
 }
 
-static uint32_t static_readw(void *opaque, target_phys_addr_t offset) {
+static uint32_t static_readw(void *opaque, target_phys_addr_t offset)
+{
     uint32_t *val = (uint32_t *) opaque;
     return *val >> ((offset & 0) << 3);
 }
@@ -82,6 +85,12 @@ static CPUWriteMemoryFunc *static_writefn[] = {
 #define PALMTE_MMC2_GPIO	7
 #define PALMTE_MMC3_GPIO	11
 
+static struct mouse_transform_info_s palmte_pointercal = {
+    .x = 320,
+    .y = 320,
+    .a = { -5909, 8, 22465308, 104, 7644, -1219972, 65536 },
+};
+
 static void palmte_microwire_setup(struct omap_mpu_state_s *cpu)
 {
     struct uwire_slave_s *tsc;
@@ -96,6 +105,8 @@ static void palmte_microwire_setup(struct omap_mpu_state_s *cpu)
 
     omap_uwire_attach(cpu->microwire, tsc, 0);
     omap_mcbsp_i2s_attach(cpu->mcbsp1, tsc210x_codec(tsc));
+
+    tsc210x_set_transform(tsc, &palmte_pointercal);
 }
 
 static struct {
@@ -183,14 +194,20 @@ static void palmte_gpio_setup(struct omap_mpu_state_s *cpu)
     qemu_irq_raise(omap_mpuio_in_get(cpu->mpuio)[11]);
 }
 
-static void palmte_init(int ram_size, int vga_ram_size,
+static struct arm_boot_info palmte_binfo = {
+    .loader_start = OMAP_EMIFF_BASE,
+    .ram_size = 0x02000000,
+    .board_id = 0x331,
+};
+
+static void palmte_init(ram_addr_t ram_size, int vga_ram_size,
                 const char *boot_device, DisplayState *ds,
                 const char *kernel_filename, const char *kernel_cmdline,
                 const char *initrd_filename, const char *cpu_model)
 {
     struct omap_mpu_state_s *cpu;
     int flash_size = 0x00800000;
-    int sdram_size = 0x02000000;
+    int sdram_size = palmte_binfo.ram_size;
     int io;
     static uint32_t cs0val = 0xffffffff;
     static uint32_t cs1val = 0x0000e1a0;
@@ -250,10 +267,12 @@ static void palmte_init(int ram_size, int vga_ram_size,
     /* Load the kernel.  */
     if (kernel_filename) {
         /* Start at bootloader.  */
-        cpu->env->regs[15] = OMAP_EMIFF_BASE;
+        cpu->env->regs[15] = palmte_binfo.loader_start;
 
-        arm_load_kernel(cpu->env, sdram_size, kernel_filename, kernel_cmdline,
-                        initrd_filename, 0x331, OMAP_EMIFF_BASE);
+        palmte_binfo.kernel_filename = kernel_filename;
+        palmte_binfo.kernel_cmdline = kernel_cmdline;
+        palmte_binfo.initrd_filename = initrd_filename;
+        arm_load_kernel(cpu->env, &palmte_binfo);
     }
 
     dpy_resize(ds, 320, 320);
@@ -263,4 +282,5 @@ QEMUMachine palmte_machine = {
     "cheetah",
     "Palm Tungsten|E aka. Cheetah PDA (OMAP310)",
     palmte_init,
+    (0x02000000 + 0x00800000 + OMAP15XX_SRAM_SIZE) | RAMSIZE_FIXED,
 };

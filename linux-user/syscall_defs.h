@@ -830,6 +830,14 @@ struct target_pollfd {
 #define TARGET_HDIO_SET_DMA           0x0326  /* change use-dma flag */
 #define TARGET_HDIO_SET_PIO_MODE      0x0327  /* reconfig interface to new speed */
 
+/* loop ioctls */
+#define TARGET_LOOP_SET_FD            0x4C00
+#define TARGET_LOOP_CLR_FD            0x4C01
+#define TARGET_LOOP_SET_STATUS        0x4C02
+#define TARGET_LOOP_GET_STATUS        0x4C03
+#define TARGET_LOOP_SET_STATUS64      0x4C04
+#define TARGET_LOOP_GET_STATUS64      0x4C05
+#define TARGET_LOOP_CHANGE_FD         0x4C06
 
 /* from asm/termbits.h */
 
@@ -1752,6 +1760,9 @@ struct target_flock {
 struct target_flock64 {
 	short  l_type;
 	short  l_whence;
+#if defined(TARGET_PPC) || defined(TARGET_X86_64) || defined(TARGET_MIPS) || defined(TARGET_SPARC) || defined(TARGET_HPPA)
+        int __pad;
+#endif
 	unsigned long long l_start;
 	unsigned long long l_len;
 	int  l_pid;

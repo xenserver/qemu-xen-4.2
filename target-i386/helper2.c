@@ -28,6 +28,7 @@
 #include "cpu.h"
 #include "exec-all.h"
 #include "svm.h"
+#include "qemu-common.h"
 
 //#define DEBUG_MMU
 
@@ -128,6 +129,13 @@ typedef struct x86_def_t {
     uint32_t xlevel;
 } x86_def_t;
 
+#define I486_FEATURES (CPUID_FP87 | CPUID_VME | CPUID_PSE)
+#define PENTIUM_FEATURES (I486_FEATURES | CPUID_DE | CPUID_TSC | \
+          CPUID_MSR | CPUID_MCE | CPUID_CX8 | CPUID_MMX)
+#define PENTIUM2_FEATURES (PENTIUM_FEATURES | CPUID_PAE | CPUID_SEP | \
+          CPUID_MTRR | CPUID_PGE | CPUID_MCA | CPUID_CMOV | CPUID_PAT | \
+          CPUID_PSE36 | CPUID_FXSR)
+#define PENTIUM3_FEATURES (PENTIUM2_FEATURES | CPUID_SSE)
 #define PPRO_FEATURES (CPUID_FP87 | CPUID_DE | CPUID_PSE | CPUID_TSC | \
           CPUID_MSR | CPUID_MCE | CPUID_CX8 | CPUID_PGE | CPUID_CMOV | \
           CPUID_PAT | CPUID_FXSR | CPUID_MMX | CPUID_SSE | CPUID_SSE2 | \
@@ -150,7 +158,8 @@ static x86_def_t x86_defs[] = {
             CPUID_PSE36,
         .ext_features = CPUID_EXT_SSE3,
         .ext2_features = (PPRO_FEATURES & 0x0183F3FF) | 
-            CPUID_EXT2_LM | CPUID_EXT2_SYSCALL | CPUID_EXT2_NX,
+            CPUID_EXT2_LM | CPUID_EXT2_SYSCALL | CPUID_EXT2_NX |
+            CPUID_EXT2_3DNOW | CPUID_EXT2_3DNOWEXT,
         .ext3_features = CPUID_EXT3_SVM,
         .xlevel = 0x8000000A,
     },
@@ -171,7 +180,7 @@ static x86_def_t x86_defs[] = {
         .family = 4,
         .model = 0,
         .stepping = 0,
-        .features = 0x0000000B,
+        .features = I486_FEATURES,
         .xlevel = 0,
     },
     {
@@ -180,7 +189,7 @@ static x86_def_t x86_defs[] = {
         .family = 5,
         .model = 4,
         .stepping = 3,
-        .features = 0x008001BF,
+        .features = PENTIUM_FEATURES,
         .xlevel = 0,
     },
     {
@@ -189,7 +198,7 @@ static x86_def_t x86_defs[] = {
         .family = 6,
         .model = 5,
         .stepping = 2,
-        .features = 0x0183F9FF,
+        .features = PENTIUM2_FEATURES,
         .xlevel = 0,
     },
     {
@@ -198,8 +207,21 @@ static x86_def_t x86_defs[] = {
         .family = 6,
         .model = 7,
         .stepping = 3,
-        .features = 0x0383F9FF,
+        .features = PENTIUM3_FEATURES,
         .xlevel = 0,
+    },
+    {
+        .name = "athlon",
+        .level = 2,
+        .vendor1 = 0x68747541, /* "Auth" */
+        .vendor2 = 0x69746e65, /* "enti" */
+        .vendor3 = 0x444d4163, /* "cAMD" */
+        .family = 6,
+        .model = 2,
+        .stepping = 3,
+        .features = PPRO_FEATURES | PPRO_FEATURES | CPUID_PSE36 | CPUID_VME | CPUID_MTRR | CPUID_MCA,
+        .ext2_features = (PPRO_FEATURES & 0x0183F3FF) | CPUID_EXT2_MMXEXT | CPUID_EXT2_3DNOW | CPUID_EXT2_3DNOWEXT,
+        .xlevel = 0x80000008,
     },
 };
 
@@ -355,7 +377,7 @@ void cpu_reset(CPUX86State *env)
     env->hflags |= HF_GIF_MASK;
 
     cpu_x86_update_cr0(env, 0x60000010);
-    env->a20_mask = 0xffffffff;
+    env->a20_mask = ~0x0;
     env->smbase = 0x30000;
 
     env->idt.limit = 0xffff;
@@ -673,7 +695,7 @@ void cpu_x86_set_a20(CPUX86State *env, int a20_state)
         /* when a20 is changed, all the MMU mappings are invalid, so
            we must flush everything */
         tlb_flush(env, 1);
-        env->a20_mask = 0xffefffff | (a20_state << 20);
+        env->a20_mask = (~0x100000) | (a20_state << 20);
     }
 }
 
@@ -778,7 +800,17 @@ target_phys_addr_t cpu_get_phys_page_debug(CPUState *env, target_ulong addr)
 
 #else
 
-#define PHYS_ADDR_MASK 0xfffff000
+/* XXX: This value should match the one returned by CPUID
+ * and in exec.c */
+#if defined(USE_KQEMU)
+#define PHYS_ADDR_MASK 0xfffff000L
+#else
+# if defined(TARGET_X86_64)
+# define PHYS_ADDR_MASK 0xfffffff000L
+# else
+# define PHYS_ADDR_MASK 0xffffff000L
+# endif
+#endif
 
 /* return value:
    -1 = cannot handle fault
@@ -790,9 +822,10 @@ int cpu_x86_handle_mmu_fault(CPUX86State *env, target_ulong addr,
                              int is_write1, int mmu_idx, int is_softmmu)
 {
     uint64_t ptep, pte;
-    uint32_t pdpe_addr, pde_addr, pte_addr;
+    target_ulong pde_addr, pte_addr;
     int error_code, is_dirty, prot, page_size, ret, is_write, is_user;
-    unsigned long paddr, page_offset;
+    target_phys_addr_t paddr;
+    uint32_t page_offset;
     target_ulong vaddr, virt_addr;
 
     is_user = mmu_idx == MMU_USER_IDX;
@@ -812,12 +845,11 @@ int cpu_x86_handle_mmu_fault(CPUX86State *env, target_ulong addr,
 
     if (env->cr[4] & CR4_PAE_MASK) {
         uint64_t pde, pdpe;
+        target_ulong pdpe_addr;
 
-        /* XXX: we only use 32 bit physical addresses */
 #ifdef TARGET_X86_64
         if (env->hflags & HF_LMA_MASK) {
-            uint32_t pml4e_addr;
-            uint64_t pml4e;
+            uint64_t pml4e_addr, pml4e;
             int32_t sext;
 
             /* test virtual address sign extension */
@@ -1079,17 +1111,19 @@ int cpu_x86_handle_mmu_fault(CPUX86State *env, target_ulong addr,
 
 target_phys_addr_t cpu_get_phys_page_debug(CPUState *env, target_ulong addr)
 {
-    uint32_t pde_addr, pte_addr;
-    uint32_t pde, pte, paddr, page_offset, page_size;
+    target_ulong pde_addr, pte_addr;
+    uint64_t pte;
+    target_phys_addr_t paddr;
+    uint32_t page_offset;
+    int page_size;
 
     if (env->cr[4] & CR4_PAE_MASK) {
-        uint32_t pdpe_addr, pde_addr, pte_addr;
-        uint32_t pdpe;
+        target_ulong pdpe_addr;
+        uint64_t pde, pdpe;
 
-        /* XXX: we only use 32 bit physical addresses */
 #ifdef TARGET_X86_64
         if (env->hflags & HF_LMA_MASK) {
-            uint32_t pml4e_addr, pml4e;
+            uint64_t pml4e_addr, pml4e;
             int32_t sext;
 
             /* test virtual address sign extension */
@@ -1099,13 +1133,13 @@ target_phys_addr_t cpu_get_phys_page_debug(CPUState *env, target_ulong addr)
 
             pml4e_addr = ((env->cr[3] & ~0xfff) + (((addr >> 39) & 0x1ff) << 3)) &
                 env->a20_mask;
-            pml4e = ldl_phys(pml4e_addr);
+            pml4e = ldq_phys(pml4e_addr);
             if (!(pml4e & PG_PRESENT_MASK))
                 return -1;
 
             pdpe_addr = ((pml4e & ~0xfff) + (((addr >> 30) & 0x1ff) << 3)) &
                 env->a20_mask;
-            pdpe = ldl_phys(pdpe_addr);
+            pdpe = ldq_phys(pdpe_addr);
             if (!(pdpe & PG_PRESENT_MASK))
                 return -1;
         } else
@@ -1113,14 +1147,14 @@ target_phys_addr_t cpu_get_phys_page_debug(CPUState *env, target_ulong addr)
         {
             pdpe_addr = ((env->cr[3] & ~0x1f) + ((addr >> 27) & 0x18)) &
                 env->a20_mask;
-            pdpe = ldl_phys(pdpe_addr);
+            pdpe = ldq_phys(pdpe_addr);
             if (!(pdpe & PG_PRESENT_MASK))
                 return -1;
         }
 
         pde_addr = ((pdpe & ~0xfff) + (((addr >> 21) & 0x1ff) << 3)) &
             env->a20_mask;
-        pde = ldl_phys(pde_addr);
+        pde = ldq_phys(pde_addr);
         if (!(pde & PG_PRESENT_MASK)) {
             return -1;
         }
@@ -1133,9 +1167,11 @@ target_phys_addr_t cpu_get_phys_page_debug(CPUState *env, target_ulong addr)
             pte_addr = ((pde & ~0xfff) + (((addr >> 12) & 0x1ff) << 3)) &
                 env->a20_mask;
             page_size = 4096;
-            pte = ldl_phys(pte_addr);
+            pte = ldq_phys(pte_addr);
         }
     } else {
+        uint32_t pde;
+
         if (!(env->cr[0] & CR0_PG_MASK)) {
             pte = addr;
             page_size = 4096;

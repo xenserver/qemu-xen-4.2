@@ -67,8 +67,25 @@ void wm8750_data_req_set(i2c_slave *i2c,
                 void (*data_req)(void *, int, int), void *opaque);
 void wm8750_dac_dat(void *opaque, uint32_t sample);
 uint32_t wm8750_adc_dat(void *opaque);
+void *wm8750_dac_buffer(void *opaque, int samples);
+void wm8750_dac_commit(void *opaque);
+void wm8750_set_bclk_in(void *opaque, int hz);
 
 /* ssd0303.c */
 void ssd0303_init(DisplayState *ds, i2c_bus *bus, int address);
+
+/* twl92230.c */
+i2c_slave *twl92230_init(i2c_bus *bus, qemu_irq irq);
+qemu_irq *twl92230_gpio_in_get(i2c_slave *i2c);
+void twl92230_gpio_out_set(i2c_slave *i2c, int line, qemu_irq handler);
+
+/* tmp105.c */
+struct i2c_slave *tmp105_init(i2c_bus *bus, qemu_irq alarm);
+void tmp105_reset(i2c_slave *i2c);
+void tmp105_set(i2c_slave *i2c, int temp);
+
+/* lm832x.c */
+struct i2c_slave *lm8323_init(i2c_bus *bus, qemu_irq nirq);
+void lm832x_key_event(struct i2c_slave *i2c, int key, int state);
 
 #endif

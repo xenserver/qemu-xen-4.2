@@ -31,6 +31,7 @@
 #include "net.h"
 #include "smbus.h"
 #include "boards.h"
+#include "console.h"
 
 /* output Bochs bios info messages */
 //#define DEBUG_BIOS
@@ -38,6 +39,8 @@
 #define BIOS_FILENAME "bios.bin"
 #define VGABIOS_FILENAME "vgabios.bin"
 #define VGABIOS_CIRRUS_FILENAME "vgabios-cirrus.bin"
+
+#define PC_MAX_BIOS_SIZE (4 * 1024 * 1024)
 
 /* Leave a chunk of memory at the top of RAM for the BIOS ACPI tables.  */
 #define ACPI_DATA_SIZE       0x10000
@@ -113,9 +116,16 @@ int cpu_get_pic_interrupt(CPUState *env)
 
 static void pic_irq_request(void *opaque, int irq, int level)
 {
-    CPUState *env = opaque;
-    if (level && apic_accept_pic_intr(env))
-        cpu_interrupt(env, CPU_INTERRUPT_HARD);
+    CPUState *env = first_cpu;
+
+    if (!level)
+        return;
+
+    while (env) {
+        if (apic_accept_pic_intr(env))
+            apic_local_deliver(env, APIC_LINT0);
+        env = env->next_cpu;
+    }
 }
 
 /* PC cmos mappings */
@@ -180,8 +190,36 @@ static int boot_device2nibble(char boot_device)
     return 0;
 }
 
+/* copy/pasted from cmos_init, should be made a general function
+ and used there as well */
+int pc_boot_set(const char *boot_device)
+{
+#define PC_MAX_BOOT_DEVICES 3
+    RTCState *s = rtc_state;
+    int nbds, bds[3] = { 0, };
+    int i;
+
+    nbds = strlen(boot_device);
+    if (nbds > PC_MAX_BOOT_DEVICES) {
+        term_printf("Too many boot devices for PC\n");
+        return(1);
+    }
+    for (i = 0; i < nbds; i++) {
+        bds[i] = boot_device2nibble(boot_device[i]);
+        if (bds[i] == 0) {
+            term_printf("Invalid boot device for PC: '%c'\n",
+                    boot_device[i]);
+            return(1);
+        }
+    }
+    rtc_set_memory(s, 0x3d, (bds[1] << 4) | bds[0]);
+    rtc_set_memory(s, 0x38, (bds[2] << 4));
+    return(0);
+}
+
 /* hd_table must contain 4 block drivers */
-static void cmos_init(int ram_size, const char *boot_device, BlockDriverState **hd_table)
+static void cmos_init(ram_addr_t ram_size, ram_addr_t above_4g_mem_size,
+                      const char *boot_device, BlockDriverState **hd_table)
 {
     RTCState *s = rtc_state;
     int nbds, bds[3] = { 0, };
@@ -204,6 +242,12 @@ static void cmos_init(int ram_size, const char *boot_device, BlockDriverState **
     rtc_set_memory(s, 0x30, val);
     rtc_set_memory(s, 0x31, val >> 8);
 
+    if (above_4g_mem_size) {
+        rtc_set_memory(s, 0x5b, (unsigned int)above_4g_mem_size >> 16);
+        rtc_set_memory(s, 0x5c, (unsigned int)above_4g_mem_size >> 24);
+        rtc_set_memory(s, 0x5d, (uint64_t)above_4g_mem_size >> 32);
+    }
+
     if (ram_size > (16 * 1024 * 1024))
         val = (ram_size / 65536) - ((16 * 1024 * 1024) / 65536);
     else
@@ -212,6 +256,9 @@ static void cmos_init(int ram_size, const char *boot_device, BlockDriverState **
         val = 65535;
     rtc_set_memory(s, 0x34, val);
     rtc_set_memory(s, 0x35, val >> 8);
+
+    /* set the number of CPU */
+    rtc_set_memory(s, 0x5f, smp_cpus - 1);
 
     /* set boot devices, and disable floppy signature check if requested */
 #define PC_MAX_BOOT_DEVICES 3
@@ -433,36 +480,6 @@ static void generate_bootsect(uint32_t gpr[8], uint16_t segs[6], uint16_t ip)
     *p++ = segs[1] >> 8;
 
     bdrv_set_boot_sector(drives_table[hda].bdrv, bootsect, sizeof(bootsect));
-}
-
-static int load_kernel(const char *filename, uint8_t *addr,
-                       uint8_t *real_addr)
-{
-    int fd, size;
-    int setup_sects;
-
-    fd = open(filename, O_RDONLY | O_BINARY);
-    if (fd < 0)
-        return -1;
-
-    /* load 16 bit code */
-    if (qemu_read_ok(fd, real_addr, 512) < 0)
-        goto fail;
-    setup_sects = real_addr[0x1F1];
-    if (!setup_sects)
-        setup_sects = 4;
-    if (qemu_read_ok(fd, real_addr + 512, setup_sects * 512) < 0)
-        goto fail;
-
-    /* load 32 bit code */
-    size = qemu_read(fd, addr, 16 * 1024 * 1024);
-    if (size < 0)
-        goto fail;
-    close(fd);
-    return size;
- fail:
-    close(fd);
-    return -1;
 }
 
 static long get_file_size(FILE *f)
@@ -696,7 +713,7 @@ static void pc_init_ne2k_isa(NICInfo *nd, qemu_irq *pic)
 }
 
 /* PC hardware initialisation */
-static void pc_init1(int ram_size, int vga_ram_size,
+static void pc_init1(ram_addr_t ram_size, int vga_ram_size,
                      const char *boot_device, DisplayState *ds,
                      const char *kernel_filename, const char *kernel_cmdline,
                      const char *initrd_filename,
@@ -705,6 +722,7 @@ static void pc_init1(int ram_size, int vga_ram_size,
     char buf[1024];
     int ret, linux_boot, i;
     ram_addr_t ram_addr, vga_ram_addr, bios_offset, vga_bios_offset;
+    ram_addr_t below_4g_mem_size, above_4g_mem_size = 0;
     int bios_size, isa_bios_size, vga_bios_size;
     PCIBus *pci_bus;
     int piix3_devfn = -1;
@@ -715,6 +733,15 @@ static void pc_init1(int ram_size, int vga_ram_size,
     int index;
     BlockDriverState *hd[MAX_IDE_BUS * MAX_IDE_DEVS];
     BlockDriverState *fd[MAX_FD];
+
+    if (ram_size >= 0xe0000000 ) {
+        above_4g_mem_size = ram_size - 0xe0000000;
+        below_4g_mem_size = 0xe0000000;
+    } else {
+        below_4g_mem_size = ram_size;
+    }
+
+    qemu_register_boot_set(pc_boot_set);
 
     linux_boot = (kernel_filename != NULL);
 
@@ -744,12 +771,19 @@ static void pc_init1(int ram_size, int vga_ram_size,
         if (pci_enabled) {
             apic_init(env);
         }
-        vmport_init(env);
     }
+
+    vmport_init();
 
     /* allocate RAM */
     ram_addr = qemu_ram_alloc(ram_size);
-    cpu_register_physical_memory(0, ram_size, ram_addr);
+    cpu_register_physical_memory(0, below_4g_mem_size, ram_addr);
+
+    /* above 4giga memory allocation */
+    if (above_4g_mem_size > 0) {
+        cpu_register_physical_memory(0x100000000ULL, above_4g_mem_size,
+                                     ram_addr + below_4g_mem_size);
+    }
 
     /* allocate VGA RAM */
     vga_ram_addr = qemu_ram_alloc(vga_ram_size);
@@ -840,7 +874,7 @@ static void pc_init1(int ram_size, int vga_ram_size,
     if (linux_boot)
 	load_linux(kernel_filename, initrd_filename, kernel_cmdline);
 
-    cpu_irq = qemu_allocate_irqs(pic_irq_request, first_cpu, 1);
+    cpu_irq = qemu_allocate_irqs(pic_irq_request, NULL, 1);
     i8259 = i8259_init(cpu_irq[0]);
     ferr_irq = i8259[13];
 
@@ -897,7 +931,8 @@ static void pc_init1(int ram_size, int vga_ram_size,
 
     for(i = 0; i < MAX_SERIAL_PORTS; i++) {
         if (serial_hds[i]) {
-            serial_init(serial_io[i], i8259[serial_irq[i]], serial_hds[i]);
+            serial_init(serial_io[i], i8259[serial_irq[i]], 115200,
+                        serial_hds[i]);
         }
     }
 
@@ -969,7 +1004,7 @@ static void pc_init1(int ram_size, int vga_ram_size,
     }
     floppy_controller = fdctrl_init(i8259[6], 2, 0, 0x3f0, fd);
 
-    cmos_init(ram_size, boot_device, hd);
+    cmos_init(below_4g_mem_size, above_4g_mem_size, boot_device, hd);
 
     if (pci_enabled && usb_enabled) {
         usb_uhci_piix3_init(pci_bus, piix3_devfn + 2);
@@ -1009,7 +1044,7 @@ static void pc_init1(int ram_size, int vga_ram_size,
     }
 }
 
-static void pc_init_pci(int ram_size, int vga_ram_size,
+static void pc_init_pci(ram_addr_t ram_size, int vga_ram_size,
                         const char *boot_device, DisplayState *ds,
                         const char *kernel_filename,
                         const char *kernel_cmdline,
@@ -1021,7 +1056,7 @@ static void pc_init_pci(int ram_size, int vga_ram_size,
              initrd_filename, 1, cpu_model);
 }
 
-static void pc_init_isa(int ram_size, int vga_ram_size,
+static void pc_init_isa(ram_addr_t ram_size, int vga_ram_size,
                         const char *boot_device, DisplayState *ds,
                         const char *kernel_filename,
                         const char *kernel_cmdline,
@@ -1037,10 +1072,12 @@ QEMUMachine pc_machine = {
     "pc",
     "Standard PC",
     pc_init_pci,
+    VGA_RAM_SIZE + PC_MAX_BIOS_SIZE,
 };
 
 QEMUMachine isapc_machine = {
     "isapc",
     "ISA-only PC",
     pc_init_isa,
+    VGA_RAM_SIZE + PC_MAX_BIOS_SIZE,
 };

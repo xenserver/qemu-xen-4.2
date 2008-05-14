@@ -1,3 +1,7 @@
+  - MIPS Magnum R4000 machine (Hervé Poussineau)
+  - Braille support (Samuel Thibault)
+  - Freecom MusicPal system emulation (Jan Kiszka)
+
 version 0.9.1:
 
   - TFTP booting from host directory (Anthony Liguori, Erwan Velu)

@@ -41,6 +41,8 @@ void *sbi_init(target_phys_addr_t addr, qemu_irq **irq, qemu_irq **cpu_irq,
 /* sun4c_intctl.c */
 void *sun4c_intctl_init(target_phys_addr_t addr, qemu_irq **irq,
                         qemu_irq *parent_irq);
+void sun4c_pic_info(void *opaque);
+void sun4c_irq_info(void *opaque);
 
 /* slavio_timer.c */
 void slavio_timer_init_all(target_phys_addr_t base, qemu_irq master_irq,
@@ -63,14 +65,7 @@ void slavio_set_power_fail(void *opaque, int power_failing);
 void cs_init(target_phys_addr_t base, int irq, void *intctl);
 
 /* sparc32_dma.c */
-void *sparc32_dma_init(target_phys_addr_t daddr, qemu_irq parent_irq,
-                       void *iommu, qemu_irq **dev_irq, qemu_irq **reset);
-void ledma_memory_read(void *opaque, target_phys_addr_t addr,
-                       uint8_t *buf, int len, int do_bswap);
-void ledma_memory_write(void *opaque, target_phys_addr_t addr,
-                        uint8_t *buf, int len, int do_bswap);
-void espdma_memory_read(void *opaque, uint8_t *buf, int len);
-void espdma_memory_write(void *opaque, uint8_t *buf, int len);
+#include "sparc32_dma.h"
 
 /* pcnet.c */
 void lance_init(NICInfo *nd, target_phys_addr_t leaddr, void *dma_opaque,

@@ -3,7 +3,7 @@
 #ifndef HW_BOARDS_H
 #define HW_BOARDS_H
 
-typedef void QEMUMachineInitFunc(int ram_size, int vga_ram_size,
+typedef void QEMUMachineInitFunc(ram_addr_t ram_size, int vga_ram_size,
                                  const char *boot_device, DisplayState *ds,
                                  const char *kernel_filename,
                                  const char *kernel_cmdline,
@@ -14,10 +14,13 @@ typedef struct QEMUMachine {
     const char *name;
     const char *desc;
     QEMUMachineInitFunc *init;
+#define RAMSIZE_FIXED	(1 << 0)
+    ram_addr_t ram_require;
     struct QEMUMachine *next;
 } QEMUMachine;
 
 int qemu_register_machine(QEMUMachine *m);
+void register_machines(void);
 
 /* Axis ETRAX.  */
 extern QEMUMachine bareetraxfs_machine;
@@ -36,11 +39,12 @@ extern QEMUMachine taihu_machine;
 /* mips_r4k.c */
 extern QEMUMachine mips_machine;
 
+/* mips_jazz.c */
+extern QEMUMachine mips_magnum_machine;
+extern QEMUMachine mips_pica61_machine;
+
 /* mips_malta.c */
 extern QEMUMachine mips_malta_machine;
-
-/* mips_pica61.c */
-extern QEMUMachine mips_pica61_machine;
 
 /* mips_mipssim.c */
 extern QEMUMachine mips_mipssim_machine;
@@ -80,6 +84,10 @@ extern QEMUMachine terrierpda_machine;
 /* palm.c */
 extern QEMUMachine palmte_machine;
 
+/* nseries.c */
+extern QEMUMachine n800_machine;
+extern QEMUMachine n810_machine;
+
 /* gumstix.c */
 extern QEMUMachine connex_machine;
 extern QEMUMachine verdex_machine;
@@ -99,5 +107,8 @@ extern QEMUMachine dummy_m68k_machine;
 
 /* mainstone.c */
 extern QEMUMachine mainstone2_machine;
+
+/* musicpal.c */
+extern QEMUMachine musicpal_machine;
 
 #endif
