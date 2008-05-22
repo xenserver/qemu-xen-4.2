@@ -392,8 +392,6 @@ void timeoffset_get(void)
     else
 	time_offset = 0;
 
-    xc_domain_set_time_offset(xc_handle, domid, time_offset);
-
     free(p);
 }
 
@@ -484,7 +482,7 @@ void cpu_handle_ioreq(void *opaque)
     CPUState *env = opaque;
     ioreq_t *req = cpu_get_ioreq();
 
-    handle_buffered_io(env);
+    __handle_buffered_iopage(env);
     if (req) {
         __handle_ioreq(env, req);
 

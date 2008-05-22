@@ -148,8 +148,6 @@ int inet_aton(const char *cp, struct in_addr *ia);
 #else
 #define DEFAULT_RAM_SIZE 128
 #endif
-/* in ms */
-#define GUI_REFRESH_INTERVAL 30
 
 /* Max number of USB devices that can be specified on the commandline.  */
 #define MAX_USB_CMDLINE 8
@@ -195,6 +193,11 @@ int graphic_depth = 15;
 int full_screen = 0;
 int no_frame = 0;
 int no_quit = 0;
+#ifdef CONFIG_OPENGL
+int opengl_enabled = 1;
+#else
+int opengl_enabled = 0;
+#endif
 CharDriverState *serial_hds[MAX_SERIAL_PORTS];
 CharDriverState *parallel_hds[MAX_PARALLEL_PORTS];
 #ifdef TARGET_I386
@@ -5547,6 +5550,8 @@ static void dumb_display_init(DisplayState *ds)
     ds->dpy_update = dumb_update;
     ds->dpy_resize = dumb_resize;
     ds->dpy_refresh = dumb_refresh;
+    ds->gui_timer_interval = 500;
+    ds->idle = 1;
 }
 
 /***********************************************************/
@@ -7185,6 +7190,9 @@ static void help(int exitcode)
            "-alt-grab       use Ctrl-Alt-Shift to grab mouse (instead of Ctrl-Alt)\n"
            "-no-quit        disable SDL window close capability\n"
 #endif
+#ifdef CONFIG_OPENGL
+           "-disable-opengl disable OpenGL rendering, using SDL"
+#endif
 #ifdef TARGET_I386
            "-no-fd-bootchk  disable boot signature checking for floppy disks\n"
 #endif
@@ -7375,6 +7383,7 @@ enum {
     QEMU_OPTION_no_frame,
     QEMU_OPTION_alt_grab,
     QEMU_OPTION_no_quit,
+    QEMU_OPTION_disable_opengl,
     QEMU_OPTION_pidfile,
     QEMU_OPTION_no_kqemu,
     QEMU_OPTION_kernel_kqemu,
@@ -7476,6 +7485,7 @@ const QEMUOption qemu_options[] = {
     { "alt-grab", 0, QEMU_OPTION_alt_grab },
     { "no-quit", 0, QEMU_OPTION_no_quit },
 #endif
+    { "disable-opengl", 0, QEMU_OPTION_disable_opengl },
     { "pidfile", HAS_ARG, QEMU_OPTION_pidfile },
     { "win2k-hack", 0, QEMU_OPTION_win2k_hack },
     { "usbdevice", HAS_ARG, QEMU_OPTION_usbdevice },
@@ -8220,6 +8230,9 @@ int main(int argc, char **argv)
                 no_quit = 1;
                 break;
 #endif
+            case QEMU_OPTION_disable_opengl:
+                opengl_enabled = 0;
+                break;
             case QEMU_OPTION_pidfile:
                 pid_file = optarg;
                 break;
@@ -8563,7 +8576,7 @@ int main(int argc, char **argv)
 #endif
     {
 #if defined(CONFIG_SDL)
-        sdl_display_init(ds, full_screen, no_frame);
+        sdl_display_init(ds, full_screen, no_frame, opengl_enabled);
 #elif defined(CONFIG_COCOA)
         cocoa_display_init(ds, full_screen);
 #else

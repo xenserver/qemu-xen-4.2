@@ -201,6 +201,15 @@
 
 /* set to 1 set disable mult support */
 #define MAX_MULT_SECTORS 16
+#ifdef CONFIG_STUBDOM
+#include <xen/io/blkif.h>
+#define IDE_DMA_BUF_SIZE (BLKIF_MAX_SEGMENTS_PER_REQUEST * TARGET_PAGE_SIZE)
+#else
+#define IDE_DMA_BUF_SIZE 131072
+#endif
+#if (IDE_DMA_BUF_SIZE < MAX_MULT_SECTORS * 512)
+#error "IDE_DMA_BUF_SIZE must be bigger or equal to MAX_MULT_SECTORS * 512"
+#endif
 
 #ifdef CONFIG_STUBDOM
 #include <xen/io/blkif.h>
@@ -357,6 +366,7 @@
 #define ASC_ILLEGAL_OPCODE                   0x20
 #define ASC_LOGICAL_BLOCK_OOR                0x21
 #define ASC_INV_FIELD_IN_CMD_PACKET          0x24
+#define ASC_MEDIUM_MAY_HAVE_CHANGED          0x28
 #define ASC_MEDIUM_NOT_PRESENT               0x3a
 #define ASC_SAVING_PARAMETERS_NOT_SUPPORTED  0x39
 
@@ -1092,6 +1102,8 @@ static void ide_read_dma_cb(void *opaque, int ret)
 
     if (!s->bs) return; /* yikes */
 
+    if (!s->bs) return; /* yikes */
+
     n = s->io_buffer_size >> 9;
     sector_num = ide_get_sector(s);
     if (n > 0) {
@@ -1217,6 +1229,8 @@ static void ide_write_dma_cb(void *opaque, int ret)
 
     if (!s->bs) return; /* yikes */
 
+    if (!s->bs) return; /* yikes */
+
     n = s->io_buffer_size >> 9;
     sector_num = ide_get_sector(s);
     if (n > 0) {
@@ -1260,6 +1274,39 @@ static void ide_sector_write_dma(IDEState *s)
     s->io_buffer_index = 0;
     s->io_buffer_size = 0;
     ide_dma_start(s, ide_write_dma_cb);
+}
+
+static void ide_device_utterly_broken(IDEState *s) {
+    s->status |= BUSY_STAT;
+    s->bs = NULL;
+    /* This prevents all future commands from working.  All of the
+     * asynchronous callbacks (and ide_set_irq, as a safety measure)
+     * check to see whether this has happened and bail if so.
+     */
+}
+
+static void ide_flush_cb(void *opaque, int ret)
+{
+    IDEState *s = opaque;
+
+    if (!s->bs) return; /* yikes */
+
+    if (ret) {
+        /* We are completely doomed.  The IDE spec does not permit us
+	 * to return an error from a flush except via a protocol which
+	 * requires us to say where the error is and which
+	 * contemplates the guest repeating the flush attempt to
+	 * attempt flush the remaining data.  We can't support that
+	 * because f(data)sync (which is what the block drivers use
+	 * eventually) doesn't report the necessary information or
+	 * give us the necessary control.  So we make the disk vanish.
+	 */
+	ide_device_utterly_broken(s);
+	return;
+    }
+    else
+        s->status = READY_STAT;
+    ide_set_irq(s);
 }
 
 static void ide_device_utterly_broken(IDEState *s) {
@@ -1523,6 +1570,8 @@ static void ide_atapi_cmd_read_dma_cb(void *opaque, int ret)
 
     if (!s->bs) return; /* yikes */
 
+    if (!s->bs) return; /* yikes */
+
     if (ret < 0) {
         ide_atapi_io_error(s, ret);
         goto eot;
@@ -1652,6 +1701,11 @@ static void ide_atapi_cmd(IDEState *s)
     switch(s->io_buffer[0]) {
     case GPCMD_TEST_UNIT_READY:
         if (bdrv_is_inserted(s->bs)) {
+            if (s->is_cdrom && s->sense_key == SENSE_NOT_READY) {
+                ide_atapi_cmd_error(s, SENSE_UNIT_ATTENTION, 
+                                    ASC_MEDIUM_MAY_HAVE_CHANGED);
+                break;
+            }
             ide_atapi_cmd_ok(s);
         } else {
             ide_atapi_cmd_error(s, SENSE_NOT_READY,
@@ -2096,6 +2150,8 @@ static void cdrom_change_cb(void *opaque)
 {
     IDEState *s = opaque;
     uint64_t nb_sectors;
+
+    if (!s->bs) return; /* yikes */
 
     if (!s->bs) return; /* yikes */
 

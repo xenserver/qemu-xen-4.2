@@ -575,6 +575,7 @@ BlockDriver bdrv_raw = {
     .bdrv_aio_read = raw_aio_read,
     .bdrv_aio_write = raw_aio_write,
     .bdrv_aio_cancel = raw_aio_cancel,
+    .bdrv_aio_flush = raw_aio_flush,
     .aiocb_size = sizeof(RawAIOCB),
     .protocol_name = "file",
     .bdrv_pread = raw_pread,
