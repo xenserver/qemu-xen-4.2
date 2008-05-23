@@ -45,6 +45,8 @@ typedef struct QEMUSnapshotInfo {
                                      it (default for
                                      bdrv_file_open()) */
 #define BDRV_O_DIRECT      0x0020
+#define BDRV_O_EXTENDABLE  0x0080 /* allow writes out of original size range;
+				     only effective for some drivers */
 
 #ifndef QEMU_IMG
 void bdrv_info(void);

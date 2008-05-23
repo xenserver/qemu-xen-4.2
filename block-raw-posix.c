@@ -941,4 +941,6 @@ BlockDriver bdrv_host_device = {
     .bdrv_set_locked = raw_set_locked,
     /* generic scsi device */
     .bdrv_ioctl = raw_ioctl,
+
+    .bdrv_flags = BLOCK_DRIVER_FLAG_EXTENDABLE
 };
