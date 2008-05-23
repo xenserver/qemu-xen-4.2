@@ -1702,7 +1702,7 @@ static void ide_atapi_cmd(IDEState *s)
     case GPCMD_TEST_UNIT_READY:
         if (bdrv_is_inserted(s->bs)) {
             if (s->is_cdrom && s->sense_key == SENSE_NOT_READY) {
-                ide_atapi_cmd_error(s, SENSE_UNIT_ATTENTION, 
+                ide_atapi_cmd_error(s, SENSE_UNIT_ATTENTION,
                                     ASC_MEDIUM_MAY_HAVE_CHANGED);
                 break;
             }
