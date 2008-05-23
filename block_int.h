@@ -30,6 +30,8 @@
 #define BLOCK_FLAG_COMPRESS	2
 #define BLOCK_FLAG_COMPAT6	4
 
+#define BLOCK_DRIVER_FLAG_EXTENDABLE  0x0001u
+
 struct BlockDriver {
     const char *format_name;
     int instance_size;
@@ -87,6 +89,7 @@ struct BlockDriver {
     /* to control generic scsi devices */
     int (*bdrv_ioctl)(BlockDriverState *bs, unsigned long int req, void *buf);
 
+    unsigned bdrv_flags;
     BlockDriverAIOCB *free_aiocb;
     struct BlockDriver *next;
 };
@@ -99,6 +102,7 @@ struct BlockDriverState {
     int locked;    /* if true, the media cannot temporarily be ejected */
     int encrypted; /* if true, the media is encrypted */
     int sg;        /* if true, the device is a /dev/sg* */
+    int extendable;/* if true, we may write out of original range */
     /* event callback when inserting/removing */
     void (*change_cb)(void *opaque);
     void *change_opaque;
