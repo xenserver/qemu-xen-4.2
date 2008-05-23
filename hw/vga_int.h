@@ -28,7 +28,7 @@
 #define ST01_DISP_ENABLE    0x01
 
 /* bochs VBE support */
-#define CONFIG_BOCHS_VBE
+//#define CONFIG_BOCHS_VBE
 
 #define VBE_DISPI_MAX_XRES              1600
 #define VBE_DISPI_MAX_YRES              1200
@@ -80,13 +80,15 @@
 #define VGA_MAX_HEIGHT 2048
 
 #define VGA_STATE_COMMON                                                \
+    uint8_t *vram_alloc;                                                \
     uint8_t *vram_ptr;                                                  \
+    uint8_t *vram_shadow;                                               \
     unsigned long vram_offset;                                          \
     unsigned int vram_size;                                             \
     unsigned long bios_offset;                                          \
     unsigned int bios_size;                                             \
-    target_phys_addr_t base_ctrl;                                       \
-    int it_shift;                                                       \
+    unsigned long lfb_addr;                                             \
+    unsigned long lfb_end;                                              \
     PCIDevice *pci_dev;                                                 \
     uint32_t latch;                                                     \
     uint8_t sr_index;                                                   \
@@ -137,10 +139,6 @@
     uint32_t cursor_offset;                                             \
     unsigned int (*rgb_to_pixel)(unsigned int r,                        \
                                  unsigned int g, unsigned b);           \
-    vga_hw_update_ptr update;                                           \
-    vga_hw_invalidate_ptr invalidate;                                   \
-    vga_hw_screen_dump_ptr screen_dump;                                 \
-    vga_hw_text_update_ptr text_update;                                 \
     /* hardware mouse cursor support */                                 \
     uint32_t invalidated_y_table[VGA_MAX_HEIGHT / 32];                  \
     void (*cursor_invalidate)(struct VGAState *s);                      \
@@ -164,12 +162,9 @@ static inline int c6_to_8(int v)
 
 void vga_common_init(VGAState *s, DisplayState *ds, uint8_t *vga_ram_base,
                      unsigned long vga_ram_offset, int vga_ram_size);
-void vga_init(VGAState *s);
 uint32_t vga_mem_readb(void *opaque, target_phys_addr_t addr);
 void vga_mem_writeb(void *opaque, target_phys_addr_t addr, uint32_t val);
 void vga_invalidate_scanlines(VGAState *s, int y1, int y2);
-int ppm_save(const char *filename, uint8_t *data,
-             int w, int h, int linesize);
 
 void vga_draw_cursor_line_8(uint8_t *d1, const uint8_t *src1,
                             int poffset, int w,
@@ -184,5 +179,6 @@ void vga_draw_cursor_line_32(uint8_t *d1, const uint8_t *src1,
                              unsigned int color0, unsigned int color1,
                              unsigned int color_xor);
 
+void *vga_update_vram(VGAState *s, void *vga_ram_base, int vga_ram_size);
 extern const uint8_t sr_mask[8];
 extern const uint8_t gr_mask[16];

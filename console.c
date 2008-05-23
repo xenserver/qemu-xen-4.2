@@ -61,7 +61,7 @@ typedef struct QEMUFIFO {
     int count, wptr, rptr;
 } QEMUFIFO;
 
-static int qemu_fifo_write(QEMUFIFO *f, const uint8_t *buf, int len1)
+int qemu_fifo_write(QEMUFIFO *f, const uint8_t *buf, int len1)
 {
     int l, len;
 
@@ -84,7 +84,7 @@ static int qemu_fifo_write(QEMUFIFO *f, const uint8_t *buf, int len1)
     return len1;
 }
 
-static int qemu_fifo_read(QEMUFIFO *f, uint8_t *buf, int len1)
+int qemu_fifo_read(QEMUFIFO *f, uint8_t *buf, int len1)
 {
     int l, len;
 
@@ -106,22 +106,15 @@ static int qemu_fifo_read(QEMUFIFO *f, uint8_t *buf, int len1)
     return len1;
 }
 
-typedef enum {
-    GRAPHIC_CONSOLE,
-    TEXT_CONSOLE,
-    TEXT_CONSOLE_FIXED_SIZE
-} console_type_t;
-
 /* ??? This is mis-named.
    It is used for both text and graphical consoles.  */
 struct TextConsole {
-    console_type_t console_type;
+    int text_console; /* true if text console */
     DisplayState *ds;
     /* Graphic console state.  */
     vga_hw_update_ptr hw_update;
     vga_hw_invalidate_ptr hw_invalidate;
     vga_hw_screen_dump_ptr hw_screen_dump;
-    vga_hw_text_update_ptr hw_text_update;
     void *hw;
 
     int g_width, g_height;
@@ -136,7 +129,6 @@ struct TextConsole {
     TextAttributes t_attrib_default; /* default text attributes */
     TextAttributes t_attrib; /* currently active text attributes */
     TextCell *cells;
-    int text_x[2], text_y[2], cursor_invalidate;
 
     enum TTYState state;
     int esc_params[MAX_ESC_PARAMS];
@@ -173,28 +165,18 @@ void vga_hw_screen_dump(const char *filename)
         consoles[0]->hw_screen_dump(consoles[0]->hw, filename);
 }
 
-void vga_hw_text_update(console_ch_t *chardata)
-{
-    if (active_console && active_console->hw_text_update)
-        active_console->hw_text_update(active_console->hw, chardata);
-}
-
 /* convert a RGBA color to a color index usable in graphic primitives */
 static unsigned int vga_get_color(DisplayState *ds, unsigned int rgba)
 {
     unsigned int r, g, b, color;
 
     switch(ds->depth) {
-#if 0
     case 8:
         r = (rgba >> 16) & 0xff;
         g = (rgba >> 8) & 0xff;
         b = (rgba) & 0xff;
-        color = (rgb_to_index[r] * 6 * 6) +
-            (rgb_to_index[g] * 6) +
-            (rgb_to_index[b]);
+        color = ((r >> 5) << 5 | (g >> 5) << 2 | (b >> 6));
         break;
-#endif
     case 15:
         r = (rgba >> 16) & 0xff;
         g = (rgba >> 8) & 0xff;
@@ -523,25 +505,12 @@ static void text_console_resize(TextConsole *s)
     s->cells = cells;
 }
 
-static inline void text_update_xy(TextConsole *s, int x, int y)
-{
-    s->text_x[0] = MIN(s->text_x[0], x);
-    s->text_x[1] = MAX(s->text_x[1], x);
-    s->text_y[0] = MIN(s->text_y[0], y);
-    s->text_y[1] = MAX(s->text_y[1], y);
-}
-
 static void update_xy(TextConsole *s, int x, int y)
 {
     TextCell *c;
     int y1, y2;
 
     if (s == active_console) {
-        if (!s->ds->depth) {
-            text_update_xy(s, x, y);
-            return;
-        }
-
         y1 = (s->y_base + y) % s->total_height;
         y2 = y1 - s->y_displayed;
         if (y2 < 0)
@@ -562,30 +531,21 @@ static void console_show_cursor(TextConsole *s, int show)
     int y, y1;
 
     if (s == active_console) {
-        int x = s->x;
-
-        if (!s->ds->depth) {
-            s->cursor_invalidate = 1;
-            return;
-        }
-
-        if (x >= s->width) {
-            x = s->width - 1;
-        }
         y1 = (s->y_base + s->y) % s->total_height;
         y = y1 - s->y_displayed;
         if (y < 0)
             y += s->total_height;
         if (y < s->height) {
-            c = &s->cells[y1 * s->width + x];
+            c = &s->cells[y1 * s->width + s->x];
             if (show) {
                 TextAttributes t_attrib = s->t_attrib_default;
                 t_attrib.invers = !(t_attrib.invers); /* invert fg and bg */
-                vga_putcharxy(s->ds, x, y, c->ch, &t_attrib);
+                vga_putcharxy(s->ds, s->x, y, c->ch, &t_attrib);
             } else {
-                vga_putcharxy(s->ds, x, y, c->ch, &(c->t_attrib));
+                vga_putcharxy(s->ds, s->x, y, c->ch,
+                              &(c->t_attrib));
             }
-            dpy_update(s->ds, x * FONT_WIDTH, y * FONT_HEIGHT,
+            dpy_update(s->ds, s->x * FONT_WIDTH, y * FONT_HEIGHT,
                        FONT_WIDTH, FONT_HEIGHT);
         }
     }
@@ -598,14 +558,6 @@ static void console_refresh(TextConsole *s)
 
     if (s != active_console)
         return;
-    if (!s->ds->depth) {
-        s->text_x[0] = 0;
-        s->text_y[0] = 0;
-        s->text_x[1] = s->width - 1;
-        s->text_y[1] = s->height - 1;
-        s->cursor_invalidate = 1;
-        return;
-    }
 
     vga_fill_rect(s->ds, 0, 0, s->ds->width, s->ds->height,
                   color_table[0][COLOR_BLACK]);
@@ -630,7 +582,7 @@ static void console_scroll(int ydelta)
     int i, y1;
 
     s = active_console;
-    if (!s || (s->console_type == GRAPHIC_CONSOLE))
+    if (!s || !s->text_console)
         return;
 
     if (ydelta > 0) {
@@ -683,14 +635,6 @@ static void console_put_lf(TextConsole *s)
             c++;
         }
         if (s == active_console && s->y_displayed == s->y_base) {
-            if (!s->ds->depth) {
-                s->text_x[0] = 0;
-                s->text_y[0] = 0;
-                s->text_x[1] = s->width - 1;
-                s->text_y[1] = s->height - 1;
-                return;
-            }
-
             vga_bitblt(s->ds, 0, FONT_HEIGHT, 0, 0,
                        s->width * FONT_WIDTH,
                        (s->height - 1) * FONT_HEIGHT);
@@ -850,10 +794,8 @@ static void console_putchar(TextConsole *s, int ch)
             s->state = TTY_STATE_ESC;
             break;
         default:
-            if (s->x >= s->width) {
-                /* line wrap */
-                s->x = 0;
-                console_put_lf(s);
+            if (s->x >= s->width - 1) {
+                break;
             }
             y1 = (s->y_base + s->y) % s->total_height;
             c = &s->cells[y1 * s->width + s->x];
@@ -861,6 +803,12 @@ static void console_putchar(TextConsole *s, int ch)
             c->t_attrib = s->t_attrib;
             update_xy(s, s->x, s->y);
             s->x++;
+#if 0 /* line wrap disabled */
+            if (s->x >= s->width) {
+                s->x = 0;
+                console_put_lf(s);
+            }
+#endif
             break;
         }
         break;
@@ -1041,7 +989,17 @@ void console_select(unsigned int index)
     s = consoles[index];
     if (s) {
         active_console = s;
-        vga_hw_invalidate();
+        if (s->text_console) {
+            if (s->g_width != s->ds->width ||
+                s->g_height != s->ds->height) {
+                s->g_width = s->ds->width;
+                s->g_height = s->ds->height;
+                text_console_resize(s);
+            }
+            console_refresh(s);
+        } else {
+            vga_hw_invalidate();
+        }
     }
 }
 
@@ -1103,7 +1061,7 @@ void kbd_put_keysym(int keysym)
     int c;
 
     s = active_console;
-    if (!s || (s->console_type == GRAPHIC_CONSOLE))
+    if (!s || !s->text_console)
         return;
 
     switch(keysym) {
@@ -1145,53 +1103,7 @@ void kbd_put_keysym(int keysym)
     }
 }
 
-static void text_console_invalidate(void *opaque)
-{
-    TextConsole *s = (TextConsole *) opaque;
-
-    if (s->console_type != GRAPHIC_CONSOLE) {
-        if (s->g_width != s->ds->width ||
-            s->g_height != s->ds->height) {
-            if (s->console_type == TEXT_CONSOLE_FIXED_SIZE)
-                dpy_resize(s->ds, s->g_width, s->g_height);
-            else {
-                s->g_width = s->ds->width;
-                s->g_height = s->ds->height;
-                text_console_resize(s);
-            }
-        }
-    }
-    console_refresh(s);
-}
-
-static void text_console_update(void *opaque, console_ch_t *chardata)
-{
-    TextConsole *s = (TextConsole *) opaque;
-    int i, j, src;
-
-    if (s->text_x[0] <= s->text_x[1]) {
-        src = (s->y_base + s->text_y[0]) * s->width;
-        chardata += s->text_y[0] * s->width;
-        for (i = s->text_y[0]; i <= s->text_y[1]; i ++)
-            for (j = 0; j < s->width; j ++, src ++)
-                console_write_ch(chardata ++, s->cells[src].ch |
-                                (s->cells[src].t_attrib.fgcol << 12) |
-                                (s->cells[src].t_attrib.bgcol << 8) |
-                                (s->cells[src].t_attrib.bold << 21));
-        dpy_update(s->ds, s->text_x[0], s->text_y[0],
-                   s->text_x[1] - s->text_x[0], i - s->text_y[0]);
-        s->text_x[0] = s->width;
-        s->text_y[0] = s->height;
-        s->text_x[1] = 0;
-        s->text_y[1] = 0;
-    }
-    if (s->cursor_invalidate) {
-        dpy_cursor(s->ds, s->x, s->y);
-        s->cursor_invalidate = 0;
-    }
-}
-
-static TextConsole *new_console(DisplayState *ds, console_type_t console_type)
+static TextConsole *new_console(DisplayState *ds, int text)
 {
     TextConsole *s;
     int i;
@@ -1202,18 +1114,16 @@ static TextConsole *new_console(DisplayState *ds, console_type_t console_type)
     if (!s) {
         return NULL;
     }
-    if (!active_console || ((active_console->console_type != GRAPHIC_CONSOLE) &&
-        (console_type == GRAPHIC_CONSOLE))) {
+    if (!active_console || (active_console->text_console && !text))
         active_console = s;
-    }
     s->ds = ds;
-    s->console_type = console_type;
-    if (console_type != GRAPHIC_CONSOLE) {
+    s->text_console = text;
+    if (text) {
         consoles[nb_consoles++] = s;
     } else {
         /* HACK: Put graphical consoles before text consoles.  */
         for (i = nb_consoles; i > 0; i--) {
-            if (consoles[i - 1]->console_type == GRAPHIC_CONSOLE)
+            if (!consoles[i - 1]->text_console)
                 break;
             consoles[i] = consoles[i - 1];
         }
@@ -1225,50 +1135,46 @@ static TextConsole *new_console(DisplayState *ds, console_type_t console_type)
 TextConsole *graphic_console_init(DisplayState *ds, vga_hw_update_ptr update,
                                   vga_hw_invalidate_ptr invalidate,
                                   vga_hw_screen_dump_ptr screen_dump,
-                                  vga_hw_text_update_ptr text_update,
                                   void *opaque)
 {
     TextConsole *s;
 
-    s = new_console(ds, GRAPHIC_CONSOLE);
+    s = new_console(ds, 0);
     if (!s)
       return NULL;
     s->hw_update = update;
     s->hw_invalidate = invalidate;
     s->hw_screen_dump = screen_dump;
-    s->hw_text_update = text_update;
     s->hw = opaque;
     return s;
 }
 
 int is_graphic_console(void)
 {
-    return active_console && active_console->console_type == GRAPHIC_CONSOLE;
+    return !active_console->text_console;
 }
 
-void console_color_init(DisplayState *ds)
+void set_color_table(DisplayState *ds)
 {
     int i, j;
-    for (j = 0; j < 2; j++) {
-        for (i = 0; i < 8; i++) {
-            color_table[j][i] = col_expand(ds, 
-                   vga_get_color(ds, color_table_rgb[j][i]));
-        }
+    for(j = 0; j < 2; j++) {
+	for(i = 0; i < 8; i++) {
+	    color_table[j][i] =
+		col_expand(ds, vga_get_color(ds, color_table_rgb[j][i]));
+	}
     }
 }
 
-CharDriverState *text_console_init(DisplayState *ds, const char *p)
+CharDriverState *text_console_init(DisplayState *ds)
 {
     CharDriverState *chr;
     TextConsole *s;
-    unsigned width;
-    unsigned height;
     static int color_inited;
 
     chr = qemu_mallocz(sizeof(CharDriverState));
     if (!chr)
         return NULL;
-    s = new_console(ds, (p == 0) ? TEXT_CONSOLE : TEXT_CONSOLE_FIXED_SIZE);
+    s = new_console(ds, 1);
     if (!s) {
         free(chr);
         return NULL;
@@ -1284,36 +1190,15 @@ CharDriverState *text_console_init(DisplayState *ds, const char *p)
 
     if (!color_inited) {
         color_inited = 1;
-        console_color_init(s->ds);
+        set_color_table(ds);
     }
     s->y_displayed = 0;
     s->y_base = 0;
     s->total_height = DEFAULT_BACKSCROLL;
     s->x = 0;
     s->y = 0;
-    width = s->ds->width;
-    height = s->ds->height;
-    if (p != 0) {
-        width = strtoul(p, (char **)&p, 10);
-        if (*p == 'C') {
-            p++;
-            width *= FONT_WIDTH;
-        }
-        if (*p == 'x') {
-            p++;
-            height = strtoul(p, (char **)&p, 10);
-            if (*p == 'C') {
-                p++;
-                height *= FONT_HEIGHT;
-            }
-        }
-    }
-    s->g_width = width;
-    s->g_height = height;
-
-    s->hw_invalidate = text_console_invalidate;
-    s->hw_text_update = text_console_update;
-    s->hw = s;
+    s->g_width = s->ds->width;
+    s->g_height = s->ds->height;
 
     /* Set text attribute defaults */
     s->t_attrib_default.bold = 0;

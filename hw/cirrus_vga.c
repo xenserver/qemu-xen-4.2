@@ -31,6 +31,9 @@
 #include "pci.h"
 #include "console.h"
 #include "vga_int.h"
+#ifndef _WIN32
+#include <sys/mman.h>
+#endif
 
 /*
  * TODO:
@@ -284,6 +287,8 @@ typedef struct CirrusVGAState {
     int last_hw_cursor_y_end;
     int real_vram_size; /* XXX: suppress that */
     CPUWriteMemoryFunc **cirrus_linear_write;
+    unsigned long map_addr;
+    unsigned long map_end;
 } CirrusVGAState;
 
 typedef struct PCICirrusVGAState {
@@ -292,6 +297,8 @@ typedef struct PCICirrusVGAState {
 } PCICirrusVGAState;
 
 static uint8_t rop_to_index[256];
+
+void *shared_vram;
 
 /***************************************
  *
@@ -302,6 +309,7 @@ static uint8_t rop_to_index[256];
 
 static void cirrus_bitblt_reset(CirrusVGAState *s);
 static void cirrus_update_memory_access(CirrusVGAState *s);
+static void cirrus_vga_mem_writew(void *opaque, target_phys_addr_t addr, uint32_t val);
 
 /***************************************
  *
@@ -656,7 +664,8 @@ static void cirrus_invalidate_region(CirrusVGAState * s, int off_begin,
 	off_cur_end = (off_cur + bytesperline) & s->cirrus_addr_mask;
 	off_cur &= TARGET_PAGE_MASK;
 	while (off_cur < off_cur_end) {
-	    cpu_physical_memory_set_dirty(s->vram_offset + off_cur);
+	    cpu_physical_memory_set_dirty(s->vram_offset +
+					  (off_cur & s->cirrus_addr_mask));
 	    off_cur += TARGET_PAGE_SIZE;
 	}
 	off_begin += off_pitch;
@@ -1578,6 +1587,17 @@ cirrus_hook_write_gr(CirrusVGAState * s, unsigned reg_index, int reg_value)
 	break;
     case 0x31:			// BLT STATUS/START
 	cirrus_write_bitblt(s, reg_value);
+	break;
+
+	// Extension to allow BIOS to clear 16K VRAM bank in one operation
+    case 0xFE:
+	s->gr[reg_index] = reg_value;  // Lower byte of value to be written
+	break;
+    case 0xFF: {
+	target_phys_addr_t addr;
+	for (addr = 0xa0000; addr < 0xa4000; addr += 2)
+	    cirrus_vga_mem_writew(s, addr, (reg_value << 8) | s->gr[0xFE]);
+	}
 	break;
     default:
 #ifdef DEBUG_CIRRUS
@@ -2619,6 +2639,98 @@ static CPUWriteMemoryFunc *cirrus_linear_bitblt_write[3] = {
     cirrus_linear_bitblt_writel,
 };
 
+static void *set_vram_mapping(unsigned long begin, unsigned long end)
+{
+    xen_pfn_t *extent_start = NULL;
+    unsigned long nr_extents;
+    void *vram_pointer = NULL;
+    int i;
+
+    /* align begin and end address */
+    begin = begin & TARGET_PAGE_MASK;
+    end = begin + VGA_RAM_SIZE;
+    end = (end + TARGET_PAGE_SIZE -1 ) & TARGET_PAGE_MASK;
+    nr_extents = (end - begin) >> TARGET_PAGE_BITS;
+
+    extent_start = malloc(sizeof(xen_pfn_t) * nr_extents);
+    if (extent_start == NULL) {
+        fprintf(stderr, "Failed malloc on set_vram_mapping\n");
+        return NULL;
+    }
+
+    memset(extent_start, 0, sizeof(xen_pfn_t) * nr_extents);
+
+    for (i = 0; i < nr_extents; i++)
+        extent_start[i] = (begin + i * TARGET_PAGE_SIZE) >> TARGET_PAGE_BITS;
+
+    if (set_mm_mapping(xc_handle, domid, nr_extents, 0, extent_start) < 0) {
+        fprintf(logfile, "Failed set_mm_mapping\n");
+        free(extent_start);
+        return NULL;
+    }
+
+    (void)xc_domain_pin_memory_cacheattr(
+        xc_handle, domid,
+        begin >> TARGET_PAGE_BITS,
+        end >> TARGET_PAGE_BITS,
+        XEN_DOMCTL_MEM_CACHEATTR_WB);
+
+    vram_pointer = xc_map_foreign_pages(xc_handle, domid,
+                                        PROT_READ|PROT_WRITE,
+                                        extent_start, nr_extents);
+    if (vram_pointer == NULL) {
+        fprintf(logfile, "xc_map_foreign_batch vgaram returned error %d\n",
+                errno);
+        free(extent_start);
+        return NULL;
+    }
+
+    memset(vram_pointer, 0, nr_extents * TARGET_PAGE_SIZE);
+
+#ifdef CONFIG_STUBDOM
+    xenfb_pv_display_start(vram_pointer);
+#endif
+
+    free(extent_start);
+
+    return vram_pointer;
+}
+
+static int unset_vram_mapping(unsigned long begin, unsigned long end,
+                              void *mapping)
+{
+    xen_pfn_t *extent_start = NULL;
+    unsigned long nr_extents;
+    int i;
+
+    /* align begin and end address */
+
+    end = begin + VGA_RAM_SIZE;
+    begin = begin & TARGET_PAGE_MASK;
+    end = (end + TARGET_PAGE_SIZE -1 ) & TARGET_PAGE_MASK;
+    nr_extents = (end - begin) >> TARGET_PAGE_BITS;
+
+    extent_start = malloc(sizeof(xen_pfn_t) * nr_extents);
+
+    if (extent_start == NULL) {
+        fprintf(stderr, "Failed malloc on set_mm_mapping\n");
+        return -1;
+    }
+
+    /* Drop our own references to the vram pages */
+    munmap(mapping, nr_extents * TARGET_PAGE_SIZE);
+
+    /* Now drop the guest's mappings */
+    memset(extent_start, 0, sizeof(xen_pfn_t) * nr_extents);
+    for (i = 0; i < nr_extents; i++)
+        extent_start[i] = (begin + (i * TARGET_PAGE_SIZE)) >> TARGET_PAGE_BITS;
+    unset_mm_mapping(xc_handle, domid, nr_extents, 0, extent_start);
+
+    free(extent_start);
+
+    return 0;
+}
+
 /* Compute the memory access functions */
 static void cirrus_update_memory_access(CirrusVGAState *s)
 {
@@ -2637,11 +2749,37 @@ static void cirrus_update_memory_access(CirrusVGAState *s)
 
 	mode = s->gr[0x05] & 0x7;
 	if (mode < 4 || mode > 5 || ((s->gr[0x0B] & 0x4) == 0)) {
+            if (s->lfb_addr && s->lfb_end && !s->map_addr) {
+                void *vram_pointer, *old_vram;
+
+                vram_pointer = set_vram_mapping(s->lfb_addr,
+                                                s->lfb_end);
+                if (!vram_pointer)
+                    fprintf(stderr, "NULL vram_pointer\n");
+                else {
+                    old_vram = vga_update_vram((VGAState *)s, vram_pointer,
+                                               VGA_RAM_SIZE);
+                    qemu_free(old_vram);
+                }
+                s->map_addr = s->lfb_addr;
+                s->map_end = s->lfb_end;
+            }
             s->cirrus_linear_write[0] = cirrus_linear_mem_writeb;
             s->cirrus_linear_write[1] = cirrus_linear_mem_writew;
             s->cirrus_linear_write[2] = cirrus_linear_mem_writel;
         } else {
         generic_io:
+            if (s->lfb_addr && s->lfb_end && s->map_addr) {
+                void *old_vram;
+
+                old_vram = vga_update_vram((VGAState *)s, NULL, VGA_RAM_SIZE);
+
+                unset_vram_mapping(s->lfb_addr,
+                                   s->lfb_end,
+                                   old_vram);
+
+                s->map_addr = s->map_end = 0;
+            }
             s->cirrus_linear_write[0] = cirrus_linear_writeb;
             s->cirrus_linear_write[1] = cirrus_linear_writew;
             s->cirrus_linear_write[2] = cirrus_linear_writel;
@@ -2998,11 +3136,42 @@ static CPUWriteMemoryFunc *cirrus_mmio_write[3] = {
     cirrus_mmio_writel,
 };
 
+void cirrus_stop_acc(CirrusVGAState *s)
+{
+    if (s->map_addr){
+        int error;
+        s->map_addr = 0;
+        error = unset_vram_mapping(s->lfb_addr,
+                s->lfb_end, s->vram_ptr);
+        fprintf(stderr, "cirrus_stop_acc:unset_vram_mapping.\n");
+    }
+}
+
+void cirrus_restart_acc(CirrusVGAState *s)
+{
+    if (s->lfb_addr && s->lfb_end) {
+        void *vram_pointer, *old_vram;
+        fprintf(stderr, "cirrus_vga_load:re-enable vga acc.lfb_addr=0x%lx, lfb_end=0x%lx.\n",
+                s->lfb_addr, s->lfb_end);
+        vram_pointer = set_vram_mapping(s->lfb_addr ,s->lfb_end);
+        if (!vram_pointer){
+            fprintf(stderr, "cirrus_vga_load:NULL vram_pointer\n");
+        } else {
+            old_vram = vga_update_vram((VGAState *)s, vram_pointer,
+                    VGA_RAM_SIZE);
+            qemu_free(old_vram);
+            s->map_addr = s->lfb_addr;
+            s->map_end = s->lfb_end;
+        }
+    }
+}
+
 /* load/save state */
 
 static void cirrus_vga_save(QEMUFile *f, void *opaque)
 {
     CirrusVGAState *s = opaque;
+    uint8_t vga_acc;
 
     if (s->pci_dev)
         pci_device_save(s->pci_dev, f);
@@ -3040,11 +3209,18 @@ static void cirrus_vga_save(QEMUFile *f, void *opaque)
     qemu_put_be32s(f, &s->hw_cursor_y);
     /* XXX: we do not save the bitblt state - we assume we do not save
        the state when the blitter is active */
+
+    vga_acc = (!!s->map_addr);
+    qemu_put_8s(f, &vga_acc);
+    qemu_put_be64s(f, (uint64_t*)&s->lfb_addr);
+    qemu_put_be64s(f, (uint64_t*)&s->lfb_end);
+    qemu_put_buffer(f, s->vram_ptr, VGA_RAM_SIZE);
 }
 
 static int cirrus_vga_load(QEMUFile *f, void *opaque, int version_id)
 {
     CirrusVGAState *s = opaque;
+    uint8_t vga_acc = 0;
     int ret;
 
     if (version_id > 2)
@@ -3089,6 +3265,14 @@ static int cirrus_vga_load(QEMUFile *f, void *opaque, int version_id)
 
     qemu_get_be32s(f, &s->hw_cursor_x);
     qemu_get_be32s(f, &s->hw_cursor_y);
+
+    qemu_get_8s(f, &vga_acc);
+    qemu_get_be64s(f, (uint64_t*)&s->lfb_addr);
+    qemu_get_be64s(f, (uint64_t*)&s->lfb_end);
+    qemu_get_buffer(f, s->vram_ptr, VGA_RAM_SIZE);
+    if (vga_acc){
+        cirrus_restart_acc(s);
+    }
 
     /* force refresh */
     s->graphic_mode = -1;
@@ -3245,6 +3429,13 @@ static void cirrus_pci_lfb_map(PCIDevice *d, int region_num,
     /* XXX: add byte swapping apertures */
     cpu_register_physical_memory(addr, s->vram_size,
 				 s->cirrus_linear_io_addr);
+    s->lfb_addr = addr;
+    s->lfb_end = addr + VGA_RAM_SIZE;
+
+    if (s->map_addr && (s->lfb_addr != s->map_addr) &&
+        (s->lfb_end != s->map_end))
+        fprintf(logfile, "cirrus vga map change while on lfb mode\n");
+
     cpu_register_physical_memory(addr + 0x1000000, 0x400000,
 				 s->cirrus_linear_bitblt_io_addr);
 }
@@ -3281,16 +3472,16 @@ void pci_cirrus_vga_init(PCIBus *bus, DisplayState *ds, uint8_t *vga_ram_base,
     pci_conf[0x0a] = PCI_CLASS_SUB_VGA;
     pci_conf[0x0b] = PCI_CLASS_BASE_DISPLAY;
     pci_conf[0x0e] = PCI_CLASS_HEADERTYPE_00h;
+    pci_conf[0x2c] = 0x53; /* subsystem vendor: XenSource */
+    pci_conf[0x2d] = 0x58;
+    pci_conf[0x2e] = 0x01; /* subsystem device */
+    pci_conf[0x2f] = 0x00;
 
     /* setup VGA */
     s = &d->cirrus_vga;
     vga_common_init((VGAState *)s,
                     ds, vga_ram_base, vga_ram_offset, vga_ram_size);
     cirrus_init_common(s, device_id, 1);
-
-    graphic_console_init(s->ds, s->update, s->invalidate, s->screen_dump,
-                         s->text_update, s);
-
     s->pci_dev = (PCIDevice *)d;
 
     /* setup memory space */

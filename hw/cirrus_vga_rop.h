@@ -22,13 +22,31 @@
  * THE SOFTWARE.
  */
 
+#define get_base(p, s, b) do { \
+    if ((p) >= (s)->vram_ptr && (p) < (s)->vram_ptr + (s)->vram_size) \
+	(b) = (s)->vram_ptr; \
+    else if ((p) >= &(s)->cirrus_bltbuf[0] && \
+	     (p) < &(s)->cirrus_bltbuf[CIRRUS_BLTBUFSIZE]) \
+	(b) = &(s)->cirrus_bltbuf[0]; \
+    else \
+	return; \
+} while(0)
+
+#define m(x) ((x) & s->cirrus_addr_mask)
+
 static void
 glue(cirrus_bitblt_rop_fwd_, ROP_NAME)(CirrusVGAState *s,
-                             uint8_t *dst,const uint8_t *src,
+                             uint8_t *dst_,const uint8_t *src_,
                              int dstpitch,int srcpitch,
                              int bltwidth,int bltheight)
 {
     int x,y;
+    uint32_t dst, src;
+    uint8_t *dst_base, *src_base;
+    get_base(dst_, s, dst_base);
+    get_base(src_, s, src_base);
+    dst = dst_ - dst_base;
+    src = src_ - src_base;
     dstpitch -= bltwidth;
     srcpitch -= bltwidth;
 
@@ -39,7 +57,7 @@ glue(cirrus_bitblt_rop_fwd_, ROP_NAME)(CirrusVGAState *s,
 
     for (y = 0; y < bltheight; y++) {
         for (x = 0; x < bltwidth; x++) {
-            ROP_OP(*dst, *src);
+            ROP_OP(*(dst_base + m(dst)), *(src_base + m(src)));
             dst++;
             src++;
         }
@@ -50,16 +68,22 @@ glue(cirrus_bitblt_rop_fwd_, ROP_NAME)(CirrusVGAState *s,
 
 static void
 glue(cirrus_bitblt_rop_bkwd_, ROP_NAME)(CirrusVGAState *s,
-                                        uint8_t *dst,const uint8_t *src,
+                                        uint8_t *dst_,const uint8_t *src_,
                                         int dstpitch,int srcpitch,
                                         int bltwidth,int bltheight)
 {
     int x,y;
+    uint32_t dst, src;
+    uint8_t *dst_base, *src_base;
+    get_base(dst_, s, dst_base);
+    get_base(src_, s, src_base);
+    dst = dst_ - dst_base;
+    src = src_ - src_base;
     dstpitch += bltwidth;
     srcpitch += bltwidth;
     for (y = 0; y < bltheight; y++) {
         for (x = 0; x < bltwidth; x++) {
-            ROP_OP(*dst, *src);
+            ROP_OP(*(dst_base + m(dst)), *(src_base + m(src)));
             dst--;
             src--;
         }
@@ -184,3 +208,6 @@ glue(glue(cirrus_bitblt_rop_bkwd_transp_, ROP_NAME),_16)(CirrusVGAState *s,
 
 #undef ROP_NAME
 #undef ROP_OP
+
+#undef get_base
+#undef m
