@@ -1,8 +1,0 @@
-#!/bin/sh
-set -e
-if [ $# != 1 ]; then echo >&2 "usage: $0 <target-dir>"; exit 1; fi
-target=$1
-
-test -d $target || mkdir $target
-rm $target/Makefile
-ln -s ../Makefile.target $target/Makefile
