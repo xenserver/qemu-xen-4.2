@@ -46,21 +46,6 @@
 #include <malloc.h>
 #endif
 
-void *get_mmap_addr(unsigned long size)
-{
-    return NULL;
-}
-
-void qemu_free(void *ptr)
-{
-    free(ptr);
-}
-
-void *qemu_malloc(size_t size)
-{
-    return malloc(size);
-}
-
 #define define_readwrite(rw, cnst)				\
 ssize_t qemu_##rw(int fd, cnst void *buf, size_t count) {	\
     ssize_t got, done;						\
