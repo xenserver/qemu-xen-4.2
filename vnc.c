@@ -1320,7 +1320,7 @@ static void do_key_event(VncState *vs, int down, uint32_t sym)
             shift = 1;
         }
         else {
-            shift = keysymIsShift(vs->kbd_layout, sym & 0xFFFF);
+            shift = keysym_is_shift(vs->kbd_layout, sym & 0xFFFF);
         }
     }
     shift_keys = vs->modifiers_state[0x2a] | vs->modifiers_state[0x36];
@@ -1370,13 +1370,13 @@ static void do_key_event(VncState *vs, int down, uint32_t sym)
 	return;
     }
 
-    keypad = keycodeIsKeypad(vs->kbd_layout, keycode);
+    keypad = keycode_is_keypad(vs->kbd_layout, keycode);
     if (keypad) {
         /* If the numlock state needs to change then simulate an additional
            keypress before sending this one.  This will happen if the user
            toggles numlock away from the VNC window.
         */
-        if (keysymIsNumlock(vs->kbd_layout, sym & 0xFFFF)) {
+        if (keysym_is_numlock(vs->kbd_layout, sym & 0xFFFF)) {
 	    if (!vs->modifiers_state[0x45]) {
 		vs->modifiers_state[0x45] = 1;
 		press_key(vs, 0xff7f);
@@ -1398,7 +1398,7 @@ static void do_key_event(VncState *vs, int down, uint32_t sym)
             return;
         }
         else if (!shift && shift_keys && !keypad &&
-                 keycodeIsShiftable(vs->kbd_layout, keycode)) {
+                 keycode_is_shiftable(vs->kbd_layout, keycode)) {
             press_key_shift_up(vs, down, keycode);
             return;
         }
