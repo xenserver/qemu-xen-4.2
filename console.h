@@ -97,17 +97,19 @@ static inline void dpy_resize(DisplayState *s, int w, int h)
 typedef void (*vga_hw_update_ptr)(void *);
 typedef void (*vga_hw_invalidate_ptr)(void *);
 typedef void (*vga_hw_screen_dump_ptr)(void *, const char *);
+typedef void (*vga_hw_text_update_ptr)(void *, console_ch_t *);
 
 TextConsole *graphic_console_init(DisplayState *ds, vga_hw_update_ptr update,
                                   vga_hw_invalidate_ptr invalidate,
                                   vga_hw_screen_dump_ptr screen_dump,
+                                  vga_hw_text_update_ptr text_update,
                                   void *opaque);
 void vga_hw_update(void);
 void vga_hw_invalidate(void);
 void vga_hw_screen_dump(const char *filename);
 
 int is_graphic_console(void);
-CharDriverState *text_console_init(DisplayState *ds, const char *p);
+CharDriverState *text_console_init(DisplayState *ds);
 void console_select(unsigned int index);
 void console_color_init(DisplayState *ds);
 

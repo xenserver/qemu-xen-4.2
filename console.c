@@ -1135,6 +1135,7 @@ static TextConsole *new_console(DisplayState *ds, int text)
 TextConsole *graphic_console_init(DisplayState *ds, vga_hw_update_ptr update,
                                   vga_hw_invalidate_ptr invalidate,
                                   vga_hw_screen_dump_ptr screen_dump,
+                                  vga_hw_text_update_ptr text_update,
                                   void *opaque)
 {
     TextConsole *s;
