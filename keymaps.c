@@ -227,7 +227,7 @@ static inline int keysym_is_shift(void *kbd_layout, int keysym)
     return 0;
 }
 
-static int keycodeIsShiftable(void *kbd_layout, int keycode)
+static int keycode_is_shiftable(void *kbd_layout, int keycode)
 {
     kbd_layout_t *k = kbd_layout;
     struct key_range *kr;
