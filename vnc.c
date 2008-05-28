@@ -30,6 +30,8 @@
 #include "qemu_socket.h"
 #include "qemu-timer.h"
 
+#include <assert.h>
+
 #ifdef CONFIG_STUBDOM
 #include <netfront.h>
 #endif
