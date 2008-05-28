@@ -24,12 +24,12 @@
  * THE SOFTWARE.
  */
 
-#include <sys/stat.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include "vl.h"
+#include "qemu-common.h"
+#include "console.h"
+#include "sysemu.h"
 #include "qemu_socket.h"
-#include <assert.h>
+#include "qemu-timer.h"
+
 #ifdef CONFIG_STUBDOM
 #include <netfront.h>
 #endif
