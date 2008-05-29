@@ -1873,7 +1873,7 @@ static void make_challenge(VncState *vs)
         vs->challenge[i] = (int) (256.0*rand()/(RAND_MAX+1.0));
 }
 
-static int protocol_client_auth_vnc(VncState *vs, char *data, size_t len)
+static int protocol_client_auth_vnc(VncState *vs, uint8_t *data, size_t len)
 {
     char response[VNC_AUTH_CHALLENGE_SIZE];
     int i, j, pwlen;
@@ -2284,7 +2284,7 @@ static int vnc_start_tls(struct VncState *vs) {
     return vnc_continue_handshake(vs);
 }
 
-static int protocol_client_vencrypt_auth(VncState *vs, char *data, size_t len)
+static int protocol_client_vencrypt_auth(VncState *vs, uint8_t *data, size_t len)
 {
     int auth = read_u32(data, 0);
 
@@ -2314,7 +2314,7 @@ static int protocol_client_vencrypt_auth(VncState *vs, char *data, size_t len)
     return 0;
 }
 
-static int protocol_client_vencrypt_init(VncState *vs, char *data, size_t len)
+static int protocol_client_vencrypt_init(VncState *vs, uint8_t *data, size_t len)
 {
     if (data[0] != 0 ||
 	data[1] != 2) {
@@ -2344,7 +2344,7 @@ static int start_auth_vencrypt(VncState *vs)
 }
 #endif /* CONFIG_VNC_TLS */
 
-static int protocol_client_auth(VncState *vs, char *data, size_t len)
+static int protocol_client_auth(VncState *vs, uint8_t *data, size_t len)
 {
     /* We only advertise 1 auth scheme at a time, so client
      * must pick the one we sent. Verify this */
@@ -2393,7 +2393,7 @@ static int protocol_client_auth(VncState *vs, char *data, size_t len)
     return 0;
 }
 
-static int protocol_version(VncState *vs, char *version, size_t len)
+static int protocol_version(VncState *vs, uint8_t *version, size_t len)
 {
     char local[13];
 
