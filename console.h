@@ -118,7 +118,7 @@ void console_select(unsigned int index);
 void set_color_table(DisplayState *ds);
 
 /* sdl.c */
-void sdl_display_init(DisplayState *ds, int full_screen, int no_frame);
+void sdl_display_init(DisplayState *ds, int full_screen, int no_frame, int opengl_enabled);
 
 /* cocoa.m */
 void cocoa_display_init(DisplayState *ds, int full_screen);

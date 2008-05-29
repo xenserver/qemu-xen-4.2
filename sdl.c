@@ -727,7 +727,7 @@ static void sdl_cleanup(void)
     SDL_Quit();
 }
 
-void sdl_display_init(DisplayState *ds, int full_screen, int opengl)
+void sdl_display_init(DisplayState *ds, int full_screen, int no_frame, int opengl)
 {
     int flags;
     uint8_t data = 0;
