@@ -2,6 +2,12 @@
 set -e
 if [ $# != 0 ]; then echo >&2 "usage: $0"; exit 1; fi
 
+rm -f $target/Makefile
+rm -f $target/config.mak
+rm -f config-host.mak
+
+./configure --disable-curses
+
 target=i386-dm
 
 ln -sf ../Makefile.target $target/Makefile
