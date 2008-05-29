@@ -72,16 +72,16 @@ struct DisplayState {
     void *opaque;
     struct QEMUTimer *gui_timer;
 
+    int shared_buf;
+
     void (*dpy_update)(struct DisplayState *s, int x, int y, int w, int h);
     void (*dpy_resize)(struct DisplayState *s, int w, int h);
+    void (*dpy_setdata)(DisplayState *s, void *pixels);
     void (*dpy_refresh)(struct DisplayState *s);
     void (*dpy_copy)(struct DisplayState *s, int src_x, int src_y,
                      int dst_x, int dst_y, int w, int h);
     void (*dpy_fill)(struct DisplayState *s, int x, int y,
                      int w, int h, uint32_t c);
-    void (*mouse_set)(int x, int y, int on);
-    void (*cursor_define)(int width, int height, int bpp, int hot_x, int hot_y,
-                          uint8_t *image, uint8_t *mask);
 };
 
 static inline void dpy_update(DisplayState *s, int x, int y, int w, int h)
