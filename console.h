@@ -71,6 +71,7 @@ struct DisplayState {
     int height;
     void *opaque;
     uint64_t gui_timer_interval;
+    int idle;
 
     int shared_buf;
 
