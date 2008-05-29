@@ -1166,7 +1166,7 @@ void set_color_table(DisplayState *ds)
     }
 }
 
-CharDriverState *text_console_init(DisplayState *ds)
+CharDriverState *text_console_init(DisplayState *ds, const char *p)
 {
     CharDriverState *chr;
     TextConsole *s;
