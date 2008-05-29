@@ -114,7 +114,7 @@ void vga_hw_screen_dump(const char *filename);
 int is_graphic_console(void);
 CharDriverState *text_console_init(DisplayState *ds);
 void console_select(unsigned int index);
-void console_color_init(DisplayState *ds);
+void set_color_table(DisplayState *ds);
 
 /* sdl.c */
 void sdl_display_init(DisplayState *ds, int full_screen, int no_frame);
