@@ -62,6 +62,9 @@ void kbd_put_keysym(int keysym);
 
 /* consoles */
 
+/* in ms */
+#define GUI_REFRESH_INTERVAL 30
+
 struct DisplayState {
     uint8_t *data;
     int linesize;
