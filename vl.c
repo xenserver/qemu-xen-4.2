@@ -207,6 +207,7 @@ int usb_enabled = 0;
 static VLANState *first_vlan;
 int smp_cpus = 1;
 const char *vnc_display;
+int vncunused;
 #if defined(TARGET_SPARC)
 #define MAX_CPUS 16
 #elif defined(TARGET_I386)
@@ -5598,6 +5599,11 @@ int qemu_set_fd_handler2(int fd,
             if (ioh->fd == fd) {
                 ioh->deleted = 1;
                 break;
+            case QEMU_OPTION_vncunused:
+                vncunused++;
+                if (vnc_display == -1)
+                    vnc_display = -2;
+                break;
             }
             pioh = &ioh->next;
         }
@@ -7301,6 +7307,7 @@ static void help(int exitcode)
            "-no-shutdown    stop before shutdown\n"
            "-loadvm [tag|id]  start right away with a saved state (loadvm in monitor)\n"
 	   "-vnc display    start a VNC server on display\n"
+           "-vncunused      bind the VNC server to an unused port\n"
 #ifndef _WIN32
 	   "-daemonize      daemonize QEMU after initializing\n"
 #endif
@@ -7402,6 +7409,7 @@ enum {
     QEMU_OPTION_usbdevice,
     QEMU_OPTION_smp,
     QEMU_OPTION_vnc,
+    QEMU_OPTION_vncunused,
     QEMU_OPTION_no_acpi,
     QEMU_OPTION_curses,
     QEMU_OPTION_no_reboot,
@@ -7501,6 +7509,7 @@ const QEMUOption qemu_options[] = {
     { "usbdevice", HAS_ARG, QEMU_OPTION_usbdevice },
     { "smp", HAS_ARG, QEMU_OPTION_smp },
     { "vnc", HAS_ARG, QEMU_OPTION_vnc },
+    { "vncunused", 0, QEMU_OPTION_vncunused },
 #ifdef CONFIG_CURSES
     { "curses", 0, QEMU_OPTION_curses },
 #endif
@@ -8576,7 +8585,8 @@ int main(int argc, char **argv)
         dumb_display_init(ds);
     } else if (vnc_display != NULL) {
         vnc_display_init(ds);
-        if (vnc_display_open(ds, vnc_display) < 0)
+        vnc_display = vnc_display_open(ds, vnc_display, vncunused);
+        if (vnc_display < 0)
             exit(1);
     } else
 #if defined(CONFIG_CURSES)
