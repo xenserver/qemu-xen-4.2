@@ -31,3 +31,4 @@ qemu-img
 *~
 
 i386-dm/Makefile
+i386-dm/config.mak
