@@ -5599,11 +5599,6 @@ int qemu_set_fd_handler2(int fd,
             if (ioh->fd == fd) {
                 ioh->deleted = 1;
                 break;
-            case QEMU_OPTION_vncunused:
-                vncunused++;
-                if (vnc_display == -1)
-                    vnc_display = -2;
-                break;
             }
             pioh = &ioh->next;
         }
@@ -8292,6 +8287,11 @@ int main(int argc, char **argv)
 	    case QEMU_OPTION_vnc:
 		vnc_display = optarg;
 		break;
+            case QEMU_OPTION_vncunused:
+                vncunused++;
+                if (vnc_display == -1)
+                    vnc_display = -2;
+                break;
             case QEMU_OPTION_no_acpi:
                 acpi_enabled = 0;
                 break;
