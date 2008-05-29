@@ -2491,7 +2491,6 @@ static int pp_hw_mode(ParallelCharDriver *s, uint16_t mode)
     return 1;
 }
 
-#if defined(__linux__)
 static int pp_ioctl(CharDriverState *chr, int cmd, void *arg)
 {
     ParallelCharDriver *drv = chr->opaque;
