@@ -7393,6 +7393,7 @@ enum {
     QEMU_OPTION_std_vga,
     QEMU_OPTION_echr,
     QEMU_OPTION_monitor,
+    QEMU_OPTION_domainname,
     QEMU_OPTION_serial,
     QEMU_OPTION_parallel,
     QEMU_OPTION_loadvm,
@@ -7494,6 +7495,7 @@ const QEMUOption qemu_options[] = {
     { "std-vga", 0, QEMU_OPTION_std_vga },
     { "echr", HAS_ARG, QEMU_OPTION_echr },
     { "monitor", HAS_ARG, QEMU_OPTION_monitor },
+    { "domain-name", 1, QEMU_OPTION_domainname },
     { "serial", HAS_ARG, QEMU_OPTION_serial },
     { "parallel", HAS_ARG, QEMU_OPTION_parallel },
     { "loadvm", HAS_ARG, QEMU_OPTION_loadvm },
@@ -8315,6 +8317,10 @@ int main(int argc, char **argv)
 		break;
             case QEMU_OPTION_semihosting:
                 semihosting_enabled = 1;
+                break;
+            case QEMU_OPTION_domainname:
+                snprintf(domain_name, sizeof(domain_name),
+                         "Xen-%s", optarg);
                 break;
             case QEMU_OPTION_name:
                 qemu_name = optarg;

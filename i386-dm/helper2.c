@@ -74,6 +74,9 @@ int vcpus = 1;
 
 extern int xc_handle;
 
+char domain_name[64] = "Xen-no-name";
+int domid;
+
 long time_offset = 0;
 
 shared_iopage_t *shared_page = NULL;
