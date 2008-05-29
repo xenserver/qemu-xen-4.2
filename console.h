@@ -70,6 +70,7 @@ struct DisplayState {
     int width;
     int height;
     void *opaque;
+    struct QEMUTimer *gui_timer;
     uint64_t gui_timer_interval;
     int idle;
 
