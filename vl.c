@@ -8288,9 +8288,7 @@ int main(int argc, char **argv)
 		vnc_display = optarg;
 		break;
             case QEMU_OPTION_vncunused:
-                vncunused++;
-                if (vnc_display == -1)
-                    vnc_display = -2;
+                vncunused = 1;
                 break;
             case QEMU_OPTION_no_acpi:
                 acpi_enabled = 0;
@@ -8589,9 +8587,10 @@ int main(int argc, char **argv)
         }
         /* nearly nothing to do */
         dumb_display_init(ds);
-    } else if (vnc_display != NULL) {
+    } else if (vnc_display != NULL || vncunused != 0) {
+	int vnc_display_port;
         vnc_display_init(ds);
-        vnc_display = vnc_display_open(ds, vnc_display, vncunused);
+        vnc_display_port = vnc_display_open(ds, vnc_display, vncunused);
         if (vnc_display < 0)
             exit(1);
     } else
