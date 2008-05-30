@@ -12,5 +12,5 @@ target=i386-dm
 
 ln -sf ../Makefile.target $target/Makefile
 ln -sf ../xen-config.mak $target/config.mak
-ln -sf xen-config-host.mak config-host.mak
+cat xen-config-host.mak >>config-host.mak
 echo '#include "xen-config-host.h"' >>config-host.h
