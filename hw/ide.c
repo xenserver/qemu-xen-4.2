@@ -1309,39 +1309,6 @@ static void ide_flush_cb(void *opaque, int ret)
     ide_set_irq(s);
 }
 
-static void ide_device_utterly_broken(IDEState *s) {
-    s->status |= BUSY_STAT;
-    s->bs = NULL;
-    /* This prevents all future commands from working.  All of the
-     * asynchronous callbacks (and ide_set_irq, as a safety measure)
-     * check to see whether this has happened and bail if so.
-     */
-}
-
-static void ide_flush_cb(void *opaque, int ret)
-{
-    IDEState *s = opaque;
-
-    if (!s->bs) return; /* yikes */
-
-    if (ret) {
-        /* We are completely doomed.  The IDE spec does not permit us
-	 * to return an error from a flush except via a protocol which
-	 * requires us to say where the error is and which
-	 * contemplates the guest repeating the flush attempt to
-	 * attempt flush the remaining data.  We can't support that
-	 * because f(data)sync (which is what the block drivers use
-	 * eventually) doesn't report the necessary information or
-	 * give us the necessary control.  So we make the disk vanish.
-	 */
-	ide_device_utterly_broken(s);
-	return;
-    }
-    else
-        s->status = READY_STAT;
-    ide_set_irq(s);
-}
-
 static void ide_atapi_cmd_ok(IDEState *s)
 {
     s->error = 0;
