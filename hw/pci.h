@@ -65,10 +65,14 @@ struct PCIDevice {
     int irq_state[4];
 };
 
+extern char direct_pci_str[];
+
 PCIDevice *pci_register_device(PCIBus *bus, const char *name,
                                int instance_size, int devfn,
                                PCIConfigReadFunc *config_read,
                                PCIConfigWriteFunc *config_write);
+
+void pci_hide_device(PCIDevice *pci_dev);
 
 void pci_register_io_region(PCIDevice *pci_dev, int region_num,
                             uint32_t size, int type,
@@ -95,6 +99,25 @@ void pci_for_each_device(int bus_num, void (*fn)(PCIDevice *d));
 void pci_info(void);
 PCIBus *pci_bridge_init(PCIBus *bus, int devfn, uint32_t id,
                         pci_map_irq_fn map_irq, const char *name);
+
+/* PCI slot 6~7 support ACPI PCI hot plug */
+#define PHP_SLOT_START  (6)
+#define PHP_SLOT_END    (8)
+#define PHP_SLOT_LEN    (PHP_SLOT_END - PHP_SLOT_START)
+#define PHP_TO_PCI_SLOT(x) (x + PHP_SLOT_START)
+#define PCI_TO_PHP_SLOT(x) (x - PHP_SLOT_START)
+#define PHP_DEVFN_START (PHP_SLOT_START << 3)
+#define PHP_DEVFN_END   (PHP_SLOT_END << 3)
+
+int insert_to_pci_slot(char*);
+int test_pci_slot(int);
+int bdf_to_slot(char*);
+int power_on_php_slot(int);
+int power_off_php_slot(int);
+void pt_uninit(void);
+
+void do_pci_add(char *devname);
+void do_pci_del(char *devname);
 
 /* lsi53c895a.c */
 #define LSI_MAX_DEVS 7

@@ -1365,6 +1365,12 @@ static term_cmd_t term_cmds[] = {
       "device", "add USB device (e.g. 'host:bus.addr' or 'host:vendor_id:product_id')" },
     { "usb_del", "s", do_usb_del,
       "device", "remove USB device 'bus.addr'" },
+#ifdef CONFIG_PHP_DEBUG
+    { "pci_add", "s", do_pci_add,
+      "device", "insert PCI pass-through device by BDF,e.g. (dom, bus, dev, func) by hex '0x0, 0x3, 0x0, 0x0'" },
+    { "pci_del", "s", do_pci_del,
+      "device", "remove PCI pass-through device by BDF,e.g. (dom, bus, dev, func) by hex '0x0, 0x3, 0x0, 0x0'" },
+#endif
     { "cpu", "i", do_cpu_set,
       "index", "set the default CPU" },
     { "mouse_move", "sss?", do_mouse_move,

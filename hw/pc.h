@@ -97,6 +97,9 @@ i2c_bus *piix4_pm_init(PCIBus *bus, int devfn, uint32_t smb_io_base,
 void piix4_smbus_register_device(SMBusDevice *dev, uint8_t addr);
 void acpi_bios_init(void);
 
+void acpi_php_add(int);
+void acpi_php_del(int);
+
 /* pcspk.c */
 void pcspk_init(PITState *);
 int pcspk_audio_init(AudioState *, qemu_irq *pic);

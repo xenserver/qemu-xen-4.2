@@ -3539,6 +3539,24 @@ void qemu_chr_close(CharDriverState *chr)
     qemu_free(chr);
 }
 
+void do_pci_del(char *devname)
+{
+    int pci_slot;
+    pci_slot = bdf_to_slot(devname);
+
+    acpi_php_del(pci_slot);
+}
+
+void do_pci_add(char *devname)
+{
+    int pci_slot;
+
+    pci_slot = insert_to_pci_slot(devname);
+
+    acpi_php_add(pci_slot);
+}
+
+
 /***********************************************************/
 /* network device redirectors */
 
@@ -7748,7 +7766,7 @@ int main(int argc, char **argv)
     const char *pid_file = NULL;
     VLANState *vlan;
 
-    const char *direct_pci = NULL;
+    const char *direct_pci = direct_pci_str;
 
 #if !defined(__sun__) && !defined(CONFIG_STUBDOM)
     /* Maximise rlimits. Needed where default constraints are tight (*BSD). */
@@ -8118,9 +8136,6 @@ int main(int argc, char **argv)
                     exit(1);
                 }
                 ram_size = value;
-                break;
-            case QEMU_OPTION_pci:
-                direct_pci = optarg;
                 break;
             }
             case QEMU_OPTION_d:
@@ -8734,6 +8749,7 @@ int main(int argc, char **argv)
 
     main_loop();
     quit_timers();
+    pt_uninit();
 
 #if !defined(_WIN32)
     /* close network clients */
