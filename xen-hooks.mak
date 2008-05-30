@@ -9,10 +9,11 @@ endif
 
 QEMU_PROG=qemu-dm
 
-CFLAGS += -Wno-unused -Wno-declaration-after-statement
+CFLAGS += -Wno-unused -Wno-declaration-after-statement \
+ -Wno-pointer-sign
 
-LIBS += -L../../libxc -lxenctrl -lxenguest
-LIBS += -L../../xenstore -lxenstore
+LIBS += -L$(XEN_ROOT)/tools/libxc -lxenctrl -lxenguest
+LIBS += -L$(XEN_ROOT)/tools/xenstore -lxenstore
 
 LDFLAGS := $(CFLAGS) $(LDFLAGS)
 
