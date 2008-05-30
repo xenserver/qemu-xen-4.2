@@ -742,7 +742,8 @@ static void pc_init1(ram_addr_t ram_size, int vga_ram_size,
                      const char *boot_device, DisplayState *ds,
                      const char *kernel_filename, const char *kernel_cmdline,
                      const char *initrd_filename,
-                     int pci_enabled, const char *cpu_model)
+                     int pci_enabled, const char *cpu_model,
+		     const char *direct_pci)
 {
     char buf[1024];
     int ret, linux_boot, i;
@@ -758,6 +759,7 @@ static void pc_init1(ram_addr_t ram_size, int vga_ram_size,
     int index;
     BlockDriverState *hd[MAX_IDE_BUS * MAX_IDE_DEVS];
     BlockDriverState *fd[MAX_FD];
+    int rc;
 
     if (ram_size >= 0xe0000000 ) {
         above_4g_mem_size = ram_size - 0xe0000000;
@@ -944,6 +946,19 @@ static void pc_init1(ram_addr_t ram_size, int vga_ram_size,
         }
     }
 
+#ifdef CONFIG_PASSTHROUGH
+    /* Pass-through Initialization */
+    if ( pci_enabled && direct_pci )
+    {
+        rc = pt_init(pci_bus, direct_pci); 
+        if ( rc < 0 )
+        {
+            fprintf(logfile, "Error: Initialization failed for pass-through devices\n");
+            exit(1);
+        }
+    }
+#endif
+
     rtc_state = rtc_init(0x70, i8259[8]);
 
     register_ioport_read(0x92, 1, 1, ioport92_read, NULL);
@@ -1087,11 +1102,13 @@ static void pc_init_pci(ram_addr_t ram_size, int vga_ram_size,
                         const char *kernel_filename,
                         const char *kernel_cmdline,
                         const char *initrd_filename,
-                        const char *cpu_model)
+                        const char *cpu_model,
+                        const char *direct_pci)
 {
     pc_init1(ram_size, vga_ram_size, boot_device, ds,
              kernel_filename, kernel_cmdline,
-             initrd_filename, 1, cpu_model);
+             initrd_filename, 1, cpu_model,
+             direct_pci);
 }
 
 static void pc_init_isa(ram_addr_t ram_size, int vga_ram_size,
@@ -1099,11 +1116,13 @@ static void pc_init_isa(ram_addr_t ram_size, int vga_ram_size,
                         const char *kernel_filename,
                         const char *kernel_cmdline,
                         const char *initrd_filename,
-                        const char *cpu_model)
+                        const char *cpu_model,
+                        const char *direct_pci)
 {
     pc_init1(ram_size, vga_ram_size, boot_device, ds,
              kernel_filename, kernel_cmdline,
-             initrd_filename, 0, cpu_model);
+             initrd_filename, 0, cpu_model,
+             direct_pci);
 }
 
 QEMUMachine pc_machine = {

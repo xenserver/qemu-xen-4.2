@@ -7405,6 +7405,7 @@ enum {
     QEMU_OPTION_smp,
     QEMU_OPTION_vnc,
     QEMU_OPTION_vncunused,
+    QEMU_OPTION_pci,
     QEMU_OPTION_no_acpi,
     QEMU_OPTION_curses,
     QEMU_OPTION_no_reboot,
@@ -7506,6 +7507,7 @@ const QEMUOption qemu_options[] = {
     { "smp", HAS_ARG, QEMU_OPTION_smp },
     { "vnc", HAS_ARG, QEMU_OPTION_vnc },
     { "vncunused", 0, QEMU_OPTION_vncunused },
+    { "pci", HAS_ARG, QEMU_OPTION_pci },
 #ifdef CONFIG_CURSES
     { "curses", 0, QEMU_OPTION_curses },
 #endif
@@ -7745,6 +7747,8 @@ int main(int argc, char **argv)
 #endif
     const char *pid_file = NULL;
     VLANState *vlan;
+
+    const char *direct_pci = NULL;
 
 #if !defined(__sun__) && !defined(CONFIG_STUBDOM)
     /* Maximise rlimits. Needed where default constraints are tight (*BSD). */
@@ -8114,6 +8118,9 @@ int main(int argc, char **argv)
                     exit(1);
                 }
                 ram_size = value;
+                break;
+            case QEMU_OPTION_pci:
+                direct_pci = optarg;
                 break;
             }
             case QEMU_OPTION_d:
@@ -8660,7 +8667,8 @@ int main(int argc, char **argv)
     }
 
     machine->init(ram_size, vga_ram_size, boot_devices, ds,
-                  kernel_filename, kernel_cmdline, initrd_filename, cpu_model);
+                  kernel_filename, kernel_cmdline, initrd_filename, cpu_model,
+		  direct_pci);
 
     /* init USB devices */
     if (usb_enabled) {

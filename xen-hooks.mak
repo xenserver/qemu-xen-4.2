@@ -26,6 +26,10 @@ OBJS += xenfb.o
 OBJS += xen_console.o
 OBJS += xen_machine_fv.o
 
+ifdef CONFIG_PASSTHROUGH
+OBJS+= pass-through.o
+endif
+
 BAD_OBJS += loader.o monitor.o gdbstub.o acpi.o
 
 OBJS := $(filter-out $(BAD_OBJS), $(OBJS))
