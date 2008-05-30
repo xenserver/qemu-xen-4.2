@@ -28,6 +28,7 @@
 #include "hw/pc.h"
 #include "hw/audiodev.h"
 #include "hw/isa.h"
+#include "hw/pci.h"
 #include "hw/baum.h"
 #include "net.h"
 #include "console.h"
