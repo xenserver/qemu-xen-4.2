@@ -9,8 +9,7 @@ endif
 
 QEMU_PROG=qemu-dm
 
-#CFLAGS += -Wno-unused -Wno-declaration-after-statement
-#	-Werror
+CFLAGS += -Wno-unused -Wno-declaration-after-statement
 
 LIBS += -L../../libxc -lxenctrl -lxenguest
 LIBS += -L../../xenstore -lxenstore
