@@ -167,7 +167,7 @@ qemu-img-%.o: %.c
 	$(CC) $(CFLAGS) $(CPPFLAGS) -c -o $@ $<
 
 # dyngen host tool
-dyngen$(EXESUF): dyngen.c osdep.o
+dyngen$(EXESUF): dyngen.o osdep.o
 	$(HOST_CC) $(CFLAGS) $(CPPFLAGS) -o $@ $^
 
 clean:
