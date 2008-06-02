@@ -2639,6 +2639,38 @@ static CPUWriteMemoryFunc *cirrus_linear_bitblt_write[3] = {
     cirrus_linear_bitblt_writel,
 };
 
+
+/* FIXME Flush the shadow page */
+static int unset_mm_mapping(int xc_handle, uint32_t domid,
+                     unsigned long nr_pages, unsigned int address_bits,
+                     xen_pfn_t *extent_start)
+{
+    int err = 0;
+
+    err = xc_domain_memory_decrease_reservation(xc_handle, domid,
+                                                nr_pages, 0, extent_start);
+    if (err)
+        fprintf(stderr, "Failed to decrease physmap\n");
+
+    return err;
+}
+
+static int set_mm_mapping(int xc_handle, uint32_t domid,
+                   unsigned long nr_pages, unsigned int address_bits,
+                   xen_pfn_t *extent_start)
+{
+    int err = 0;
+
+    err = xc_domain_memory_populate_physmap(xc_handle, domid, nr_pages, 0,
+                                            address_bits, extent_start);
+    if (err) {
+        fprintf(stderr, "Failed to populate physmap\n");
+        return -1;
+    }
+
+    return 0;
+}
+
 static void *set_vram_mapping(unsigned long begin, unsigned long end)
 {
     xen_pfn_t *extent_start = NULL;
