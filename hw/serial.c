@@ -778,17 +778,12 @@ static void serial_reset(void *opaque)
     qemu_irq_lower(s->irq);
 }
 
-/* If fd is zero, it means that the serial device uses the console */
-SerialState *serial_init(int base, qemu_irq irq, int baudbase,
-                         CharDriverState *chr)
+static void serial_init_core(SerialState *s, qemu_irq irq, int baudbase,
+			     CharDriverState *chr)
 {
-    SerialState *s;
-
-    s = qemu_mallocz(sizeof(SerialState));
-    if (!s)
-        return NULL;
     s->irq = irq;
     s->baudbase = baudbase;
+    s->chr = chr;
 
     s->modem_status_poll = qemu_new_timer(vm_clock, ( QEMUTimerCB *) serial_update_msl, s); 
  
@@ -798,11 +793,24 @@ SerialState *serial_init(int base, qemu_irq irq, int baudbase,
     qemu_register_reset(serial_reset, s);
     serial_reset(s);
 
+}
+
+/* If fd is zero, it means that the serial device uses the console */
+SerialState *serial_init(int base, qemu_irq irq, int baudbase,
+                         CharDriverState *chr)
+{
+    SerialState *s;
+
+    s = qemu_mallocz(sizeof(SerialState));
+    if (!s)
+        return NULL;
+
+    serial_init_core(s, irq, baudbase, chr);
+
     register_savevm("serial", base, 2, serial_save, serial_load, s);
 
     register_ioport_write(base, 8, 1, serial_ioport_write, s);
     register_ioport_read(base, 8, 1, serial_ioport_read, s);
-    s->chr = chr;
     qemu_chr_add_handlers(chr, serial_can_receive1, serial_receive1,
                           serial_event, s);
     return s;
@@ -890,18 +898,11 @@ SerialState *serial_mm_init (target_phys_addr_t base, int it_shift,
     s = qemu_mallocz(sizeof(SerialState));
     if (!s)
         return NULL;
-    s->irq = irq;
+
     s->base = base;
     s->it_shift = it_shift;
-    s->baudbase= baudbase;
 
-    s->tx_timer = qemu_new_timer(vm_clock, serial_tx_done, s);
-    if (!s->tx_timer)
-        return NULL;
-
-    qemu_register_reset(serial_reset, s);
-    serial_reset(s);
-
+    serial_init_core(s, irq, baudbase, chr);
     register_savevm("serial", base, 2, serial_save, serial_load, s);
 
     if (ioregister) {
@@ -909,7 +910,6 @@ SerialState *serial_mm_init (target_phys_addr_t base, int it_shift,
                                              serial_mm_write, s);
         cpu_register_physical_memory(base, 8 << it_shift, s_io_memory);
     }
-    s->chr = chr;
     qemu_chr_add_handlers(chr, serial_can_receive1, serial_receive1,
                           serial_event, s);
     serial_update_msl(s);
