@@ -753,7 +753,7 @@ static int usb_hid_handle_control(USBDevice *dev, int request, int value,
         }
         break;
     case GET_REPORT:
-	if (s->kind == USB_MOUSE || s->kind == s->kind == USB_TABLET)
+	if (s->kind == USB_MOUSE || s->kind == USB_TABLET)
             ret = usb_pointer_poll(s, data, length);
         else if (s->kind == USB_KEYBOARD)
             ret = usb_keyboard_poll(&s->kbd, data, length);
