@@ -81,7 +81,7 @@ typedef struct CPUX86State {
     CPU_COMMON
 } CPUX86State;
 
-CPUX86State *cpu_x86_init(void);
+CPUX86State *cpu_x86_init(const char *cpu_model);
 int cpu_x86_exec(CPUX86State *s);
 void cpu_x86_close(CPUX86State *s);
 int cpu_get_pic_interrupt(CPUX86State *s);
