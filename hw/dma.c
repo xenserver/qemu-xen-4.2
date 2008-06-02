@@ -448,13 +448,6 @@ static int dma_phony_handler (void *opaque, int nchan, int dma_pos, int dma_len)
     return dma_pos;
 }
 
-static int dma_phony_handler (void *opaque, int nchan, int dma_pos, int dma_len)
-{
-    dolog ("unregistered DMA channel used nchan=%d dma_pos=%d dma_len=%d\n",
-           nchan, dma_pos, dma_len);
-    return dma_pos;
-}
-
 /* dshift = 0: 8 bit DMA, 1 = 16 bit DMA */
 static void dma_init2(struct dma_cont *d, int base, int dshift,
                       int page_base, int pageh_base)
