@@ -26,6 +26,7 @@
 #include "hw.h"
 #include "pc.h"
 #include "pci.h"
+#include "sysemu.h"
 
 #include <xen/hvm/ioreq.h>
 
