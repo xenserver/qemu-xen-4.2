@@ -32,10 +32,9 @@
 #include <errno.h>
 #include <stdlib.h>
 
-#include "vl.h"
-#include "blktaplib.h"
 #include "xen_blktap.h"
 #include "block_int.h"
+#include "qemu-char.h"
 
 #define MSG_SIZE 4096
 

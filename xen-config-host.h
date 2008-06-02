@@ -6,6 +6,7 @@ extern int domid;
 #define bool xen_bool
 #include "xenctrl.h"
 #include "xs.h"
+#include "blktaplib.h"
 #undef bool
 
 extern int xc_handle;

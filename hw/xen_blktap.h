@@ -12,6 +12,7 @@
 #include <syslog.h>
 #include <stdio.h>
 
+#include "hw.h"
 #include "block_int.h"
 
 /* Things disks need to know about, these should probably be in a higher-level
