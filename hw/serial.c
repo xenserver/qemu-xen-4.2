@@ -808,64 +808,6 @@ SerialState *serial_init(int base, qemu_irq irq, int baudbase,
     return s;
 }
 
-/* Memory mapped interface */
-static uint32_t serial_mm_readb (void *opaque, target_phys_addr_t addr)
-{
-    SerialState *s = opaque;
-
-    return serial_ioport_read(s, (addr - s->base) >> s->it_shift) & 0xFF;
-}
-
-static void serial_mm_writeb (void *opaque,
-                              target_phys_addr_t addr, uint32_t value)
-{
-    SerialState *s = opaque;
-
-    serial_ioport_write(s, (addr - s->base) >> s->it_shift, value & 0xFF);
-}
-
-static uint32_t serial_mm_readw (void *opaque, target_phys_addr_t addr)
-{
-    SerialState *s = opaque;
-
-    return serial_ioport_read(s, (addr - s->base) >> s->it_shift) & 0xFFFF;
-}
-
-static void serial_mm_writew (void *opaque,
-                              target_phys_addr_t addr, uint32_t value)
-{
-    SerialState *s = opaque;
-
-    serial_ioport_write(s, (addr - s->base) >> s->it_shift, value & 0xFFFF);
-}
-
-static uint32_t serial_mm_readl (void *opaque, target_phys_addr_t addr)
-{
-    SerialState *s = opaque;
-
-    return serial_ioport_read(s, (addr - s->base) >> s->it_shift);
-}
-
-static void serial_mm_writel (void *opaque,
-                              target_phys_addr_t addr, uint32_t value)
-{
-    SerialState *s = opaque;
-
-    serial_ioport_write(s, (addr - s->base) >> s->it_shift, value);
-}
-
-static CPUReadMemoryFunc *serial_mm_read[] = {
-    &serial_mm_readb,
-    &serial_mm_readw,
-    &serial_mm_readl,
-};
-
-static CPUWriteMemoryFunc *serial_mm_write[] = {
-    &serial_mm_writeb,
-    &serial_mm_writew,
-    &serial_mm_writel,
-};
-
 SerialState *serial_mm_init (SetIRQFunc *set_irq, void *opaque,
                              target_ulong base, int it_shift,
                              int irq, CharDriverState *chr)
