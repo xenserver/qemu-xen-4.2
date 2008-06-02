@@ -35,7 +35,7 @@ static void i8259_set_irq(void *opaque, int irq, int level) {
 
 qemu_irq *i8259_init(qemu_irq parent_irq)
 {
-    return qemu_allocate_irqs(i8259_set_irq, s, 16);
+    return qemu_allocate_irqs(i8259_set_irq, 0, 16);
 }
 
 #if 0
