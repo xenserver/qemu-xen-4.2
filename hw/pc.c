@@ -90,12 +90,14 @@ uint64_t cpu_get_tsc(CPUX86State *env)
     }
 }
 
+#if 0
 /* SMM support */
 void cpu_smm_update(CPUState *env)
 {
     if (i440fx_state && env == first_cpu)
         i440fx_set_smm(i440fx_state, (env->hflags >> HF_SMM_SHIFT) & 1);
 }
+#endif
 
 #ifndef CONFIG_DM
 /* IRQ handling */
