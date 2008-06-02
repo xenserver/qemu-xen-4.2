@@ -162,6 +162,8 @@ struct SerialState {
 
 static int tokens_avail;
 
+static void serial_receive1(void *opaque, const uint8_t *buf, int size);
+
 static void fifo_clear(SerialState *s, int fifo) {
     SerialFIFO *f = ( fifo ) ? &s->recv_fifo : &s->xmit_fifo;
     memset(f->data, 0, UART_FIFO_LENGTH);   
@@ -208,7 +210,7 @@ static void serial_update_irq(SerialState *s)
     uint8_t tmp_iir = UART_IIR_NO_INT;
 
     if (!s->ier) {
-        s->set_irq(s->irq_opaque, s->irq, 0);
+        qemu_irq_lower(s->irq);
 	return;
     }
 
@@ -379,7 +381,7 @@ static void serial_xmit(void *opaque) {
 
     if ( (s->mcr & UART_MCR_LOOP
 	  /* in loopback mode, say that we just received a char */
-	  ? (serial_receive1(s, ch, 1), 1)
+	  ? (serial_receive1(s, &s->tsr, 1), 1)
 	  : qemu_chr_write(s->chr, &s->tsr, 1))
 	 != 1 ) {
         if ( ( s->tsr_retry > 0 ) && ( s->tsr_retry <= MAX_XMIT_RETRY ) ) {
@@ -787,10 +789,6 @@ SerialState *serial_init(int base, qemu_irq irq, int baudbase,
         return NULL;
     s->irq = irq;
     s->baudbase = baudbase;
-
-    s->tx_timer = qemu_new_timer(vm_clock, serial_tx_done, s);
-    if (!s->tx_timer)
-        return NULL;
 
     s->modem_status_poll = qemu_new_timer(vm_clock, ( QEMUTimerCB *) serial_update_msl, s); 
  
