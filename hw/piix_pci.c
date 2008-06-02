@@ -27,7 +27,7 @@
 #include "pci.h"
 
 
-static void i440fx_set_irq(void *pic, int irq_num, int level);
+static void i440fx_set_irq(qemu_irq *pic, int irq_num, int level);
 static void piix3_write_config(PCIDevice *d, 
                                uint32_t address, uint32_t val, int len);
 
@@ -207,7 +207,7 @@ PCIBus *i440fx_init(PCIDevice **pi440fx_state, qemu_irq *pic)
     register_ioport_read(0xcfc, 4, 4, pci_host_data_readl, s);
 
     d = pci_register_device(b, "i440FX", sizeof(PCIDevice), 0,
-                            NULL, i440fx_write_config);
+                            NULL, NULL);
 
     d->config[0x00] = 0x86; // vendor_id
     d->config[0x01] = 0x80;
@@ -427,7 +427,7 @@ static void piix3_write_config(PCIDevice *d,
     pci_default_write_config(d, address, val, len);
 }
 
-static void i440fx_set_irq(void *pic, int irq_num, int level)
+static void i440fx_set_irq(qemu_irq *pic, int irq_num, int level)
 {
     xc_hvm_set_pci_intx_level(xc_handle, domid, 0, 0, irq_num >> 2,
                               irq_num & 3, level);
