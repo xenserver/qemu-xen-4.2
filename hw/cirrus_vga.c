@@ -31,6 +31,9 @@
 #include "pci.h"
 #include "console.h"
 #include "vga_int.h"
+
+#include "exec-all.h"
+
 #ifndef _WIN32
 #include <sys/mman.h>
 #endif
