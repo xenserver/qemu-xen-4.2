@@ -33,6 +33,8 @@
 #include "boards.h"
 #include "console.h"
 
+#include "xen_platform.h"
+
 /* output Bochs bios info messages */
 //#define DEBUG_BIOS
 
@@ -54,7 +56,8 @@ static IOAPICState *ioapic;
 static PCIDevice *i440fx_state;
 
 static void xen_relocator_hook(target_phys_addr_t prot_addr, uint16_t protocol,
-			       uint8_t header[], int kernel_size);
+			       uint8_t header[], int kernel_size,
+			       target_phys_addr_t real_addr, int real_size);
 #define smbus_eeprom_device_init (void)
 
 static void ioport80_write(void *opaque, uint32_t addr, uint32_t data)
@@ -133,6 +136,8 @@ static void pic_irq_request(void *opaque, int irq, int level)
         env = env->next_cpu;
     }
 }
+#else
+#define pic_irq_request 0  /* see i386-dm/i8259.c:i8259_init */
 #endif /* !CONFIG_DM */
 
 /* PC cmos mappings */
@@ -655,7 +660,8 @@ static void load_linux(const char *kernel_filename,
     setup_size = (setup_size+1)*512;
     kernel_size -= setup_size;	/* Size of protected-mode code */
 
-    xen_relocator_hook(prot_addr, protocol, header, kernel_size);
+    xen_relocator_hook(prot_addr, protocol, header, kernel_size,
+		       real_addr, setup_size-1024);
 
     if (!fread_targphys_ok(real_addr+1024, setup_size-1024, f) ||
 	!fread_targphys_ok(prot_addr, kernel_size, f)) {
@@ -1232,7 +1238,8 @@ static void setup_relocator(target_phys_addr_t addr, target_phys_addr_t src, tar
 
 
 static void xen_relocator_hook(target_phys_addr_t prot_addr, uint16_t protocol,
-			       uint8_t header[], int kernel_size)
+			       uint8_t header[], int kernel_size,
+			       target_phys_addr_t real_addr, int real_size)
 {
 
     /* Urgh, Xen's HVM firmware lives at 0x100000, but that's also the
@@ -1259,17 +1266,16 @@ static void xen_relocator_hook(target_phys_addr_t prot_addr, uint16_t protocol,
 	    stl_p(header+0x214, reloc_prot_addr + kernel_size);
 	    setup_relocator(reloc_prot_addr + kernel_size, reloc_prot_addr, prot_addr, kernel_size);
 	}
+	fprintf(stderr, "qemu: loading kernel protected mode (%x bytes) at %#zx\n",
+		kernel_size, (size_t)reloc_prot_addr);
+	fprintf(stderr, "qemu: loading kernel real mode (%x bytes) at %#zx\n",
+		real_size, (size_t)real_addr);
     }
-
-    fprintf(stderr, "qemu: loading kernel real mode (%#x bytes) at %#zx\n",
-	    setup_size-1024, real_addr);
-    fprintf(stderr, "qemu: loading kernel protected mode (%#x bytes) at %#zx\n",
-	    kernel_size, reloc_prot_addr);
 }
 
 #ifdef CONFIG_DM
 
-void vmport_init(CPUX86State *env) { }
-void apic_init(CPUX86State *env) { }
+void vmport_init(void) { }
+int apic_init(CPUX86State *env) { return 0; }
 
 #endif /* CONFIG_DM */

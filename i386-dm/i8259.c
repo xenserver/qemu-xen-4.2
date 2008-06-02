@@ -34,6 +34,9 @@ static void i8259_set_irq(void *opaque, int irq, int level) {
 }
 
 qemu_irq *i8259_init(qemu_irq parent_irq)
+     /* We ignore the parent irq entirely.  The parent irq is attached to
+      * hw/pc.c:pic_irq_request
+      */
 {
     return qemu_allocate_irqs(i8259_set_irq, 0, 16);
 }
