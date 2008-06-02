@@ -808,36 +808,6 @@ SerialState *serial_init(int base, qemu_irq irq, int baudbase,
     return s;
 }
 
-SerialState *serial_mm_init (SetIRQFunc *set_irq, void *opaque,
-                             target_ulong base, int it_shift,
-                             int irq, CharDriverState *chr)
-{
-    SerialState *s;
-    int s_io_memory;
-
-    s = qemu_mallocz(sizeof(SerialState));
-    if (!s)
-        return NULL;
-    s->set_irq = set_irq;
-    s->irq_opaque = opaque;
-    s->irq = irq;
-    s->lsr = UART_LSR_TEMT | UART_LSR_THRE;
-    s->iir = UART_IIR_NO_INT;
-    s->msr = UART_MSR_DCD | UART_MSR_DSR | UART_MSR_CTS;
-    s->base = base;
-    s->it_shift = it_shift;
-
-    register_savevm("serial", base, 2, serial_save, serial_load, s);
-
-    s_io_memory = cpu_register_io_memory(0, serial_mm_read,
-                                         serial_mm_write, s);
-    cpu_register_physical_memory(base, 8 << it_shift, s_io_memory);
-    s->chr = chr;
-    qemu_chr_add_handlers(chr, serial_can_receive1, serial_receive1,
-                          serial_event, s);
-    return s;
-}
-
 /* Memory mapped interface */
 uint32_t serial_mm_readb (void *opaque, target_phys_addr_t addr)
 {
