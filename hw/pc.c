@@ -906,6 +906,8 @@ static void pc_init1(ram_addr_t ram_size, int vga_ram_size,
     /* map all the bios at the top of memory */
     cpu_register_physical_memory((uint32_t)(-bios_size),
                                  bios_size, bios_offset | IO_MEM_ROM);
+#else
+    vga_ram_addr = 0; /* this is not supposed to be used */
 #endif /* !CONFIG_DM */
 
     bochs_bios_init();
