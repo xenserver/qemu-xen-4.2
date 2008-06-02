@@ -575,9 +575,9 @@ static void load_linux(const char *kernel_filename,
 	    "qemu: real_addr     = %#zx\n"
 	    "qemu: cmdline_addr  = %#zx\n"
 	    "qemu: prot_addr     = %#zx\n",
-	    real_addr,
-	    cmdline_addr,
-	    prot_addr);
+	    (size_t)real_addr,
+	    (size_t)cmdline_addr,
+	    (size_t)prot_addr);
 #endif
 
     /* highest address for loading the initrd */
@@ -630,7 +630,7 @@ static void load_linux(const char *kernel_filename,
 	initrd_addr = ((initrd_max-initrd_size) & ~4095);
 
 	fprintf(stderr, "qemu: loading initrd (%#x bytes) at %#zx\n",
-		initrd_size, initrd_addr);
+		initrd_size, (size_t)initrd_addr);
 
 	if (!fread_targphys_ok(initrd_addr, initrd_size, fi)) {
 	    fprintf(stderr, "qemu: read error on initial ram disk '%s'\n",
