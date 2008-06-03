@@ -23,7 +23,8 @@
  * THE SOFTWARE.
  */
 
-#include "vl.h"
+#include "hw.h"
+
 #include <xen/hvm/params.h>
 #include <sys/mman.h>
 
