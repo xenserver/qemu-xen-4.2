@@ -1,6 +1,7 @@
 CPPFLAGS+= -I$(XEN_ROOT)/tools/libxc
 CPPFLAGS+= -I$(XEN_ROOT)/tools/xenstore
 CPPFLAGS+= -I$(XEN_ROOT)/tools/include
+CPPFLAGS+= -I$(XEN_ROOT)/tools/blktap/lib
 
 SSE2 := $(call cc-option,$(CC),-msse2,)
 ifeq ($(SSE2),-msse2)
@@ -14,6 +15,7 @@ CFLAGS += -Wno-unused -Wno-declaration-after-statement \
 
 LIBS += -L$(XEN_ROOT)/tools/libxc -lxenctrl -lxenguest
 LIBS += -L$(XEN_ROOT)/tools/xenstore -lxenstore
+LIBS += -L$(XEN_ROOT)/tools/blktap/lib -lblktap
 
 LDFLAGS := $(CFLAGS) $(LDFLAGS)
 
@@ -25,6 +27,7 @@ OBJS += xen_machine_pv.o
 OBJS += xenfb.o
 OBJS += xen_console.o
 OBJS += xen_machine_fv.o
+OBJS += xen_blktap.o
 
 ifdef CONFIG_PASSTHROUGH
 OBJS+= pass-through.o
