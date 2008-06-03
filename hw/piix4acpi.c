@@ -1,4 +1,4 @@
-/*
+ /*
  * PIIX4 ACPI controller emulation
  *
  * Winston liwen Wang, winston.l.wang@intel.com
@@ -47,8 +47,6 @@
 #define PHP_EVT_ADD     0x0
 #define PHP_EVT_REMOVE  0x3
 
-#define ACPI_SCI_IRQ 9
-
 /* The bit in GPE0_STS/EN to notify the pci hotplug event */
 #define ACPI_PHP_GPE_BIT 3
 
@@ -82,6 +80,7 @@ typedef struct PHPSlots {
 } PHPSlots;
 
 PHPSlots php_slots;
+static qemu_irq sci_irq;
 
 static void piix4acpi_save(QEMUFile *f, void *opaque)
 {
@@ -330,7 +329,7 @@ static void gpe_sts_write(void *opaque, uint32_t addr, uint32_t val)
          hotplugged &&
          !test_bit(&s->gpe0_sts[0], ACPI_PHP_GPE_BIT)) {
         fprintf(logfile, "Clear the GPE0_STS bit for ACPI hotplug & deassert the IRQ.\n");
-        pic_set_irq(ACPI_SCI_IRQ, 0);
+        qemu_irq_lower(sci_irq);
     }
 
 }
@@ -359,7 +358,7 @@ static void gpe_en_write(void *opaque, uint32_t addr, uint32_t val)
          !(val & (1 << (ACPI_PHP_GPE_BIT % 8))) ) {
         fprintf(logfile, "deassert due to disable GPE bit.\n");
         s->sci_asserted = 0;
-        pic_set_irq(ACPI_SCI_IRQ, 0);
+        qemu_irq_lower(sci_irq);
     }
 
 }
@@ -433,7 +432,7 @@ static void acpi_sci_intr(GPEState *s)
 
         set_bit(&s->gpe0_sts[0], ACPI_PHP_GPE_BIT);
         s->sci_asserted = 1;
-        pic_set_irq(ACPI_SCI_IRQ, 1);
+        qemu_irq_raise(sci_irq);
         fprintf(logfile, "generate a sci for PHP.\n");
     }
 }
@@ -501,10 +500,15 @@ void acpi_php_add(int pci_slot)
 #endif /* CONFIG_PASSTHROUGH */
 
 /* PIIX4 acpi pci configuration space, func 2 */
-void *piix4_pm_init(PCIBus *bus, int devfn)
+i2c_bus *piix4_pm_init(PCIBus *bus, int devfn, uint32_t smb_io_base,
+                       qemu_irq sci_irq_spec)
 {
     PCIAcpiState *d;
     uint8_t *pci_conf;
+
+    sci_irq = sci_irq_spec;
+
+    /* we ignore smb_io_base as we don't give HVM guests an emulated smbus */
 
     /* register a function 2 of PIIX4 */
     d = (PCIAcpiState *)pci_register_device(
@@ -546,4 +550,6 @@ void *piix4_pm_init(PCIBus *bus, int devfn)
 #endif
 
     register_savevm("piix4acpi", 0, 1, piix4acpi_save, piix4acpi_load, d);
+
+    return NULL;
 }
