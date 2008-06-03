@@ -291,6 +291,8 @@ ifdef CONFIG_DYNGEN_OP
 OPC_H = gen-op.h dyngen-opc.h op.h
 endif
 
+include hookslib.mak
+
 libqemu.a: $(LIBOBJS)
 	rm -f $@
 	$(AR) rcs $@ $(LIBOBJS)
