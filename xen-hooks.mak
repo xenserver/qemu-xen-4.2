@@ -20,11 +20,11 @@ LIBS += -L$(XEN_ROOT)/tools/blktap/lib -lblktap
 LDFLAGS := $(CFLAGS) $(LDFLAGS)
 
 OBJS += piix4acpi.o
-OBJS += xenstore.o
+#OBJS += xenstore.o
 OBJS += xen_platform.o
 OBJS += xen_machine_fv.o
 OBJS += xen_machine_pv.o
-OBJS += xenfb.o
+#OBJS += xenfb.o
 OBJS += xen_console.o
 OBJS += xen_machine_fv.o
 OBJS += xen_blktap.o
@@ -34,6 +34,9 @@ OBJS+= pass-through.o
 endif
 
 BAD_OBJS += loader.o monitor.o gdbstub.o acpi.o apic.o
-BAD_OBJS += vmmouse.o vmport.o tcg* helper.o disas.o
+BAD_OBJS += vmmouse.o vmport.o tcg* helper.o
+
+# don't compile right now:
+BAD_OBJS += vga.o
 
 OBJS := $(filter-out $(BAD_OBJS), $(OBJS))
