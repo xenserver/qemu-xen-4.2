@@ -52,6 +52,12 @@
 
 #include "cpu.h"
 #include "exec-all.h"
+#include "hw.h"
+#include "pci.h"
+#include "console.h"
+#include "qemu-timer.h"
+#include "sysemu.h"
+#include "qemu-xen.h"
 
 //#define DEBUG_MMU
 
@@ -188,7 +194,7 @@ target_ulong cpu_get_phys_page_debug(CPUState *env, target_ulong addr)
 }
 
 //some functions to handle the io req packet
-void sp_info()
+void sp_info(void)
 {
     ioreq_t *req;
     int i;
@@ -404,7 +410,7 @@ void cpu_ioreq_timeoffset(CPUState *env, ioreq_t *req)
 
     time_offset += (unsigned long)req->data;
 
-    fprintf(logfile, "Time offset set %ld, added offset %ld\n", time_offset, req->data);
+    fprintf(logfile, "Time offset set %ld, added offset %lld\n", time_offset, req->data);
     sprintf(b, "%ld", time_offset);
     xenstore_vm_write(domid, "rtc/timeoffset", b);
 }
@@ -512,10 +518,9 @@ void cpu_handle_ioreq(void *opaque)
 		fprintf(logfile, "shutdown requested in cpu_handle_ioreq\n");
 		destroy_hvm_domain();
 	    }
-	    if (reset_requested) {
+	    if (qemu_reset_requested()) {
 		fprintf(logfile, "reset requested in cpu_handle_ioreq.\n");
 		qemu_system_reset();
-		reset_requested = 0;
 	    }
 	}
 

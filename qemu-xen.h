@@ -23,6 +23,9 @@ void timeoffset_get(void);
 void pci_xen_platform_init(PCIBus *bus);
 #endif
 
+
+void destroy_hvm_domain(void);
+
 #ifdef __ia64__
 static inline void xc_domain_shutdown_hook(int xc_handle, uint32_t domid)
 {
