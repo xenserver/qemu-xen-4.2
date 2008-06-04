@@ -20,6 +20,11 @@
  *  Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
+#include "hw.h"
+#include "sysemu.h"
+#include "exec-all.h"
+#include "qemu-char.h"
+
 #include <malloc.h>
 #include <stdlib.h>
 #include <errno.h>
@@ -33,8 +38,6 @@
 #include <xs.h>
 #include <xen/io/console.h>
 #include <xenctrl.h>
-
-#include "vl.h"
 
 #include "xen_console.h"
 

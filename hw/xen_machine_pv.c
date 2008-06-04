@@ -25,6 +25,8 @@
 #include "hw.h"
 #include "xen_console.h"
 #include "xenfb.h"
+#include "sysemu.h"
+#include "boards.h"
 
 extern void init_blktap(void);
 
@@ -33,12 +35,12 @@ extern void init_blktap(void);
  *   - a virtual framebuffer
  *   - ....
  */
-static void xen_init_pv(uint64_t ram_size, int vga_ram_size, char *boot_device,
-			DisplayState *ds, const char **fd_filename,
-			int snapshot,
+static void xen_init_pv(ram_addr_t ram_size, int vga_ram_size,
+			const char *boot_device, DisplayState *ds,
 			const char *kernel_filename,
 			const char *kernel_cmdline,
 			const char *initrd_filename,
+			const char *cpu_model,
 			const char *direct_pci)
 {
     struct xenfb *xenfb;

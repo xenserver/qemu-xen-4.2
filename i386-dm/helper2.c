@@ -67,7 +67,7 @@ _syscall3(int, modify_ldt, int, func, void *, ptr, unsigned long, bytecount)
 #endif
 #endif /* USE_CODE_COPY */
 
-#include "vl.h"
+#include "hw.h"
 
 int domid = -1;
 int vcpus = 1;
@@ -95,7 +95,7 @@ int send_vcpu = 0;
 #define NR_CPUS 32
 evtchn_port_t ioreq_local_port[NR_CPUS];
 
-CPUX86State *cpu_x86_init(void)
+CPUX86State *cpu_x86_init(const char *cpu_model)
 {
     CPUX86State *env;
     static int inited;
