@@ -34,4 +34,36 @@ void handle_buffered_pio(void);
 #define handle_buffered_pio()                           do {} while (0)
 #endif
 
+/* xenstore.c */
+void xenstore_parse_domain_config(int domid);
+int xenstore_fd(void);
+void xenstore_process_event(void *opaque);
+void xenstore_record_dm(char *subpath, char *state);
+void xenstore_record_dm_state(char *state);
+void xenstore_check_new_media_present(int timeout);
+void xenstore_write_vncport(int vnc_display);
+void xenstore_read_vncpasswd(int domid, char *pwbuf, size_t pwbuflen);
+void xenstore_write_vslots(char *vslots);
+
+int xenstore_domain_has_devtype(struct xs_handle *handle,
+                                const char *devtype);
+char **xenstore_domain_get_devices(struct xs_handle *handle,
+                                   const char *devtype, unsigned int *num);
+char *xenstore_read_hotplug_status(struct xs_handle *handle,
+                                   const char *devtype, const char *inst);
+char *xenstore_backend_read_variable(struct xs_handle *,
+                                     const char *devtype, const char *inst,
+                                     const char *var);
+int xenstore_subscribe_to_hotplug_status(struct xs_handle *handle,
+                                         const char *devtype,
+                                         const char *inst,
+                                         const char *token);
+int xenstore_unsubscribe_from_hotplug_status(struct xs_handle *handle,
+                                             const char *devtype,
+                                             const char *inst,
+                                             const char *token);
+
+int xenstore_vm_write(int domid, char *key, char *val);
+char *xenstore_vm_read(int domid, char *key, unsigned int *len);
+
 #endif /*QEMU_XEN_H*/
