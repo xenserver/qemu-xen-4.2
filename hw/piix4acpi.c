@@ -29,6 +29,7 @@
 #include "sysemu.h"
 
 #include <xen/hvm/ioreq.h>
+#include <xen/hvm/params.h>
 
 /* PM1a_CNT bits, as defined in the ACPI specification. */
 #define SCI_EN            (1 <<  0)
@@ -39,6 +40,7 @@
 /* Sleep state type codes as defined by the \_Sx objects in the DSDT. */
 /* These must be kept in sync with the DSDT (hvmloader/acpi/dsdt.asl) */
 #define SLP_TYP_S4        (6 << 10)
+#define SLP_TYP_S3        (5 << 10)
 #define SLP_TYP_S5        (7 << 10)
 
 #define ACPI_DBG_IO_ADDR  0xb044
@@ -80,6 +82,7 @@ typedef struct PHPSlots {
 } PHPSlots;
 
 PHPSlots php_slots;
+static int s3_shutdown_flag;
 static qemu_irq sci_irq;
 
 static void piix4acpi_save(QEMUFile *f, void *opaque)
@@ -121,6 +124,13 @@ static void acpi_shutdown(uint32_t val)
         return;
 
     switch (val & SLP_TYP_Sx) {
+    case SLP_TYP_S3:
+        s3_shutdown_flag = 1;
+        qemu_system_reset();
+        s3_shutdown_flag = 0;
+        cmos_set_s3_resume();
+        xc_set_hvm_param(xc_handle, domid, HVM_PARAM_ACPI_S_STATE, 3);
+        break;
     case SLP_TYP_S4:
     case SLP_TYP_S5:
         qemu_system_shutdown_request();

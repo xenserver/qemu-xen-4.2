@@ -89,6 +89,7 @@ extern int fd_bootchk;
 
 void ioport_set_a20(int enable);
 int ioport_get_a20(void);
+void cmos_set_s3_resume(void);
 
 /* acpi.c */
 extern int acpi_enabled;

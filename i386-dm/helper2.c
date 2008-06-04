@@ -142,8 +142,12 @@ CPUX86State *cpu_x86_init(const char *cpu_model)
 /* called from main_cpu_reset */
 void cpu_reset(CPUX86State *env)
 {
+    extern int s3_shutdown_flag;
     int xcHandle;
     int sts;
+ 
+    if (s3_shutdown_flag)
+        return;
 
     xcHandle = xc_interface_open();
     if (xcHandle < 0)
