@@ -1,7 +1,7 @@
 #ifndef _XENFB_H_
 #define _XENFB_H_
 
-#include "vl.h"
+#include "hw.h"
 #include <stdbool.h>
 #include <sys/types.h>
 

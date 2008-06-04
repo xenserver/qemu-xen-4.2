@@ -24,6 +24,9 @@
  */
 
 #include "hw.h"
+#include "boards.h"
+#include "exec-all.h"
+#include "qemu-xen.h"
 
 #include <xen/hvm/params.h>
 #include <sys/mman.h>
@@ -180,12 +183,10 @@ void qemu_invalidate_map_cache(void)
 #endif /* defined(MAPCACHE) */
 
 
-static void xen_init_fv(uint64_t ram_size, int vga_ram_size, char *boot_device,
-                        DisplayState *ds, const char **fd_filename,
-                        int snapshot,
-                        const char *kernel_filename,
-                        const char *kernel_cmdline,
-                        const char *initrd_filename,
+static void xen_init_fv(ram_addr_t ram_size, int vga_ram_size,
+			const char *boot_device, DisplayState *ds,
+			const char *kernel_filename,const char *kernel_cmdline,
+                        const char *initrd_filename, const char *cpu_model,
                         const char *direct_pci)
 {
     unsigned long ioreq_pfn;
@@ -272,9 +273,9 @@ static void xen_init_fv(uint64_t ram_size, int vga_ram_size, char *boot_device,
     timeoffset_get();
 
 
-    pc_machine.init(ram_size, vga_ram_size, boot_device, ds, fd_filename,
-                    snapshot, kernel_filename, kernel_cmdline, initrd_filename,
-                    direct_pci);
+    pc_machine.init(ram_size, vga_ram_size, boot_device, ds,
+		    kernel_filename, kernel_cmdline, initrd_filename,
+		    cpu_model, direct_pci);
 }
 
 QEMUMachine xenfv_machine = {

@@ -22,7 +22,7 @@
  * THE SOFTWARE.
  */
 
-#include "vl.h"
+#include "hw.h"
 #include "xen_console.h"
 #include "xenfb.h"
 
