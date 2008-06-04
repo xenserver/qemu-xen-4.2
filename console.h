@@ -81,7 +81,7 @@ struct DisplayState {
 
     void (*dpy_update)(struct DisplayState *s, int x, int y, int w, int h);
     void (*dpy_resize)(struct DisplayState *s, int w, int h);
-    void (*dpy_resize_shared)(struct DisplayState *s, int w, int h, int linesize);
+    void (*dpy_resize_shared)(struct DisplayState *s, int w, int h, int depth, int linesize, void *pixels);
     void (*dpy_setdata)(DisplayState *s, void *pixels);
     void (*dpy_refresh)(struct DisplayState *s);
     void (*dpy_copy)(struct DisplayState *s, int src_x, int src_y,
