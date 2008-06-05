@@ -36,6 +36,8 @@
 #include "disas.h"
 #include <dirent.h>
 
+#undef TARGET_I386
+
 #ifdef CONFIG_PROFILER
 #include "qemu-timer.h" /* for ticks_per_sec */
 #endif
