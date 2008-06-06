@@ -1438,7 +1438,6 @@ static void xenfb_pv_colourdepth(DisplayState *ds, int depth)
         ds->data = NULL;
     } else {
         ds->data = xs->nonshared_vram;
-        fbfront_resize(fb_dev, ds->width, ds->height, ds->linesize, ds->depth, VGA_RAM_SIZE);
     }
 }
 

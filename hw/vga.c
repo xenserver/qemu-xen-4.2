@@ -2326,7 +2326,7 @@ static void vga_save_dpy_update(DisplayState *s,
 {
 }
 
-static void vga_save_dpy_resize(DisplayState *s, int w, int h, int linesize)
+static void vga_save_dpy_resize(DisplayState *s, int w, int h)
 {
     s->linesize = w * 4;
     s->data = qemu_malloc(h * s->linesize);
