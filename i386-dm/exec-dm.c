@@ -672,6 +672,11 @@ uint32_t ldl_phys(target_phys_addr_t addr)
     return tswap32(val);
 }
 
+void cpu_physical_memory_write_rom(target_phys_addr_t addr, 
+                                   const uint8_t *buf, int len) {
+    return cpu_physical_memory_write(addr,buf,len);
+}
+
 /* stub out various functions for Xen DM */
 void dump_exec_info(FILE *f,
                     int (*cpu_fprintf)(FILE *f, const char *fmt, ...)) {
