@@ -671,3 +671,13 @@ uint32_t ldl_phys(target_phys_addr_t addr)
     cpu_physical_memory_read(addr, (uint8_t *)&val, 4);
     return tswap32(val);
 }
+
+/* stub out various functions for Xen DM */
+void dump_exec_info(FILE *f,
+                    int (*cpu_fprintf)(FILE *f, const char *fmt, ...)) {
+}
+void monitor_disas(CPUState *env,
+                   target_ulong pc, int nb_insn, int is_physical, int flags) {
+}
+void irq_info(void) { }
+void pic_info(void) { }
