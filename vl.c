@@ -8767,7 +8767,6 @@ int main(int argc, char **argv)
 
     main_loop();
     quit_timers();
-    pt_uninit();
 
 #if !defined(_WIN32)
     /* close network clients */

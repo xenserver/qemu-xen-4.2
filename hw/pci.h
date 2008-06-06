@@ -114,7 +114,6 @@ int test_pci_slot(int);
 int bdf_to_slot(char*);
 int power_on_php_slot(int);
 int power_off_php_slot(int);
-void pt_uninit(void);
 
 void do_pci_add(char *devname);
 void do_pci_del(char *devname);
