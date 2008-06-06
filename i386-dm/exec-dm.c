@@ -34,7 +34,8 @@
 
 #include "cpu.h"
 #include "exec-all.h"
-#include "vl.h"
+#include "hw.h"
+#include "qemu-xen.h"
 
 //#define DEBUG_TB_INVALIDATE
 //#define DEBUG_FLUSH
@@ -64,8 +65,8 @@ uint8_t code_gen_buffer[CODE_GEN_BUFFER_SIZE];
 uint8_t *code_gen_ptr;
 #endif /* !CONFIG_DM */
 
-uint64_t phys_ram_size;
-extern uint64_t ram_size;
+ram_addr_t phys_ram_size;
+ram_addr_t ram_size;
 int phys_ram_fd;
 uint8_t *phys_ram_base;
 uint8_t *phys_ram_dirty;
