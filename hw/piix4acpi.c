@@ -563,3 +563,7 @@ i2c_bus *piix4_pm_init(PCIBus *bus, int devfn, uint32_t smb_io_base,
 
     return NULL;
 }
+
+void i440fx_init_memory_mappings(PCIDevice *d) {
+    /* our implementation doesn't need this */
+}
