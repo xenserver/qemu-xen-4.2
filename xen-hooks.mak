@@ -37,7 +37,4 @@ endif
 BAD_OBJS += loader.o gdbstub.o acpi.o apic.o
 BAD_OBJS += vmmouse.o vmport.o tcg* helper.o
 
-# don't compile right now:
-BAD_OBJS += vga.o
-
 OBJS := $(filter-out $(BAD_OBJS), $(OBJS))

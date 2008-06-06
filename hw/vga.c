@@ -2163,12 +2163,11 @@ void vga_common_init(VGAState *s, DisplayState *ds, uint8_t *vga_ram_base,
     s->vram_offset = vga_ram_offset;
     s->vram_size = vga_ram_size;
     s->ds = ds;
-    ds->palette = s->last_palette;
     s->get_bpp = vga_get_bpp;
     s->get_offsets = vga_get_offsets;
     s->get_resolution = vga_get_resolution;
     graphic_console_init(s->ds, vga_update_display, vga_invalidate_display,
-                         vga_screen_dump, s);
+                         vga_screen_dump, NULL, s);
 
     vga_bios_init(s);
 }
