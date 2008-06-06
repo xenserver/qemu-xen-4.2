@@ -9,4 +9,6 @@ extern int domid;
 #include "blktaplib.h"
 #undef bool
 
+#undef CONFIG_GDBSTUB
+
 extern int xc_handle;
