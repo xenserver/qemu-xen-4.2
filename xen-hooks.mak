@@ -34,7 +34,7 @@ ifdef CONFIG_PASSTHROUGH
 OBJS+= pass-through.o
 endif
 
-BAD_OBJS += loader.o gdbstub.o acpi.o apic.o
+BAD_OBJS += gdbstub.o acpi.o apic.o
 BAD_OBJS += vmmouse.o vmport.o tcg* helper.o
 
 OBJS := $(filter-out $(BAD_OBJS), $(OBJS))
