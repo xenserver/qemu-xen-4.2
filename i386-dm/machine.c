@@ -13,3 +13,5 @@ void register_machines(void)
     qemu_register_machine(&xenfv_machine);
     qemu_register_machine(&xenpv_machine);
 }
+
+void *vmmouse_init(void *m) { return NULL; }
