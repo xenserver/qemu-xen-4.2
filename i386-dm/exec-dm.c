@@ -419,8 +419,8 @@ int iomem_index(target_phys_addr_t addr)
 #define phys_ram_addr(x) (((x) < ram_size) ? (phys_ram_base + (x)) : NULL)
 #endif
 
-extern unsigned long *logdirty_bitmap;
-extern unsigned long logdirty_bitmap_size;
+unsigned long *logdirty_bitmap;
+unsigned long logdirty_bitmap_size;
 
 /*
  * Replace the standard byte memcpy with a word memcpy for appropriately sized
