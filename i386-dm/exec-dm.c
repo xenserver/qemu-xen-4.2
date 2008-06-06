@@ -617,3 +617,57 @@ void cpu_physical_memory_reset_dirty(ram_addr_t start, ram_addr_t end,
 
 	return;
 }
+
+
+/* Unoptimised in Xen DM, nicked from git
+ *  aab33094073678d459ccaac5c60ea7533e8d1d8e */
+uint32_t ldub_phys(target_phys_addr_t addr)
+{
+    uint8_t val;
+    cpu_physical_memory_read(addr, &val, 1);
+    return val;
+}
+uint32_t lduw_phys(target_phys_addr_t addr)
+{
+    uint16_t val;
+    cpu_physical_memory_read(addr, (uint8_t *)&val, 2);
+    return tswap16(val);
+}
+uint64_t ldq_phys(target_phys_addr_t addr)
+{
+    uint64_t val;
+    cpu_physical_memory_read(addr, (uint8_t *)&val, 8);
+    return tswap64(val);
+}
+void stb_phys(target_phys_addr_t addr, uint32_t val)
+{
+    uint8_t v = val;
+    cpu_physical_memory_write(addr, &v, 1);
+}
+void stw_phys(target_phys_addr_t addr, uint32_t val)
+{
+    uint16_t v = tswap16(val);
+    cpu_physical_memory_write(addr, (const uint8_t *)&v, 2);
+}
+void stq_phys(target_phys_addr_t addr, uint64_t val)
+{
+    val = tswap64(val);
+    cpu_physical_memory_write(addr, (const uint8_t *)&val, 8);
+}
+
+/* stubs which we hope (think!) are OK for Xen DM */
+void stl_phys(target_phys_addr_t addr, uint32_t val)
+{
+    val = tswap32(val);
+    cpu_physical_memory_write(addr, (const uint8_t *)&val, 4);
+}
+void stl_phys_notdirty(target_phys_addr_t addr, uint32_t val)
+{
+    stl_phys(addr, val);
+}
+uint32_t ldl_phys(target_phys_addr_t addr)
+{
+    uint32_t val;
+    cpu_physical_memory_read(addr, (uint8_t *)&val, 4);
+    return tswap32(val);
+}
