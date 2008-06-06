@@ -199,6 +199,7 @@ int opengl_enabled = 1;
 #else
 int opengl_enabled = 0;
 #endif
+static const char *direct_pci;
 CharDriverState *serial_hds[MAX_SERIAL_PORTS];
 CharDriverState *parallel_hds[MAX_PARALLEL_PORTS];
 #ifdef TARGET_I386
@@ -3550,6 +3551,7 @@ void qemu_chr_close(CharDriverState *chr)
     qemu_free(chr);
 }
 
+#ifdef CONFIG_PASSTHROUGH
 void do_pci_del(char *devname)
 {
     int pci_slot;
@@ -3566,6 +3568,7 @@ void do_pci_add(char *devname)
 
     acpi_php_add(pci_slot);
 }
+#endif
 
 
 /***********************************************************/
@@ -7231,6 +7234,7 @@ static void help(int exitcode)
 #endif
 #ifdef CONFIG_OPENGL
            "-disable-opengl disable OpenGL rendering, using SDL"
+	   "-direct-pci s   specify pci passthrough, with configuration string s\n"
 #endif
 #ifdef TARGET_I386
            "-no-fd-bootchk  disable boot signature checking for floppy disks\n"
@@ -7425,6 +7429,7 @@ enum {
     QEMU_OPTION_alt_grab,
     QEMU_OPTION_no_quit,
     QEMU_OPTION_disable_opengl,
+    QEMU_OPTION_direct_pci,
     QEMU_OPTION_pidfile,
     QEMU_OPTION_no_kqemu,
     QEMU_OPTION_kernel_kqemu,
@@ -7530,6 +7535,7 @@ const QEMUOption qemu_options[] = {
     { "no-quit", 0, QEMU_OPTION_no_quit },
 #endif
     { "disable-opengl", 0, QEMU_OPTION_disable_opengl },
+    { "direct_pci", HAS_ARG, QEMU_OPTION_direct_pci },
     { "pidfile", HAS_ARG, QEMU_OPTION_pidfile },
     { "win2k-hack", 0, QEMU_OPTION_win2k_hack },
     { "usbdevice", HAS_ARG, QEMU_OPTION_usbdevice },
@@ -7776,8 +7782,6 @@ int main(int argc, char **argv)
 #endif
     const char *pid_file = NULL;
     VLANState *vlan;
-
-    const char *direct_pci = direct_pci_str;
 
 #if !defined(__sun__) && !defined(CONFIG_STUBDOM)
     /* Maximise rlimits. Needed where default constraints are tight (*BSD). */
@@ -8280,6 +8284,9 @@ int main(int argc, char **argv)
 #endif
             case QEMU_OPTION_disable_opengl:
                 opengl_enabled = 0;
+                break;
+            case QEMU_OPTION_direct_pci:
+		direct_pci = optarg;
                 break;
             case QEMU_OPTION_pidfile:
                 pid_file = optarg;
