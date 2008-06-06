@@ -1,4 +1,7 @@
+#include <stdbool.h>
+
 #include "hw.h"
+#include "console.h"
 
 #include <stdarg.h>
 #include <stdlib.h>
@@ -20,6 +23,8 @@
 #include <xs.h>
 
 #include "xenfb.h"
+#include "qemu-common.h"
+#include "config.h"
 
 #ifdef CONFIG_STUBDOM
 #include <semaphore.h>
@@ -671,6 +676,7 @@ static int xenfb_on_state_change(struct xenfb_device *dev)
 		break;
 	case XenbusStateClosed:
 		xenfb_switch_state(dev, state);
+	default:; /* hope this isn't important */
 	}
 	return 0;
 }
@@ -1325,6 +1331,7 @@ static int xenfb_register_console(struct xenfb *xenfb) {
 			     xenfb_update,
 			     xenfb_invalidate,
 			     xenfb_screen_dump,
+			     NULL,
 			     xenfb);
         if (xenfb->ds->dpy_resize_shared)
             dpy_resize_shared(xenfb->ds, xenfb->width, xenfb->height, xenfb->depth, xenfb->row_stride, xenfb->pixels + xenfb->offset);

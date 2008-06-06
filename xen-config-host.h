@@ -3,11 +3,19 @@ extern int domid;
 
 #include <errno.h>
 
-#define bool xen_bool
+#ifdef bool
+# define XEN_CONFIG_HOST_BOOL_WAS_DEFINED 1
+#else
+# define bool xen_bool
+#endif
+
 #include "xenctrl.h"
 #include "xs.h"
 #include "blktaplib.h"
-#undef bool
+
+#ifndef XEN_CONFIG_HOST_BOOL_WAS_DEFINED
+# undef bool
+#endif
 
 #undef CONFIG_GDBSTUB
 
