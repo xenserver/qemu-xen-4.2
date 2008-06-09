@@ -20,7 +20,7 @@ LIBS += -L$(XEN_ROOT)/tools/blktap/lib -lblktap
 LDFLAGS := $(CFLAGS) $(LDFLAGS)
 
 OBJS += piix4acpi.o
-#OBJS += xenstore.o
+OBJS += xenstore.o
 OBJS += xen_platform.o
 OBJS += xen_machine_fv.o
 OBJS += xen_machine_pv.o

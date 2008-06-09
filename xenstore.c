@@ -19,10 +19,26 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <fcntl.h>
+#include <assert.h>
+
+#include "exec-all.h"
+#include "sysemu.h"
+
+#include "hw.h"
+#include "pci.h"
+
+/* re FIXME_MEDIA_EJECT
+ * These code fragments manipulated interfaces in the old qemu, which
+ * are not present in this tree.  They will need to be reintegrated.
+ * The code inside the #ifdef...#endif blocks has not been adjusted
+ # at all to align it with new upstream.
+ */
 
 struct xs_handle *xsh = NULL;
+#ifdef FIXME_MEDIA_EJECT /* not yet supported in this merge */
 static char *media_filename[MAX_DISKS + MAX_SCSI_DISKS];
 static QEMUTimer *insert_timer = NULL;
+#endif
 
 #define UWAIT_MAX (30*1000000) /* thirty seconds */
 #define UWAIT     (100000)     /* 1/10th second  */
@@ -43,6 +59,7 @@ static int pasprintf(char **buf, const char *fmt, ...)
     return ret;
 }
 
+#ifdef FIXME_MEDIA_EJECT /* not yet supported in this merge */
 static void insert_media(void *opaque)
 {
     int i;
@@ -63,6 +80,7 @@ void xenstore_check_new_media_present(int timeout)
         insert_timer = qemu_new_timer(rt_clock, insert_media, NULL);
     qemu_mod_timer(insert_timer, qemu_get_clock(rt_clock) + timeout);
 }
+#endif
 
 static void waitForDevice(char *fn)
 { 
@@ -92,8 +110,10 @@ void xenstore_parse_domain_config(int hvm_domid)
     unsigned int len, num, hd_index, pci_devid = 0;
     BlockDriverState *bs;
 
+#ifdef  FIXME_MEDIA_EJECT /* not yet supported in this merge */
     for(i = 0; i < MAX_DISKS + MAX_SCSI_DISKS; i++)
         media_filename[i] = NULL;
+#endif
 
     xsh = xs_daemon_open();
     if (xsh == NULL) {
@@ -162,8 +182,14 @@ void xenstore_parse_domain_config(int hvm_domid)
         if ((strncmp(dev, "hd", 2) && !is_scsi) || strlen(dev) != 3 )
             continue;
         hd_index = dev[2] - 'a';
-        if (hd_index >= (is_scsi ? MAX_SCSI_DISKS : MAX_DISKS))
-            continue;
+	if (nb_drives >= MAX_DRIVES) {
+	    fprintf(stderr, "qemu: too many drives\n");
+	    continue;
+	}
+        if (hd_index >= (is_scsi ? MAX_SCSI_DEVS : 4)) {
+	    fprintf(stderr, "qemu: drives %s out of range\n", dev);
+	    continue;
+	}
         /* read the type of the device */
         if (pasprintf(&buf, "%s/device/vbd/%s/device-type", path, e[i]) == -1)
             continue;
@@ -222,7 +248,7 @@ void xenstore_parse_domain_config(int hvm_domid)
             }
         }
 
-        bs = bs_table[hd_index + (is_scsi ? MAX_DISKS : 0)] = bdrv_new(dev);
+        bs = bdrv_new(dev);
         /* check if it is a cdrom */
         if (type && !strcmp(type, "cdrom")) {
             bdrv_set_type_hint(bs, BDRV_TYPE_CDROM);
@@ -244,6 +270,20 @@ void xenstore_parse_domain_config(int hvm_domid)
             if (bdrv_open(bs, params, 0 /* snapshot */) < 0)
                 fprintf(stderr, "qemu: could not open vbd '%s' or hard disk image '%s'\n", buf, params);
         }
+
+	assert(nb_drives<MAX_DRIVES);
+	if (is_scsi) {
+	    drives_table[nb_drives].type = IF_SCSI;
+	    drives_table[nb_drives].bus = 0;
+	    drives_table[nb_drives].unit = hd_index;
+	} else {
+	    drives_table[nb_drives].type = IF_IDE;
+	    drives_table[nb_drives].bus = hd_index / 2;
+	    drives_table[nb_drives].unit = hd_index % 2;
+	}
+	drives_table[nb_drives].bdrv = bs;
+	nb_drives++;
+
     }
 
 #ifdef CONFIG_STUBDOM
@@ -479,6 +519,7 @@ static void xenstore_process_dm_command_event(void)
     } else if (!strncmp(command, "continue", len)) {
         fprintf(logfile, "dm-command: continue after state save\n");
         xen_pause_requested = 0;
+#ifdef CONFIG_PASSTHROUGH
     } else if (!strncmp(command, "pci-rem", len)) {
         fprintf(logfile, "dm-command: hot remove pass-through pci dev \n");
 
@@ -507,6 +548,7 @@ static void xenstore_process_dm_command_event(void)
 
         do_pci_add(par);
         free(par);
+#endif
     } else {
         fprintf(logfile, "dm-command: unknown command\"%*s\"\n", len, command);
     }
@@ -576,6 +618,7 @@ void xenstore_process_event(void *opaque)
     if (drv && !strcmp(drv, "tap") && ((offset = strchr(image, ':')) != NULL))
         memmove(image, offset+1, strlen(offset+1)+1);
 
+#ifdef FIXME_MEDIA_EJECT /* not yet supported in this merge */
     if (!strcmp(image, bs_table[hd_index]->filename))
         goto out;  /* identical */
 
@@ -590,6 +633,7 @@ void xenstore_process_event(void *opaque)
         media_filename[hd_index] = strdup(image);
         xenstore_check_new_media_present(5000);
     }
+#endif
 
  out:
     free(drv);
