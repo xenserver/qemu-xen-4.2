@@ -82,7 +82,7 @@ typedef struct PHPSlots {
 } PHPSlots;
 
 PHPSlots php_slots;
-static int s3_shutdown_flag;
+int s3_shutdown_flag;
 static qemu_irq sci_irq;
 
 static void piix4acpi_save(QEMUFile *f, void *opaque)
