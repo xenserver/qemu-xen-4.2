@@ -8,7 +8,8 @@
  *
  */
 
-#include "vl.h"
+#include "qemu-common.h"
+
 #include "block_int.h"
 #include <unistd.h>
 #ifndef CONFIG_STUBDOM
@@ -462,7 +463,6 @@ static void xenstore_process_dm_command_event(void)
 {
     char *path = NULL, *command = NULL, *par = NULL;
     unsigned int len;
-    extern int suspend_requested;
 
     if (pasprintf(&path, 
                   "/local/domain/0/device-model/%u/command", domid) == -1) {
@@ -475,10 +475,10 @@ static void xenstore_process_dm_command_event(void)
     
     if (!strncmp(command, "save", len)) {
         fprintf(logfile, "dm-command: pause and save state\n");
-        suspend_requested = 1;
+        xen_pause_requested = 1;
     } else if (!strncmp(command, "continue", len)) {
         fprintf(logfile, "dm-command: continue after state save\n");
-        suspend_requested = 0;
+        xen_pause_requested = 0;
     } else if (!strncmp(command, "pci-rem", len)) {
         fprintf(logfile, "dm-command: hot remove pass-through pci dev \n");
 

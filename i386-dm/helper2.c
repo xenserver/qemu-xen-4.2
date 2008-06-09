@@ -518,7 +518,7 @@ void cpu_handle_ioreq(void *opaque)
          * causes Xen to powerdown the domain.
          */
         if (vm_running) {
-            if (shutdown_requested) {
+            if (qemu_shutdown_requested()) {
 		fprintf(logfile, "shutdown requested in cpu_handle_ioreq\n");
 		destroy_hvm_domain();
 	    }
@@ -533,11 +533,11 @@ void cpu_handle_ioreq(void *opaque)
     }
 }
 
+int xen_pause_requested;
+
 int main_loop(void)
 {
     extern int vm_running;
-    extern int shutdown_requested;
-    extern int suspend_requested;
     CPUState *env = cpu_single_env;
     int evtchn_fd = xce_handle == -1 ? -1 : xc_evtchn_fd(xce_handle);
     char *qemu_file;
@@ -552,7 +552,7 @@ int main_loop(void)
 
     xenstore_record_dm_state("running");
     while (1) {
-        while (!(vm_running && suspend_requested))
+        while (!(vm_running && xen_pause_requested))
             /* Wait up to 10 msec. */
             main_loop_wait(10);
 
@@ -571,7 +571,7 @@ int main_loop(void)
         xenstore_record_dm_state("paused");
 
         /* Wait to be allowed to continue */
-        while (suspend_requested) {
+        while (xen_pause_requested) {
             FD_ZERO(&fds);
             FD_SET(xenstore_fd(), &fds);
             if (select(xenstore_fd() + 1, &fds, NULL, NULL, NULL) > 0)

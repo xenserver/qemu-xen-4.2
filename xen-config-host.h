@@ -20,3 +20,4 @@ extern int domid;
 #undef CONFIG_GDBSTUB
 
 extern int xc_handle;
+extern int xen_pause_requested;
