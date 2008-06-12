@@ -3963,6 +3963,7 @@ typedef struct TAPState {
     VLANClientState *vc;
     int fd;
     char down_script[1024];
+    char script_arg[1024];
 } TAPState;
 
 static void tap_receive(void *opaque, const uint8_t *buf, int size)
@@ -4198,10 +4199,11 @@ static int tap_open(char *ifname, int ifname_size)
 }
 #endif
 
-static int launch_script(const char *setup_script, const char *ifname, int fd)
+static int launch_script(const char *setup_script, const char *ifname,
+			 const char *script_arg, int fd)
 {
     int pid, status;
-    char *args[3];
+    char *args[4];
     char **parg;
 
         /* try to launch network script */
@@ -4219,6 +4221,8 @@ static int launch_script(const char *setup_script, const char *ifname, int fd)
                 parg = args;
                 *parg++ = (char *)setup_script;
                 *parg++ = (char *)ifname;
+                if (script_arg && script_arg[0])
+                    *parg++ = (char *)script_arg;
                 *parg++ = NULL;
                 execv(setup_script, args);
                 _exit(1);
@@ -4235,7 +4239,8 @@ static int launch_script(const char *setup_script, const char *ifname, int fd)
 }
 
 static int net_tap_init(VLANState *vlan, const char *ifname1,
-                        const char *setup_script, const char *down_script)
+                        const char *setup_script, const char *down_script,
+                        const char *script_arg)
 {
     TAPState *s;
     int fd;
@@ -4252,7 +4257,7 @@ static int net_tap_init(VLANState *vlan, const char *ifname1,
     if (!setup_script || !strcmp(setup_script, "no"))
         setup_script = "";
     if (setup_script[0] != '\0') {
-	if (launch_script(setup_script, ifname, fd))
+	if (launch_script(setup_script, ifname, script_arg, fd))
 	    return -1;
     }
     s = net_tap_fd_init(vlan, fd);
@@ -4262,6 +4267,8 @@ static int net_tap_init(VLANState *vlan, const char *ifname1,
              "tap: ifname=%s setup_script=%s", ifname, setup_script);
     if (down_script && strcmp(down_script, "no"))
         snprintf(s->down_script, sizeof(s->down_script), "%s", down_script);
+    if (script_arg && script_arg[0])
+        snprintf(s->script_arg, sizeof(s->script_arg), "%s", script_arg);
     return 0;
 }
 
@@ -4854,7 +4861,7 @@ static int net_client_init(const char *str)
 #else
     if (!strcmp(device, "tap")) {
         char ifname[64];
-        char setup_script[1024], down_script[1024];
+        char setup_script[1024], down_script[1024], script_arg[1024];
         int fd;
         vlan->nb_host_devs++;
         if (get_param_value(buf, sizeof(buf), "fd", p) > 0) {
@@ -4873,7 +4880,10 @@ static int net_client_init(const char *str)
             if (get_param_value(down_script, sizeof(down_script), "downscript", p) == 0) {
                 pstrcpy(down_script, sizeof(down_script), DEFAULT_NETWORK_DOWN_SCRIPT);
             }
-            ret = net_tap_init(vlan, ifname, setup_script, down_script);
+            if (get_param_value(script_arg, sizeof(script_arg), "scriptarg", p) == 0) {
+                pstrcpy(script_arg, sizeof(script_arg), "");
+            }
+            ret = net_tap_init(vlan, ifname, setup_script, down_script, script_arg);
         }
     } else
 #endif
@@ -7191,11 +7201,12 @@ static void help(int exitcode)
            "-net tap[,vlan=n],ifname=name\n"
            "                connect the host TAP network interface to VLAN 'n'\n"
 #else
-           "-net tap[,vlan=n][,fd=h][,ifname=name][,script=file][,downscript=dfile]\n"
+           "-net tap[,vlan=n][,fd=h][,ifname=name][,script=file][,downscript=dfile][,scriptarg=extraargument]\n"
            "                connect the host TAP network interface to VLAN 'n' and use the\n"
            "                network scripts 'file' (default=%s)\n"
            "                and 'dfile' (default=%s);\n"
            "                use '[down]script=no' to disable script execution;\n"
+           "                use 'scriptarg=...' to pass an additional (nonempty) argument;\n"
            "                use 'fd=h' to connect to an already opened TAP interface\n"
 #endif
            "-net socket[,vlan=n][,fd=h][,listen=[host]:port][,connect=host:port]\n"
@@ -8638,7 +8649,7 @@ int main(int argc, char **argv)
 
                 if (sscanf(vc->info_str, "tap: ifname=%63s ", ifname) == 1 &&
                     s->down_script[0])
-                    launch_script(s->down_script, ifname, s->fd);
+                    launch_script(s->down_script, ifname, s->script_arg, s->fd);
             }
         }
     }
