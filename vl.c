@@ -7433,6 +7433,7 @@ enum {
     QEMU_OPTION_disable_opengl,
     QEMU_OPTION_direct_pci,
     QEMU_OPTION_vcpus,
+    QEMU_OPTION_acpi,
     QEMU_OPTION_pidfile,
     QEMU_OPTION_no_kqemu,
     QEMU_OPTION_kernel_kqemu,
@@ -7512,7 +7513,7 @@ const QEMUOption qemu_options[] = {
     { "S", 0, QEMU_OPTION_S },
     { "s", 0, QEMU_OPTION_s },
     { "p", HAS_ARG, QEMU_OPTION_p },
-    { "d", HAS_ARG, QEMU_OPTION_domid }, /* deprecated */
+    { "d", HAS_ARG, QEMU_OPTION_domid }, /* deprecated; for xend compatibility */
     { "domid", HAS_ARG, QEMU_OPTION_domid },
     { "hdachs", HAS_ARG, QEMU_OPTION_hdachs },
     { "L", HAS_ARG, QEMU_OPTION_L },
@@ -7542,6 +7543,7 @@ const QEMUOption qemu_options[] = {
     { "disable-opengl", 0, QEMU_OPTION_disable_opengl },
 #endif CONFIG_OPENGL
     { "vcpus", 1, QEMU_OPTION_vcpus },
+    { "acpi", 0, QEMU_OPTION_acpi }, /* deprecated, for xend compatibility */
     { "direct_pci", HAS_ARG, QEMU_OPTION_direct_pci },
     { "pidfile", HAS_ARG, QEMU_OPTION_pidfile },
     { "win2k-hack", 0, QEMU_OPTION_win2k_hack },
@@ -8304,6 +8306,9 @@ int main(int argc, char **argv)
             case QEMU_OPTION_vcpus:
                 vcpus = atoi(optarg);
                 fprintf(logfile, "qemu: the number of cpus is %d\n", vcpus);
+                break;
+            case QEMU_OPTION_acpi:
+                acpi_enabled = 1;
                 break;
             case QEMU_OPTION_pidfile:
                 pid_file = optarg;
