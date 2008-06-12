@@ -7785,6 +7785,8 @@ int main(int argc, char **argv)
     const char *pid_file = NULL;
     VLANState *vlan;
 
+    logfile = stderr; /* initial value */
+
 #if !defined(__sun__) && !defined(CONFIG_STUBDOM)
     /* Maximise rlimits. Needed where default constraints are tight (*BSD). */
     if (getrlimit(RLIMIT_STACK, &rl) != 0) {
