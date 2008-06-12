@@ -7234,8 +7234,8 @@ static void help(int exitcode)
 #endif
 #ifdef CONFIG_OPENGL
            "-disable-opengl disable OpenGL rendering, using SDL"
-	   "-direct-pci s   specify pci passthrough, with configuration string s\n"
 #endif
+	   "-direct-pci s   specify pci passthrough, with configuration string s\n"
 #ifdef TARGET_I386
            "-no-fd-bootchk  disable boot signature checking for floppy disks\n"
 #endif
