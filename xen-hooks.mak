@@ -13,6 +13,8 @@ QEMU_PROG=qemu-dm
 CFLAGS += -Wno-unused -Wno-declaration-after-statement \
  -Wno-pointer-sign
 
+CFLAGS += $(CMDLINE_CFLAGS)
+
 LIBS += -L$(XEN_ROOT)/tools/libxc -lxenctrl -lxenguest
 LIBS += -L$(XEN_ROOT)/tools/xenstore -lxenstore
 LIBS += -L$(XEN_ROOT)/tools/blktap/lib -lblktap
