@@ -22,3 +22,6 @@ extern int domid;
 extern int xc_handle;
 extern int xen_pause_requested;
 extern int vcpus;
+
+#define DEFAULT_NETWORK_SCRIPT "/etc/xen/qemu-ifup"
+#define DEFAULT_NETWORK_DOWN_SCRIPT "/etc/xen/qemu-ifdown"
