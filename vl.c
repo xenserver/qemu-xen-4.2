@@ -8511,10 +8511,12 @@ int main(int argc, char **argv)
     linux_boot = (kernel_filename != NULL);
     net_boot = (boot_devices_bitmap >> ('n' - 'a')) & 0xF;
 
+#ifndef CONFIG_DM
     /* XXX: this should not be: some embedded targets just have flash */
     if (!linux_boot && net_boot == 0 &&
         nb_drives_opt == 0)
         help(1);
+#endif /*!CONFIG_DM*/
 
     /* boot to floppy or the default cd if no hard disk defined yet */
     if (!boot_devices[0]) {
