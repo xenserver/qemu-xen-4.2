@@ -7536,7 +7536,9 @@ const QEMUOption qemu_options[] = {
     { "alt-grab", 0, QEMU_OPTION_alt_grab },
     { "no-quit", 0, QEMU_OPTION_no_quit },
 #endif
+#ifdef CONFIG_OPENGL
     { "disable-opengl", 0, QEMU_OPTION_disable_opengl },
+#endif CONFIG_OPENGL
     { "direct_pci", HAS_ARG, QEMU_OPTION_direct_pci },
     { "pidfile", HAS_ARG, QEMU_OPTION_pidfile },
     { "win2k-hack", 0, QEMU_OPTION_win2k_hack },
