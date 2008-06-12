@@ -7428,6 +7428,7 @@ enum {
     QEMU_OPTION_no_frame,
     QEMU_OPTION_alt_grab,
     QEMU_OPTION_no_quit,
+    QEMU_OPTION_domid,
     QEMU_OPTION_disable_opengl,
     QEMU_OPTION_direct_pci,
     QEMU_OPTION_pidfile,
@@ -7509,7 +7510,8 @@ const QEMUOption qemu_options[] = {
     { "S", 0, QEMU_OPTION_S },
     { "s", 0, QEMU_OPTION_s },
     { "p", HAS_ARG, QEMU_OPTION_p },
-    { "d", HAS_ARG, QEMU_OPTION_d },
+    { "d", HAS_ARG, QEMU_OPTION_domid }, /* deprecated */
+    { "domid", HAS_ARG, QEMU_OPTION_domid },
     { "hdachs", HAS_ARG, QEMU_OPTION_hdachs },
     { "L", HAS_ARG, QEMU_OPTION_L },
     { "bios", HAS_ARG, QEMU_OPTION_bios },
@@ -8153,6 +8155,10 @@ int main(int argc, char **argv)
                 ram_size = value;
                 break;
             }
+            case QEMU_OPTION_domid:
+                domid = atoi(optarg);
+                fprintf(logfile, "domid: %d\n", domid);
+                break;
             case QEMU_OPTION_d:
                 {
                     int mask;
