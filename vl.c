@@ -7236,6 +7236,7 @@ static void help(int exitcode)
            "-disable-opengl disable OpenGL rendering, using SDL"
 #endif
 	   "-direct-pci s   specify pci passthrough, with configuration string s\n"
+           "-vcpus          set CPU number of guest platform\n"
 #ifdef TARGET_I386
            "-no-fd-bootchk  disable boot signature checking for floppy disks\n"
 #endif
@@ -7431,6 +7432,7 @@ enum {
     QEMU_OPTION_domid,
     QEMU_OPTION_disable_opengl,
     QEMU_OPTION_direct_pci,
+    QEMU_OPTION_vcpus,
     QEMU_OPTION_pidfile,
     QEMU_OPTION_no_kqemu,
     QEMU_OPTION_kernel_kqemu,
@@ -7539,6 +7541,7 @@ const QEMUOption qemu_options[] = {
 #ifdef CONFIG_OPENGL
     { "disable-opengl", 0, QEMU_OPTION_disable_opengl },
 #endif CONFIG_OPENGL
+    { "vcpus", 1, QEMU_OPTION_vcpus },
     { "direct_pci", HAS_ARG, QEMU_OPTION_direct_pci },
     { "pidfile", HAS_ARG, QEMU_OPTION_pidfile },
     { "win2k-hack", 0, QEMU_OPTION_win2k_hack },
@@ -8297,6 +8300,10 @@ int main(int argc, char **argv)
                 break;
             case QEMU_OPTION_direct_pci:
 		direct_pci = optarg;
+                break;
+            case QEMU_OPTION_vcpus:
+                vcpus = atoi(optarg);
+                fprintf(logfile, "qemu: the number of cpus is %d\n", vcpus);
                 break;
             case QEMU_OPTION_pidfile:
                 pid_file = optarg;
