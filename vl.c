@@ -133,8 +133,10 @@ int inet_aton(const char *cp, struct in_addr *ia);
 
 #include "exec-all.h"
 
+#ifndef DEFAULT_NETWORK_SCRIPT
 #define DEFAULT_NETWORK_SCRIPT "/etc/qemu-ifup"
 #define DEFAULT_NETWORK_DOWN_SCRIPT "/etc/qemu-ifdown"
+#endif
 #ifdef __sun__
 #define SMBD_COMMAND "/usr/sfw/sbin/smbd"
 #else
