@@ -4948,7 +4948,8 @@ static int net_client_init(const char *str)
             if (get_param_value(down_script, sizeof(down_script), "downscript", p) == 0) {
                 pstrcpy(down_script, sizeof(down_script), DEFAULT_NETWORK_DOWN_SCRIPT);
             }
-            if (get_param_value(script_arg, sizeof(script_arg), "scriptarg", p) == 0) {
+            if (get_param_value(script_arg, sizeof(script_arg), "scriptarg", p) == 0 &&
+                get_param_value(script_arg, sizeof(script_arg), "bridge", p) == 0) { /* deprecated; for xend compatibility */
                 pstrcpy(script_arg, sizeof(script_arg), "");
             }
             ret = net_tap_init(vlan, ifname, setup_script, down_script, script_arg);
