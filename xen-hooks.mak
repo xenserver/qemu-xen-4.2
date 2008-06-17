@@ -40,3 +40,9 @@ BAD_OBJS += gdbstub.o acpi.o apic.o
 BAD_OBJS += vmmouse.o vmport.o tcg* helper.o
 
 OBJS := $(filter-out $(BAD_OBJS), $(OBJS))
+
+EXESUF=-xen
+
+datadir := $(subst qemu,xen/qemu,$(datadir))
+docdir :=  $(subst qemu,xen/qemu,$(docdir))
+mandir :=  $(subst share/man,share/xen/man,$(mandir))
