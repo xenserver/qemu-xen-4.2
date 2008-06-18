@@ -8598,7 +8598,6 @@ int main(int argc, char **argv)
 	    exit(1);
 	}
     }
-#endif
 
     /* init the memory */
     phys_ram_size = machine->ram_require & ~RAMSIZE_FIXED;
@@ -8626,6 +8625,10 @@ int main(int argc, char **argv)
         fprintf(stderr, "Could not allocate physical memory\n");
         exit(1);
     }
+#endif
+
+    xc_handle = xc_interface_open();
+    xenstore_parse_domain_config(domid);
 
     bdrv_init();
 

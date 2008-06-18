@@ -78,7 +78,7 @@ _syscall3(int, modify_ldt, int, func, void *, ptr, unsigned long, bytecount)
 int domid = -1;
 int vcpus = 1;
 
-int xc_handle;
+int xc_handle = -1;
 
 char domain_name[64] = "Xen-no-name";
 int domid;
