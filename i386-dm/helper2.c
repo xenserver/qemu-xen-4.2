@@ -553,6 +553,9 @@ int main_loop(void)
         qemu_set_fd_handler(evtchn_fd, cpu_handle_ioreq, NULL, env);
 
     xenstore_record_dm_state("running");
+
+    qemu_set_fd_handler(xenstore_fd(), xenstore_process_event, NULL, NULL);
+
     while (1) {
         while (!(vm_running && xen_pause_requested))
             /* Wait up to 10 msec. */
