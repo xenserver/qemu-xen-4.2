@@ -8669,7 +8669,10 @@ int main(int argc, char **argv)
         dumb_display_init(ds);
     } else if (vnc_display != NULL || vncunused != 0) {
 	int vnc_display_port;
+        char password[20];
         vnc_display_init(ds);
+        xenstore_read_vncpasswd(domid, password, sizeof(password));
+        vnc_display_password(ds, password);
         vnc_display_port = vnc_display_open(ds, vnc_display, vncunused);
         if (vnc_display < 0)
             exit(1);
