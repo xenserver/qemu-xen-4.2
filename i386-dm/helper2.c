@@ -543,6 +543,8 @@ int main_loop(void)
     char *qemu_file;
     fd_set fds;
 
+    main_loop_prepare();
+
     buffered_io_timer = qemu_new_timer(rt_clock, handle_buffered_io,
 				       cpu_single_env);
     qemu_mod_timer(buffered_io_timer, qemu_get_clock(rt_clock));

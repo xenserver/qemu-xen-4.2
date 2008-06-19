@@ -7215,6 +7215,11 @@ static int main_loop(void)
     cpu_disable_ticks();
     return ret;
 }
+
+#else /* CONFIG_DM */
+void main_loop_prepare(void) {
+    cur_cpu = first_cpu;
+}
 #endif /* !CONFIG_DM */
 
 static void help(int exitcode)

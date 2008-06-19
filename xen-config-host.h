@@ -19,6 +19,8 @@ extern int domid;
 
 #undef CONFIG_GDBSTUB
 
+void main_loop_prepare(void);
+
 extern int xc_handle;
 extern int xen_pause_requested;
 extern int vcpus;
