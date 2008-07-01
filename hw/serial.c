@@ -263,8 +263,6 @@ static void serial_update_parameters(SerialState *s)
         stop_bits = 1;
 
     data_bits = (s->lcr & 0x03) + 5;
-    if (s->divider == 0)
-        return;
     frame_size += data_bits + stop_bits;
     speed = s->baudbase / s->divider;
     ssp.speed = speed;
