@@ -565,6 +565,8 @@ BlockDriver bdrv_raw = {
     .bdrv_pwrite = raw_pwrite,
     .bdrv_truncate = raw_truncate,
     .bdrv_getlength = raw_getlength,
+
+    .bdrv_flags = BLOCK_DRIVER_FLAG_EXTENDABLE
 };
 
 /***********************************************/
@@ -923,6 +925,4 @@ BlockDriver bdrv_host_device = {
     .bdrv_set_locked = raw_set_locked,
     /* generic scsi device */
     .bdrv_ioctl = raw_ioctl,
-
-    .bdrv_flags = BLOCK_DRIVER_FLAG_EXTENDABLE
 };
