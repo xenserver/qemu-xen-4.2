@@ -11,11 +11,9 @@ rm -f config-host.mak
 
 target=i386-dm
 
-case "$XEN_ROOT_PARENT" in
-'')	;;
-/*)	echo "XEN_ROOT=$XEN_ROOT_PARENT" 		>>config-host.mak ;;
-*)	echo "XEN_ROOT=`pwd`/$XEN_ROOT_PARENT/.."	>>config-host.mak ;;
-esac
+if [ "x$XEN_ROOT" != x ]; then
+	echo "XEN_ROOT=$XEN_ROOT" >>config-host.mak
+fi
 
 ln -sf ../Makefile.target $target/Makefile
 ln -sf ../xen-config.mak $target/config.mak
