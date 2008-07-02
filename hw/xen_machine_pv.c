@@ -45,12 +45,15 @@ static void xen_init_pv(ram_addr_t ram_size, int vga_ram_size,
 {
     struct xenfb *xenfb;
     extern int domid;
-
+    CPUState *env;
 
 #ifndef CONFIG_STUBDOM
     /* Initialize tapdisk client */
     init_blktap();
 #endif
+
+    /* Initialize a dummy CPU */
+    env = cpu_init(NULL);
 
     /* Connect to text console */
     if (serial_hds[0]) {

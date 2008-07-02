@@ -112,6 +112,10 @@ CPUX86State *cpu_x86_init(const char *cpu_model)
         return NULL;
     cpu_exec_init(env);
 
+    /* There is no shared_page for PV, we're done now */
+    if (shared_page == NULL)
+        return env;
+
     /* init various static tables */
     if (!inited) {
         inited = 1;
