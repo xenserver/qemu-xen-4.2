@@ -336,7 +336,7 @@ int bdrv_file_open(BlockDriverState **pbs, const char *filename, int flags)
     bs = bdrv_new("");
     if (!bs)
         return -ENOMEM;
-    ret = bdrv_open2(bs, filename, flags | BDRV_O_FILE, NULL);
+    ret = bdrv_open2(bs, filename, flags | BDRV_O_FILE, &bdrv_raw);
     if (ret < 0) {
         bdrv_delete(bs);
         return ret;
