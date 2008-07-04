@@ -10,8 +10,11 @@ endif
 
 QEMU_PROG=qemu-dm
 
-CFLAGS += -Wno-unused -Wno-declaration-after-statement \
- -Wno-pointer-sign
+CFLAGS += -Wno-unused -Wno-declaration-after-statement
+
+ifeq (,$(shell $(CC) -Wno-pointer-sign -E - </dev/null >/dev/null || echo x))
+CFLAGS += -Wno-pointer-sign
+endif 
 
 CFLAGS += $(CMDLINE_CFLAGS)
 
