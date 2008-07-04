@@ -158,6 +158,9 @@ int inet_aton(const char *cp, struct in_addr *ia);
 /* XXX: use a two level table to limit memory usage */
 #define MAX_IOPORTS 65536
 
+/* Max number of PCI emulation */
+#define MAX_PCI_EMULATION 32
+
 const char *bios_dir = CONFIG_QEMU_SHAREDIR;
 const char *bios_name = NULL;
 void *ioport_opaque[MAX_IOPORTS];
@@ -202,6 +205,9 @@ int opengl_enabled = 1;
 int opengl_enabled = 0;
 #endif
 static const char *direct_pci;
+static int nb_pci_emulation = 0;
+static char pci_emulation_config_text[MAX_PCI_EMULATION][256];
+PCI_EMULATION_INFO *PciEmulationInfoHead = NULL;
 CharDriverState *serial_hds[MAX_SERIAL_PORTS];
 CharDriverState *parallel_hds[MAX_PARALLEL_PORTS];
 #ifdef TARGET_I386
@@ -4733,6 +4739,17 @@ static int net_socket_mcast_init(VLANState *vlan, const char *host_str)
     if (parse_host_port(&saddr, host_str) < 0)
         return -1;
 
+static int pci_emulation_add(char *config_text)
+{
+    PCI_EMULATION_INFO *new;
+    if ((new = qemu_mallocz(sizeof(PCI_EMULATION_INFO))) == NULL) {
+        return -1;
+    }
+    parse_pci_emulation_info(config_text, new);
+    new->next = PciEmulationInfoHead;
+    PciEmulationInfoHead = new;
+    return 0;
+}
 
     fd = net_socket_mcast_create(&saddr);
     if (fd < 0)
@@ -5408,7 +5425,9 @@ static int usb_device_add(const char *devname)
     } else if (!strcmp(devname, "keyboard")) {
         dev = usb_keyboard_init();
     } else if (strstart(devname, "disk:", &p)) {
-        dev = usb_msd_init(p);
+        dev = usb_msd_init(p, &bdrv_raw);
+    } else if (strstart(devname, "disk-qcow:", &p)) {
+        dev = usb_msd_init(p, 0);
     } else if (!strcmp(devname, "wacom-tablet")) {
         dev = usb_wacom_init();
     } else if (strstart(devname, "serial:", &p)) {
@@ -7254,6 +7273,7 @@ static void help(int exitcode)
            "-disable-opengl disable OpenGL rendering, using SDL"
 #endif
 	   "-direct-pci s   specify pci passthrough, with configuration string s\n"
+           "-pciemulation       name:vendorid:deviceid:command:status:revision:classcode:headertype:subvendorid:subsystemid:interruputline:interruputpin\n"
            "-vcpus          set CPU number of guest platform\n"
 #ifdef TARGET_I386
            "-no-fd-bootchk  disable boot signature checking for floppy disks\n"
@@ -7451,6 +7471,7 @@ enum {
     QEMU_OPTION_domid,
     QEMU_OPTION_disable_opengl,
     QEMU_OPTION_direct_pci,
+    QEMU_OPTION_pci_emulation,
     QEMU_OPTION_vcpus,
     QEMU_OPTION_acpi,
     QEMU_OPTION_pidfile,
@@ -7564,6 +7585,7 @@ const QEMUOption qemu_options[] = {
     { "vcpus", 1, QEMU_OPTION_vcpus },
     { "acpi", 0, QEMU_OPTION_acpi }, /* deprecated, for xend compatibility */
     { "direct_pci", HAS_ARG, QEMU_OPTION_direct_pci },
+    { "pciemulation", HAS_ARG, QEMU_OPTION_pci_emulation },
     { "pidfile", HAS_ARG, QEMU_OPTION_pidfile },
     { "win2k-hack", 0, QEMU_OPTION_win2k_hack },
     { "usbdevice", HAS_ARG, QEMU_OPTION_usbdevice },
@@ -8182,6 +8204,16 @@ int main(int argc, char **argv)
                 }
                 ram_size = value;
                 break;
+            case QEMU_OPTION_pci_emulation:
+                if (nb_pci_emulation >= MAX_PCI_EMULATION) {
+                    fprintf(stderr, "Too many PCI emulations\n");
+                    exit(1);
+                }
+                pstrcpy(pci_emulation_config_text[nb_pci_emulation],
+                        sizeof(pci_emulation_config_text[0]),
+                        optarg);
+                nb_pci_emulation++;
+                break;
             }
             case QEMU_OPTION_domid:
                 domid = atoi(optarg);
@@ -8745,6 +8777,13 @@ int main(int argc, char **argv)
             }
             if (strstart(devname, "vc", 0))
                 qemu_chr_printf(parallel_hds[i], "parallel%d console\r\n", i);
+        }
+    }
+
+    for (i = 0; i < nb_pci_emulation; i++) {
+        if(pci_emulation_add(pci_emulation_config_text[i]) < 0) {
+            fprintf(stderr, "Warning: could not add PCI device %s\n",
+                    pci_emulation_config_text[i]);
         }
     }
 

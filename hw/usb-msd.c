@@ -513,7 +513,7 @@ static void usb_msd_handle_destroy(USBDevice *dev)
     qemu_free(s);
 }
 
-USBDevice *usb_msd_init(const char *filename)
+USBDevice *usb_msd_init(const char *filename, BlockDriver *drv)
 {
     MSDState *s;
     BlockDriverState *bdrv;
@@ -523,7 +523,7 @@ USBDevice *usb_msd_init(const char *filename)
         return NULL;
 
     bdrv = bdrv_new("usb");
-    if (bdrv_open(bdrv, filename, 0) < 0)
+    if (bdrv_open2(bdrv, filename, 0, drv) < 0)
         goto fail;
     if (qemu_key_check(bdrv, filename))
         goto fail;

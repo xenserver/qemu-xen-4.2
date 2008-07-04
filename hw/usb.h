@@ -217,7 +217,7 @@ USBDevice *usb_tablet_init(void);
 USBDevice *usb_keyboard_init(void);
 
 /* usb-msd.c */
-USBDevice *usb_msd_init(const char *filename);
+USBDevice *usb_msd_init(const char *filename, BlockDriver *drv);
 
 /* usb-wacom.c */
 USBDevice *usb_wacom_init(void);

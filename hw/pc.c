@@ -1110,6 +1110,13 @@ static void pc_init1(ram_addr_t ram_size, int vga_ram_size,
 	    }
         }
     }
+
+    if (pci_enabled) {
+        PCI_EMULATION_INFO *p;
+        for (p = PciEmulationInfoHead; p != NULL; p = p->next) {
+            pci_emulation_init(pci_bus, p);
+        }
+    }
 }
 
 static void pc_init_pci(ram_addr_t ram_size, int vga_ram_size,

@@ -418,7 +418,7 @@ static void do_change_block(const char *device, const char *filename)
     }
     if (eject_device(bs, 0) < 0)
         return;
-    bdrv_open(bs, filename, 0);
+    bdrv_open2(bs, filename, 0, &bdrv_raw);
     qemu_key_check(bs, filename);
 }
 
