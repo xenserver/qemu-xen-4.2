@@ -2,7 +2,11 @@
  * Changes to PCI emulation made by Marathon Technologies, June 2008
  */
 
-#include "vl.h"
+#include "qemu-common.h"
+#include "hw.h"
+
+#include "pci.h"
+#include "pci_emulation.h"
 
 typedef struct {
     PCIDevice dev;

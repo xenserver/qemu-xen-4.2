@@ -27,3 +27,6 @@ extern int vcpus;
 
 #define DEFAULT_NETWORK_SCRIPT "/etc/xen/qemu-ifup"
 #define DEFAULT_NETWORK_DOWN_SCRIPT "/etc/xen/qemu-ifdown"
+
+void xenstore_parse_domain_config(int domid);
+void xenstore_read_vncpasswd(int domid, char *pwbuf, size_t pwbuflen);

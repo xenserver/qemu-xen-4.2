@@ -2,6 +2,9 @@
  * Changes to PCI emulation made by Marathon Technologies, June 2008
  */
 
+#ifndef PCI_EMULATION_H
+#define PCI_EMULATION_H
+
 typedef struct PCI_EMULATION_INFO_t {
     struct PCI_EMULATION_INFO_t *next;
     char name[32];
@@ -22,3 +25,5 @@ void parse_pci_emulation_info(char *config_text, PCI_EMULATION_INFO *pci_emulati
 void pci_emulation_init(PCIBus *bus, PCI_EMULATION_INFO *pci_emulation_info);
 
 extern PCI_EMULATION_INFO *PciEmulationInfoHead;
+
+#endif /*PCI_EMULATION_H*/

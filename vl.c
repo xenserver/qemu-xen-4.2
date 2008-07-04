@@ -4739,18 +4739,6 @@ static int net_socket_mcast_init(VLANState *vlan, const char *host_str)
     if (parse_host_port(&saddr, host_str) < 0)
         return -1;
 
-static int pci_emulation_add(char *config_text)
-{
-    PCI_EMULATION_INFO *new;
-    if ((new = qemu_mallocz(sizeof(PCI_EMULATION_INFO))) == NULL) {
-        return -1;
-    }
-    parse_pci_emulation_info(config_text, new);
-    new->next = PciEmulationInfoHead;
-    PciEmulationInfoHead = new;
-    return 0;
-}
-
     fd = net_socket_mcast_create(&saddr);
     if (fd < 0)
 	return -1;
@@ -4766,6 +4754,18 @@ static int pci_emulation_add(char *config_text)
              inet_ntoa(saddr.sin_addr), ntohs(saddr.sin_port));
     return 0;
 
+}
+
+static int pci_emulation_add(char *config_text)
+{
+    PCI_EMULATION_INFO *new;
+    if ((new = qemu_mallocz(sizeof(PCI_EMULATION_INFO))) == NULL) {
+        return -1;
+    }
+    parse_pci_emulation_info(config_text, new);
+    new->next = PciEmulationInfoHead;
+    PciEmulationInfoHead = new;
+    return 0;
 }
 
 static const char *get_opt_name(char *buf, int buf_size, const char *p)
@@ -7581,7 +7581,7 @@ const QEMUOption qemu_options[] = {
 #endif
 #ifdef CONFIG_OPENGL
     { "disable-opengl", 0, QEMU_OPTION_disable_opengl },
-#endif CONFIG_OPENGL
+#endif
     { "vcpus", 1, QEMU_OPTION_vcpus },
     { "acpi", 0, QEMU_OPTION_acpi }, /* deprecated, for xend compatibility */
     { "direct_pci", HAS_ARG, QEMU_OPTION_direct_pci },
