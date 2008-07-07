@@ -825,6 +825,7 @@ echo "SDL support       $sdl"
 if test "$sdl" != "no" ; then
     echo "SDL static link   $sdl_static"
 fi
+echo "OpenGL support    $opengl"
 echo "curses support    $curses"
 echo "mingw32 support   $mingw32"
 echo "Adlib support     $adlib"
@@ -1099,6 +1100,14 @@ if test "$sdl1" = "yes" ; then
   else
     echo "SDL_CFLAGS=`$sdl_config --cflags`" >> $config_mak
   fi
+fi
+if test $opengl = "yes"
+then
+    echo "#define CONFIG_OPENGL 1" >> $config_h
+    echo "CONFIG_OPENGL=yes" >> $config_mak
+    echo "SDL_CFLAGS+=-I/usr/include/GL" >> $config_mak
+    echo "SDL_LIBS+=-lXext" >> $config_mak
+    echo "SDL_LIBS+=-lGL" >> $config_mak
 fi
 if test "$cocoa" = "yes" ; then
   echo "#define CONFIG_COCOA 1" >> $config_h
