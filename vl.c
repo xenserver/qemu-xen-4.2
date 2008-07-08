@@ -8673,8 +8673,10 @@ int main(int argc, char **argv)
 
     /* we always create the cdrom drive, even if no disk is there */
 
+#ifndef CONFIG_DM
     if (nb_drives_opt < MAX_DRIVES)
         drive_add(NULL, CDROM_ALIAS);
+#endif
 
     /* we always create at least one floppy */
 
