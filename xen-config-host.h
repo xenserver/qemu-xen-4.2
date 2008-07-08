@@ -17,6 +17,8 @@ extern int domid;
 # undef bool
 #endif
 
+#define BIOS_SIZE ((256 + 64) * 1024)
+
 #undef CONFIG_GDBSTUB
 
 void main_loop_prepare(void);

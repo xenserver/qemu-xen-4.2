@@ -24,6 +24,7 @@
  */
 
 #include "hw.h"
+#include "pc.h"
 #include "boards.h"
 #include "exec-all.h"
 #include "qemu-xen.h"
@@ -282,6 +283,7 @@ QEMUMachine xenfv_machine = {
     "xenfv",
     "Xen Fully-virtualized PC",
     xen_init_fv,
+    (VGA_RAM_SIZE + BIOS_SIZE) | RAMSIZE_FIXED,
 };
 
 /*

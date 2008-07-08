@@ -23,6 +23,7 @@
  */
 
 #include "hw.h"
+#include "pc.h"
 #include "xen_console.h"
 #include "xenfb.h"
 #include "sysemu.h"
@@ -76,6 +77,7 @@ QEMUMachine xenpv_machine = {
     "xenpv",
     "Xen Para-virtualized PC",
     xen_init_pv,
+    (VGA_RAM_SIZE + BIOS_SIZE) | RAMSIZE_FIXED,
 };
 
 /*

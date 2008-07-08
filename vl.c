@@ -8636,6 +8636,7 @@ int main(int argc, char **argv)
 	}
     }
 
+#endif
     /* init the memory */
     phys_ram_size = machine->ram_require & ~RAMSIZE_FIXED;
 
@@ -8657,6 +8658,7 @@ int main(int argc, char **argv)
         phys_ram_size += ram_size;
     }
 
+#ifndef CONFIG_DM
     phys_ram_base = qemu_vmalloc(phys_ram_size);
     if (!phys_ram_base) {
         fprintf(stderr, "Could not allocate physical memory\n");
