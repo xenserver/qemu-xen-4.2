@@ -7,7 +7,7 @@ rm -f $target/Makefile
 rm -f $target/config.mak
 rm -f config-host.mak
 
-./configure --disable-curses "$@"
+./configure --disable-curses "$@" --prefix=/usr
 
 target=i386-dm
 

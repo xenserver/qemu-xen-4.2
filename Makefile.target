@@ -291,7 +291,7 @@ ifdef CONFIG_DYNGEN_OP
 OPC_H = gen-op.h dyngen-opc.h op.h
 endif
 
-include hookslib.mak
+-include hookslib.mak
 
 libqemu.a: $(LIBOBJS)
 	rm -f $@
@@ -683,7 +683,7 @@ LDFLAGS+=-p
 main.o: CFLAGS+=-p
 endif
 
-include hooks.mak
+-include hooks.mak
 all: $(PROGS)
 
 $(QEMU_PROG): $(OBJS) ../libqemu_common.a libqemu.a

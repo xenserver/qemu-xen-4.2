@@ -4,4 +4,4 @@ include $(XEN_ROOT)/tools/Rules.mk
 
 TARGET_DIRS=i386-dm
 
-include $(QEMU_ROOT)/xen-hooks.mak
+-include $(QEMU_ROOT)/xen-hooks.mak
