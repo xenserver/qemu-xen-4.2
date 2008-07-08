@@ -292,6 +292,7 @@ OPC_H = gen-op.h dyngen-opc.h op.h
 endif
 
 -include hookslib.mak
+-include hookstarget.mak
 
 libqemu.a: $(LIBOBJS)
 	rm -f $@
@@ -701,7 +702,7 @@ clean:
 	rm -f *.o *.a *~ $(PROGS) gen-op.h dyngen-opc.h op.h nwfpe/*.o fpu/*.o
 	rm -f *.d */*.d tcg/*.o
 
-install: all
+install: all install-hook
 ifneq ($(PROGS),)
 	$(INSTALL) -m 755 -s $(PROGS) "$(DESTDIR)$(bindir)"
 endif

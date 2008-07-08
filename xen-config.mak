@@ -7,3 +7,5 @@ TARGET_ARCH=i386
 CONFIG_SOFTMMU=yes
 
 CFLAGS += -I$(QEMU_ROOT)/hw
+
+bindir = ${prefix}/${LIBLEAFDIR}/xen/bin
