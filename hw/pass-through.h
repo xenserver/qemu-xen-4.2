@@ -18,7 +18,8 @@
 #ifndef __PASSTHROUGH_H__
 #define __PASSTHROUGH_H__
 
-#include "vl.h"
+#include "hw.h"
+#include "pci.h"
 #include "pci/header.h"
 #include "pci/pci.h"
 

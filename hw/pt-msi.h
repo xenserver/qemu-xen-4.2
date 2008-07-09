@@ -1,7 +1,6 @@
 #ifndef _PT_MSI_H
 #define _PT_MSI_H
 
-#include "vl.h"
 #include "pci/pci.h"
 #include "pass-through.h"
 

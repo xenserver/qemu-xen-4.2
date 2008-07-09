@@ -22,7 +22,6 @@
  * This file implements direct PCI assignment to a HVM guest
  */
 
-#include "vl.h"
 #include "pass-through.h"
 #include "pci/header.h"
 #include "pci/pci.h"
