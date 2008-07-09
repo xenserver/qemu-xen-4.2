@@ -35,6 +35,7 @@ OBJS += xen_machine_fv.o
 OBJS += xen_blktap.o
 OBJS += exec-dm.o
 OBJS += pci_emulation.o
+OBJS += tpm_tis.o
 
 ifdef CONFIG_STUBDOM
 CONFIG_PASSTHROUGH=1

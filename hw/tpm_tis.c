@@ -23,7 +23,13 @@
 #include <sys/un.h>
 #include <fcntl.h>
 #include <errno.h>
-#include "vl.h"
+
+#include "qemu-common.h"
+#include "hw.h"
+#include "pci.h"
+#include "qemu-timer.h"
+#include "qemu-xen.h"
+#include "exec-all.h"
 
 //#define DEBUG_TPM
 
