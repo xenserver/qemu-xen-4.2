@@ -208,6 +208,9 @@ static void xen_init_fv(ram_addr_t ram_size, int vga_ram_size,
     }
 #endif
 
+#ifdef CONFIG_STUBDOM /* the hvmop is not supported on older hypervisors */
+    xc_set_hvm_param(xc_handle, domid, HVM_PARAM_DM_DOMAIN, DOMID_SELF);
+#endif
     xc_get_hvm_param(xc_handle, domid, HVM_PARAM_IOREQ_PFN, &ioreq_pfn);
     fprintf(logfile, "shared page at pfn %lx\n", ioreq_pfn);
     shared_page = xc_map_foreign_range(xc_handle, domid, XC_PAGE_SIZE,
