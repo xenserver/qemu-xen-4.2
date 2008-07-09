@@ -44,6 +44,7 @@ struct CharDriverState {
     void (*chr_send_event)(struct CharDriverState *chr, int event);
     void (*chr_close)(struct CharDriverState *chr);
     void (*chr_accept_input)(struct CharDriverState *chr);
+    int (*chr_getname)(struct CharDriverState *s, char *buf, size_t buflen);
     void *opaque;
     int focus;
     QEMUBH *bh;

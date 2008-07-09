@@ -32,3 +32,6 @@ extern int vcpus;
 
 void xenstore_parse_domain_config(int domid);
 void xenstore_read_vncpasswd(int domid, char *pwbuf, size_t pwbuflen);
+struct CharDriverState;
+void xenstore_store_serial_port_info(int i, struct CharDriverState *chr,
+				     const char *devname);

@@ -2338,10 +2338,20 @@ void cfmakeraw (struct termios *termios_p)
 #endif
 
 #if defined(__linux__) || defined(__sun__) || defined(__NetBSD__) || defined(__OpenBSD__)
+static int pty_getname(struct CharDriverState *chr, char *buf, size_t len) {
+    char *name;
+    FDCharDriver *s = chr->opaque;
+
+    name = ptsname(s->fd_in);
+    if (!name) return -1;
+    return snprintf(buf,len, "pty %s", name);
+}
+
 static CharDriverState *qemu_chr_open_pty(void)
 {
     struct termios tty;
     int master_fd, slave_fd;
+    CharDriverState *chr;
 
     if (openpty(&master_fd, &slave_fd, NULL, NULL, NULL) < 0) {
         return NULL;
@@ -2352,7 +2362,9 @@ static CharDriverState *qemu_chr_open_pty(void)
     tcsetattr(slave_fd, TCSAFLUSH, &tty);
 
     fprintf(stderr, "char device redirected to %s\n", ptsname(master_fd));
-    return qemu_chr_open_fd(master_fd, master_fd);
+    chr = qemu_chr_open_fd(master_fd, master_fd);
+    chr->chr_getname = pty_getname;
+    return chr;
 }
 
 static void tty_serial_init(int fd, int speed,
@@ -8767,6 +8779,7 @@ int main(int argc, char **argv)
             }
             if (strstart(devname, "vc", 0))
                 qemu_chr_printf(serial_hds[i], "serial%d console\r\n", i);
+	    xenstore_store_serial_port_info(i, serial_hds[i], devname);
         }
     }
 

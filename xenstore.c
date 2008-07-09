@@ -9,6 +9,7 @@
  */
 
 #include "qemu-common.h"
+#include "qemu-char.h"
 
 #include "block_int.h"
 #include <unistd.h>
@@ -973,4 +974,90 @@ int xenstore_vm_write(int domid, char *key, char *value)
     free(path);
     free(buf);
     return rc;
+}
+
+
+/*
+ * Create a store entry for a device (e.g., monitor, serial/parallel lines).
+ * The entry is <domain-path><storeString>/tty and the value is the name
+ * of the pty associated with the device.
+ */
+static int store_dev_info(const char *devName, int domid,
+                          CharDriverState *cState, const char *storeString)
+{
+#ifdef CONFIG_STUBDOM
+    fprintf(logfile, "can't store dev %s name for domid %d in %s from a stub domain\n", devName, domid, storeString);
+    return ENOSYS;
+#else
+    int xc_handle;
+    struct xs_handle *xs;
+    char *path;
+    char *newpath;
+    char *pts;
+    char namebuf[128];
+    int ret;
+
+    /*
+     * Only continue if we're talking to a pty
+     */
+    if (!cState->chr_getname) return 0;
+    ret = cState->chr_getname(cState, namebuf, sizeof(namebuf));
+    if (ret < 0) {
+        fprintf(logfile, "ptsname failed (for '%s'): %s\n",
+                storeString, strerror(errno));
+        return 0;
+    }
+    if (memcmp(namebuf, "pty ", 4)) return 0;
+    pts = namebuf + 4;
+
+    /* We now have everything we need to set the xenstore entry. */
+    xs = xs_daemon_open();
+    if (xs == NULL) {
+        fprintf(logfile, "Could not contact XenStore\n");
+        return -1;
+    }
+
+    xc_handle = xc_interface_open();
+    if (xc_handle == -1) {
+        fprintf(logfile, "xc_interface_open() error\n");
+        return -1;
+    }
+
+    path = xs_get_domain_path(xs, domid);
+    if (path == NULL) {
+        fprintf(logfile, "xs_get_domain_path() error\n");
+        return -1;
+    }
+    newpath = realloc(path, (strlen(path) + strlen(storeString) +
+                             strlen("/tty") + 1));
+    if (newpath == NULL) {
+        free(path); /* realloc errors leave old block */
+        fprintf(logfile, "realloc error\n");
+        return -1;
+    }
+    path = newpath;
+
+    strcat(path, storeString);
+    strcat(path, "/tty");
+    if (!xs_write(xs, XBT_NULL, path, pts, strlen(pts))) {
+        fprintf(logfile, "xs_write for '%s' fail", storeString);
+        return -1;
+    }
+
+    free(path);
+    xs_daemon_close(xs);
+    close(xc_handle);
+
+    return 0;
+#endif
+}
+
+void xenstore_store_serial_port_info(int i, CharDriverState *chr,
+				     const char *devname) {
+    char buf[16];
+
+    snprintf(buf, sizeof(buf), "/serial/%d", i);
+    store_dev_info(devname, domid, chr, buf);
+    if (i == 0) /* serial 0 is also called the console */
+        store_dev_info(devname, domid, chr, "/console");
 }
