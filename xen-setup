@@ -7,6 +7,8 @@ rm -f $target/Makefile
 rm -f $target/config.mak
 rm -f config-host.mak
 
+mv config-host.h config-host.h~
+
 ./configure --disable-curses "$@" --prefix=/usr
 
 target=i386-dm
@@ -21,4 +23,6 @@ cat xen-config-host.mak >>config-host.mak
 
 sed -e 's,qemu,xen/qemu,' config-host.h >config-host.h.new
 echo '#include "xen-config-host.h"' >>config-host.h.new
-mv config-host.h.new config-host.h
+
+mv config-host.h~ config-host.h
+cmp -s config-host.h.new config-host.h || mv config-host.h.new config-host.h
