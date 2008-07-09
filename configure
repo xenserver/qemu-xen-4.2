@@ -719,7 +719,7 @@ cat > $TMPC << EOF
 #endif
 int main( void ) { return (int) glGetString(GL_EXTENSIONS); }
 EOF
-if $cc -o $TMPE `$sdl_config --cflags --libs 2> /dev/null` -I/usr/include/GL $TMPC -lXext -lGL 2> /dev/null
+if $cc $ARCH_CFLAGS -o $TMPE `$sdl_config --cflags --libs 2> /dev/null` -I/usr/include/GL $TMPC -lXext -lGL 2> /dev/null
 then
 opengl="yes"
 else
@@ -1100,6 +1100,14 @@ if test "$sdl1" = "yes" ; then
   else
     echo "SDL_CFLAGS=`$sdl_config --cflags`" >> $config_mak
   fi
+fi
+if test $opengl = "yes"
+then
+    echo "#define CONFIG_OPENGL 1" >> $config_h
+    echo "CONFIG_OPENGL=yes" >> $config_mak
+    echo "SDL_CFLAGS+=-I/usr/include/GL" >> $config_mak
+    echo "SDL_LIBS+=-lXext" >> $config_mak
+    echo "SDL_LIBS+=-lGL" >> $config_mak
 fi
 if test $opengl = "yes"
 then
