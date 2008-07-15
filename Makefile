@@ -107,7 +107,9 @@ ifdef AUDIO_PT_INT
 AUDIO_OBJS += audio_pt_int.o
 endif
 AUDIO_OBJS+= wavcapture.o
+ifdef CONFIG_AUDIO
 OBJS+=$(addprefix audio/, $(AUDIO_OBJS))
+endif
 
 ifdef CONFIG_SDL
 OBJS+=sdl.o x_keymap.o

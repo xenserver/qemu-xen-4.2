@@ -87,6 +87,7 @@ mingw32="no"
 EXESUF=""
 gdbstub="yes"
 slirp="yes"
+audio="yes"
 adlib="no"
 ac97="no"
 gus="no"
@@ -283,6 +284,8 @@ for opt do
   ;;
   --disable-slirp) slirp="no"
   ;;
+  --disable-audio) audio="no"
+  ;;
   --enable-adlib) adlib="yes"
   ;;
   --enable-ac97) ac97="yes"
@@ -415,6 +418,7 @@ echo "  --disable-werror         disable compilation abort on warning"
 echo "  --disable-sdl            disable SDL"
 echo "  --enable-cocoa           enable COCOA (Mac OS X only)"
 echo "  --enable-mingw32         enable Win32 cross compilation with mingw32"
+echo "  --disable-audio          disable all audio emulation"
 echo "  --enable-adlib           enable Adlib emulation"
 echo "  --enable-ac97            enable AC97 emulation"
 echo "  --enable-gus             enable Gravis Ultrasound emulation"
@@ -828,6 +832,7 @@ fi
 echo "OpenGL support    $opengl"
 echo "curses support    $curses"
 echo "mingw32 support   $mingw32"
+echo "Audio support     $audio"
 echo "Adlib support     $adlib"
 echo "AC97 support      $ac97"
 echo "GUS support       $gus"
@@ -1025,6 +1030,10 @@ fi
 if test "$slirp" = "yes" ; then
   echo "CONFIG_SLIRP=yes" >> $config_mak
   echo "#define CONFIG_SLIRP 1" >> $config_h
+fi
+if test "$audio" = "yes" ; then
+  echo "CONFIG_AUDIO=yes" >> $config_mak
+  echo "#define CONFIG_AUDIO 1" >> $config_h
 fi
 if test "$adlib" = "yes" ; then
   echo "CONFIG_ADLIB=yes" >> $config_mak

@@ -28,7 +28,9 @@
 #endif
 #include "block_int.h"
 #include <assert.h>
+#ifndef NO_AIO
 #include <aio.h>
+#endif
 
 #ifdef CONFIG_COCOA
 #include <paths.h>
@@ -233,6 +235,7 @@ label__raw_write__success:
 /***********************************************************/
 /* Unix AIO using POSIX AIO */
 
+#ifndef NO_AIO
 typedef struct RawAIOCB {
     BlockDriverAIOCB common;
     struct aiocb aiocb;
@@ -469,6 +472,7 @@ static void raw_aio_cancel(BlockDriverAIOCB *blockacb)
         pacb = &acb->next;
     }
 }
+#endif
 
 static void raw_close(BlockDriverState *bs)
 {
@@ -572,11 +576,13 @@ BlockDriver bdrv_raw = {
     raw_create,
     raw_flush,
 
+#ifndef NO_AIO
     .bdrv_aio_read = raw_aio_read,
     .bdrv_aio_write = raw_aio_write,
     .bdrv_aio_cancel = raw_aio_cancel,
     .bdrv_aio_flush = raw_aio_flush,
     .aiocb_size = sizeof(RawAIOCB),
+#endif
     .protocol_name = "file",
     .bdrv_pread = raw_pread,
     .bdrv_pwrite = raw_pwrite,
@@ -928,11 +934,13 @@ BlockDriver bdrv_host_device = {
     NULL,
     raw_flush,
 
+#ifndef NO_AIO
     .bdrv_aio_read = raw_aio_read,
     .bdrv_aio_write = raw_aio_write,
     .bdrv_aio_cancel = raw_aio_cancel,
     .bdrv_aio_flush = raw_aio_flush,
     .aiocb_size = sizeof(RawAIOCB),
+#endif
     .bdrv_pread = raw_pread,
     .bdrv_pwrite = raw_pwrite,
     .bdrv_getlength = raw_getlength,
