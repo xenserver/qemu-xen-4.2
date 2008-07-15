@@ -22,12 +22,13 @@
 #include "pci.h"
 #include "pci/header.h"
 #include "pci/pci.h"
+#include "exec-all.h"
 
 /* Log acesss */
 #define PT_LOGGING_ENABLED
 
 #ifdef PT_LOGGING_ENABLED
-#define PT_LOG(_f, _a...)   fprintf(stdout, "%s: " _f, __func__, ##_a)
+#define PT_LOG(_f, _a...)   fprintf(logfile, "%s: " _f, __func__, ##_a)
 #else
 #define PT_LOG(_f, _a...)
 #endif

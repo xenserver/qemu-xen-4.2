@@ -27,8 +27,6 @@
 #include "pci/pci.h"
 #include "pt-msi.h"
 
-extern FILE *logfile;
-
 struct php_dev {
     struct pt_dev *pt_dev;
     uint8_t valid;

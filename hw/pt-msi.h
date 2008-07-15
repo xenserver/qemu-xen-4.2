@@ -7,6 +7,8 @@
 #define  PCI_CAP_ID_MSI     0x05    /* Message Signalled Interrupts */
 #define  PCI_CAP_ID_MSIX    0x11    /* MSI-X */
 
+#ifndef PCI_MSI_FLAGS
+
 /* Message Signalled Interrupts registers */
 #define PCI_MSI_FLAGS       2   /* Various flags */
 #define  PCI_MSI_FLAGS_64BIT    0x80    /* 64-bit addresses allowed */
@@ -18,6 +20,8 @@
 #define PCI_MSI_ADDRESS_HI  8   /* Upper 32 bits (if PCI_MSI_FLAGS_64BIT set) */
 #define PCI_MSI_DATA_32     8   /* 16 bits of data for 32-bit devices */
 #define PCI_MSI_DATA_64     12  /* 16 bits of data for 64-bit devices */
+
+#endif
 
 /* MSI-X */
 #define  PCI_MSIX_ENABLE    0x8000
