@@ -203,18 +203,8 @@
 #define MAX_MULT_SECTORS 16
 #ifdef CONFIG_STUBDOM
 #include <xen/io/blkif.h>
-#define IDE_DMA_BUF_SIZE (BLKIF_MAX_SEGMENTS_PER_REQUEST * TARGET_PAGE_SIZE)
-#else
-#define IDE_DMA_BUF_SIZE 131072
-#endif
-#if (IDE_DMA_BUF_SIZE < MAX_MULT_SECTORS * 512)
-#error "IDE_DMA_BUF_SIZE must be bigger or equal to MAX_MULT_SECTORS * 512"
-#endif
-
-#ifdef CONFIG_STUBDOM
-#include <xen/io/blkif.h>
 #define IDE_DMA_BUF_SECTORS \
- ((BLKIF_MAX_SEGMENTS_PER_REQUEST * TARGET_PAGE_SIZE) / 512)
+	(((BLKIF_MAX_SEGMENTS_PER_REQUEST - 1 ) * TARGET_PAGE_SIZE) / 512)
 #else
 #define IDE_DMA_BUF_SECTORS 256
 #endif
