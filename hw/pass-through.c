@@ -713,7 +713,7 @@ int pt_init(PCIBus *e_bus, char *direct_pci)
     dpci_infos.pci_access = pci_access;
     dpci_infos.e_bus      = e_bus;
 
-    if ( strlen(direct_pci) == 0 ) {
+    if ( !direct_pci || strlen(direct_pci) == 0 ) {
         return 0;
     }
 
