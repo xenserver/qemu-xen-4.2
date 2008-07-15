@@ -32,6 +32,7 @@
 #include "smbus.h"
 #include "boards.h"
 #include "console.h"
+#include "exec-all.h"
 
 #include "xen_platform.h"
 
