@@ -9,7 +9,7 @@ rm -f config-host.mak
 
 if test -f config-host.h; then mv config-host.h config-host.h~; fi
 
-./configure --disable-curses --disable-slirp "$@" --prefix=/usr
+./configure --disable-gcc-check --disable-curses --disable-slirp "$@" --prefix=/usr
 
 target=i386-dm
 
