@@ -26,7 +26,7 @@ LIBS+=$(AIOLIBS)
 
 all: $(TOOLS) $(DOCS) recurse-all 
 
-subdir-%: dyngen$(EXESUF) libqemu_common.a
+subdir-%: libqemu_common.a
 	$(MAKE) -C $(subst subdir-,,$@) all
 
 recurse-all: $(patsubst %,subdir-%, $(TARGET_DIRS))
