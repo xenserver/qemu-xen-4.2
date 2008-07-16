@@ -27,19 +27,11 @@
 
 #include "hw.h"
 #include "pci.h"
-
-/* re FIXME_MEDIA_EJECT
- * These code fragments manipulated interfaces in the old qemu, which
- * are not present in this tree.  They will need to be reintegrated.
- * The code inside the #ifdef...#endif blocks has not been adjusted
- # at all to align it with new upstream.
- */
+#include "qemu-timer.h"
 
 struct xs_handle *xsh = NULL;
-#ifdef FIXME_MEDIA_EJECT /* not yet supported in this merge */
-static char *media_filename[MAX_DISKS + MAX_SCSI_DISKS];
+static char *media_filename[MAX_DRIVES+1];
 static QEMUTimer *insert_timer = NULL;
-#endif
 
 #define UWAIT_MAX (30*1000000) /* thirty seconds */
 #define UWAIT     (100000)     /* 1/10th second  */
@@ -60,14 +52,16 @@ static int pasprintf(char **buf, const char *fmt, ...)
     return ret;
 }
 
-#ifdef FIXME_MEDIA_EJECT /* not yet supported in this merge */
 static void insert_media(void *opaque)
 {
     int i;
+    BlockDriverState *bs;
 
-    for (i = 0; i < MAX_DISKS + MAX_SCSI_DISKS; i++) {
-        if (media_filename[i] && bs_table[i]) {
-            do_change(bs_table[i]->device_name, media_filename[i]);
+    for (i = 0; i < MAX_DRIVES + 1; i++) {
+        bs = drives_table[i].bdrv;
+        if (media_filename[i] && bs && bs->filename[0] == '\0') {
+            bdrv_open2(bs, media_filename[i], 0, &bdrv_raw);
+            pstrcpy(bs->filename, sizeof(bs->filename), media_filename[i]);
             free(media_filename[i]);
             media_filename[i] = NULL;
         }
@@ -81,7 +75,6 @@ void xenstore_check_new_media_present(int timeout)
         insert_timer = qemu_new_timer(rt_clock, insert_media, NULL);
     qemu_mod_timer(insert_timer, qemu_get_clock(rt_clock) + timeout);
 }
-#endif
 
 static void waitForDevice(char *fn)
 { 
@@ -112,10 +105,8 @@ void xenstore_parse_domain_config(int hvm_domid)
     BlockDriverState *bs;
     BlockDriver *format;
 
-#ifdef  FIXME_MEDIA_EJECT /* not yet supported in this merge */
-    for(i = 0; i < MAX_DISKS + MAX_SCSI_DISKS; i++)
+    for(i = 0; i < MAX_DRIVES + 1; i++)
         media_filename[i] = NULL;
-#endif
 
     xsh = xs_daemon_open();
     if (xsh == NULL) {
@@ -298,6 +289,7 @@ void xenstore_parse_domain_config(int hvm_domid)
 		    }
 		}
 	    }
+            pstrcpy(bs->filename, sizeof(bs->filename), params);
             if (bdrv_open2(bs, params, 0 /* snapshot */, format) < 0)
                 fprintf(stderr, "qemu: could not open vbd '%s' or hard disk image '%s' (drv '%s' format '%s')\n", buf, params, drv ? drv : "?", format ? format->format_name : "0");
         }
@@ -632,7 +624,7 @@ void xenstore_process_event(void *opaque)
     if (strncmp(vec[XS_WATCH_TOKEN], "hd", 2) ||
         strlen(vec[XS_WATCH_TOKEN]) != 3)
         goto out;
-    hd_index = vec[XS_WATCH_TOKEN][2] - 'a';
+    hd_index = vec[XS_WATCH_TOKEN][2] - 'a' - 1;
     image = xs_read(xsh, XBT_NULL, vec[XS_WATCH_PATH], &len);
     if (image == NULL)
         goto out;  /* gone */
@@ -649,12 +641,11 @@ void xenstore_process_event(void *opaque)
     if (drv && !strcmp(drv, "tap") && ((offset = strchr(image, ':')) != NULL))
         memmove(image, offset+1, strlen(offset+1)+1);
 
-#ifdef FIXME_MEDIA_EJECT /* not yet supported in this merge */
-    if (!strcmp(image, bs_table[hd_index]->filename))
+    if (!strcmp(image, drives_table[hd_index].bdrv->filename))
         goto out;  /* identical */
 
-    do_eject(0, vec[XS_WATCH_TOKEN]);
-    bs_table[hd_index]->filename[0] = 0;
+    drives_table[hd_index].bdrv->filename[0] = '\0';
+    bdrv_close(drives_table[hd_index].bdrv);
     if (media_filename[hd_index]) {
         free(media_filename[hd_index]);
         media_filename[hd_index] = NULL;
@@ -664,7 +655,6 @@ void xenstore_process_event(void *opaque)
         media_filename[hd_index] = strdup(image);
         xenstore_check_new_media_present(5000);
     }
-#endif
 
  out:
     free(drv);
