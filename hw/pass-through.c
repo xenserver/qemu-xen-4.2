@@ -408,7 +408,7 @@ static int pt_register_regions(struct pt_dev *assigned_device)
     return 0;
 }
 
-static int pt_unregister_regions(struct pt_dev *assigned_device)
+static void pt_unregister_regions(struct pt_dev *assigned_device)
 {
     int i, type, ret;
     uint32_t e_size;
