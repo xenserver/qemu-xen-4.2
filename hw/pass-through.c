@@ -26,6 +26,7 @@
 #include "pci/header.h"
 #include "pci/pci.h"
 #include "pt-msi.h"
+#include "qemu-xen.h"
 
 struct php_dev {
     struct pt_dev *pt_dev;
