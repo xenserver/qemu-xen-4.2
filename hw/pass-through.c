@@ -689,13 +689,15 @@ int power_off_php_slot(int php_slot)
     return unregister_real_device(php_slot);
 }
 
-int pt_init(PCIBus *e_bus, char *direct_pci)
+int pt_init(PCIBus *e_bus, const char *direct_pci)
 {
     int seg, b, d, f, php_slot = 0;
     struct pt_dev *pt_dev;
     struct pci_access *pci_access;
     char *vslots;
     char slot_str[8];
+    char *direct_pci_head = NULL;
+    char *direct_pci_p = NULL;
 
     /* Initialize libpci */
     pci_access = pci_alloc();
@@ -711,9 +713,12 @@ int pt_init(PCIBus *e_bus, char *direct_pci)
     dpci_infos.pci_access = pci_access;
     dpci_infos.e_bus      = e_bus;
 
-    if ( strlen(direct_pci) == 0 ) {
+    if ( !direct_pci || strlen(direct_pci) == 0 ) {
         return 0;
     }
+
+    if ( !(direct_pci_head = direct_pci_p = strdup(direct_pci)) )
+        return 0;
 
     /* the virtual pci slots of all pass-through devs
      * with hex format: xx;xx...;
@@ -721,7 +726,7 @@ int pt_init(PCIBus *e_bus, char *direct_pci)
     vslots = qemu_mallocz ( strlen(direct_pci) / 3 );
 
     /* Assign given devices to guest */
-    while ( next_bdf(&direct_pci, &seg, &b, &d, &f) )
+    while ( next_bdf(&direct_pci_p, &seg, &b, &d, &f) )
     {
         /* Register real device with the emulated bus */
         pt_dev = register_real_device(e_bus, "DIRECT PCI", PT_VIRT_DEVFN_AUTO,
@@ -729,6 +734,7 @@ int pt_init(PCIBus *e_bus, char *direct_pci)
         if ( pt_dev == NULL )
         {
             PT_LOG("Error: Registration failed (%02x:%02x.%x)\n", b, d, f);
+            free(direct_pci_head);
             return -1;
         }
 
@@ -749,6 +755,7 @@ int pt_init(PCIBus *e_bus, char *direct_pci)
     xenstore_write_vslots(vslots);
 
     qemu_free(vslots);
+    free(direct_pci_head);
 
     /* Success */
     return 0;

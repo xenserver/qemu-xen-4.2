@@ -113,7 +113,5 @@ struct pci_config_cf8 {
     };
 };
 
-int pt_init(PCIBus * e_bus, char * direct_pci);
-
 #endif /* __PASSTHROUGH_H__ */
 

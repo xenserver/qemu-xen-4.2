@@ -164,4 +164,7 @@ PCIBus *pci_prep_init(qemu_irq *pic);
 PCIBus *pci_apb_init(target_phys_addr_t special_base, target_phys_addr_t mem_base,
                      qemu_irq *pic);
 
+/* pass-through.c */
+int pt_init(PCIBus *e_bus, const char *direct_pci_opt);
+
 #endif
