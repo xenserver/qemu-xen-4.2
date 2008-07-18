@@ -2090,6 +2090,9 @@ static CharDriverState *qemu_chr_open_fd(int fd_in, int fd_out)
     CharDriverState *chr;
     FDCharDriver *s;
 
+    socket_set_nonblock(fd_in);
+    socket_set_nonblock(fd_out);
+
     chr = qemu_mallocz(sizeof(CharDriverState));
     if (!chr)
         return NULL;
