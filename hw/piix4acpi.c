@@ -27,6 +27,7 @@
 #include "pc.h"
 #include "pci.h"
 #include "sysemu.h"
+#include "qemu-xen.h"
 
 #include <xen/hvm/ioreq.h>
 #include <xen/hvm/params.h>
