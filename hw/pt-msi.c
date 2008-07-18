@@ -271,7 +271,7 @@ pt_msi_map_update(struct pt_dev *d, uint32_t old_data, uint64_t old_addr)
     data = get_msi_gdata(d);
     addr = get_msi_gaddr(d);
 
-    PT_LOG("old_data %x old_addr %lx data %x addr %lx\n",
+    PT_LOG("old_data %x old_addr %"PRIx64" data %x addr %"PRIx64"\n",
             old_data, old_addr, data, addr);
 
     if ( data != old_data || addr != old_addr )
@@ -567,7 +567,7 @@ static void pci_msix_writel(void *opaque, target_phys_addr_t addr, uint32_t val)
 
     if ( addr % 4 )
     {
-        PT_LOG("unaligned dword access to MSI-X table, addr %016lx\n",
+        PT_LOG("unaligned dword access to MSI-X table, addr %016"PRIx64"\n",
                 addr);
         return;
     }
@@ -616,7 +616,7 @@ static uint32_t pci_msix_readl(void *opaque, target_phys_addr_t addr)
 
     if ( addr % 4 )
     {
-        PT_LOG("unaligned dword access to MSI-X table, addr %016lx\n",
+        PT_LOG("unaligned dword access to MSI-X table, addr %016"PRIx64"\n",
                 addr);
         return 0;
     }
@@ -723,7 +723,7 @@ int pt_msix_init(struct pt_dev *dev, int pos)
         bar_base &= ~0xf;
         bar_base += (uint64_t)pci_read_long(pd, 0x10 + 4 * (bar_index + 1)) << 32;
     }
-    PT_LOG("get MSI-X table bar base %lx\n", bar_base);
+    PT_LOG("get MSI-X table bar base %"PRIx64"\n", bar_base);
 
     dev->msix->fd = open("/dev/mem", O_RDWR);
     dev->msix->phys_iomem_base = mmap(0, total_entries * 16,
