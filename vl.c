@@ -2036,7 +2036,9 @@ static inline int send_all(int fd, const uint8_t *buf, int len1)
 
 void socket_set_nonblock(int fd)
 {
-    fcntl(fd, F_SETFL, O_NONBLOCK);
+    int f;
+    f = fcntl(fd, F_GETFL);
+    fcntl(fd, F_SETFL, f | O_NONBLOCK);
 }
 #endif /* !_WIN32 */
 
@@ -2120,6 +2122,9 @@ static CharDriverState *qemu_chr_open_fd(int fd_in, int fd_out)
 {
     CharDriverState *chr;
     FDCharDriver *s;
+
+    socket_set_nonblock(fd_in);
+    socket_set_nonblock(fd_out);
 
     chr = qemu_mallocz(sizeof(CharDriverState));
     if (!chr)
@@ -2488,7 +2493,6 @@ static CharDriverState *qemu_chr_open_tty(const char *filename)
     int fd;
 
     TFR(fd = open(filename, O_RDWR | O_NONBLOCK));
-    fcntl(fd, F_SETFL, O_NONBLOCK);
     tty_serial_init(fd, 115200, 'N', 8, 1);
     chr = qemu_chr_open_fd(fd, fd);
     if (!chr) {
