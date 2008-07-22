@@ -56,8 +56,9 @@ static PITState *pit;
 static IOAPICState *ioapic;
 static PCIDevice *i440fx_state;
 
-static void xen_relocator_hook(target_phys_addr_t prot_addr, uint16_t protocol,
-			       uint8_t header[], int kernel_size,
+static void xen_relocator_hook(target_phys_addr_t *prot_addr_upd,
+                               uint16_t protocol,
+			       const uint8_t header[], int kernel_size,
 			       target_phys_addr_t real_addr, int real_size);
 #define smbus_eeprom_device_init (void)
 
@@ -661,7 +662,7 @@ static void load_linux(const char *kernel_filename,
     setup_size = (setup_size+1)*512;
     kernel_size -= setup_size;	/* Size of protected-mode code */
 
-    xen_relocator_hook(prot_addr, protocol, header, kernel_size,
+    xen_relocator_hook(&prot_addr, protocol, header, kernel_size,
 		       real_addr, setup_size-1024);
 
     if (!fread_targphys_ok(real_addr+1024, setup_size-1024, f) ||
@@ -1258,10 +1259,12 @@ static void setup_relocator(target_phys_addr_t addr, target_phys_addr_t src, tar
 }
 
 
-static void xen_relocator_hook(target_phys_addr_t prot_addr, uint16_t protocol,
-			       uint8_t header[], int kernel_size,
+static void xen_relocator_hook(target_phys_addr_t *prot_addr_upd,
+                               uint16_t protocol,
+			       const uint8_t header[], int kernel_size,
 			       target_phys_addr_t real_addr, int real_size)
 {
+    target_phys_addr_t prot_addr = *prot_addr_upd;
 
     /* Urgh, Xen's HVM firmware lives at 0x100000, but that's also the
      * address Linux wants to start life at prior to relocatable support
@@ -1270,11 +1273,11 @@ static void xen_relocator_hook(target_phys_addr_t prot_addr, uint16_t protocol,
 	    protocol);
 
     if (prot_addr != 0x10000) { /* old low kernels are OK */
-	target_phys_addr_t reloc_prot_addr = 0x20000;
+	target_phys_addr_t reloc_prot_addr = 0x200000;
 	
         if (protocol >= 0x205 && (header[0x234] & 1)) {
 	    /* Relocatable automatically */
-	    stl_p(header+0x214, reloc_prot_addr);
+	    stl_phys(real_addr+0x214, reloc_prot_addr);
 	    fprintf(stderr, "qemu: kernel is relocatable\n");
 	} else {
 	    /* Setup a helper which moves  kernel back to
@@ -1284,13 +1287,14 @@ static void xen_relocator_hook(target_phys_addr_t prot_addr, uint16_t protocol,
 	     * then jumps to prot_addr. Yes this is sick.
 	     */
 	    fprintf(stderr, "qemu: kernel is NOT relocatable\n");
-	    stl_p(header+0x214, reloc_prot_addr + kernel_size);
+	    stl_phys(real_addr+0x214, reloc_prot_addr + kernel_size);
 	    setup_relocator(reloc_prot_addr + kernel_size, reloc_prot_addr, prot_addr, kernel_size);
 	}
 	fprintf(stderr, "qemu: loading kernel protected mode (%x bytes) at %#zx\n",
 		kernel_size, (size_t)reloc_prot_addr);
 	fprintf(stderr, "qemu: loading kernel real mode (%x bytes) at %#zx\n",
 		real_size, (size_t)real_addr);
+        *prot_addr_upd = reloc_prot_addr;
     }
 }
 
