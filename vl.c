@@ -8732,7 +8732,7 @@ int main(int argc, char **argv)
         xenstore_read_vncpasswd(domid, password, sizeof(password));
         vnc_display_password(ds, password);
         vnc_display_port = vnc_display_open(ds, vnc_display, vncunused);
-        if (vnc_display < 0)
+        if (vnc_display_port < 0)
             exit(1);
     } else
 #if defined(CONFIG_CURSES)
