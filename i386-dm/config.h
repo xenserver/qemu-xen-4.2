@@ -5,4 +5,3 @@
 #define CONFIG_SOFTMMU 1
 #define CONFIG_SOFTFLOAT 1
 #define CONFIG_DM 1
-#define CONFIG_SDL 1
