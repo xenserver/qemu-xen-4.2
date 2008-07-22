@@ -8734,6 +8734,7 @@ int main(int argc, char **argv)
         vnc_display_port = vnc_display_open(ds, vnc_display, vncunused);
         if (vnc_display_port < 0)
             exit(1);
+	xenstore_write_vncport(vnc_display_port);
     } else
 #if defined(CONFIG_CURSES)
     if (curses) {
