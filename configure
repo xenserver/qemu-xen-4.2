@@ -1110,7 +1110,7 @@ if test "$sdl1" = "yes" ; then
     echo "SDL_CFLAGS=`$sdl_config --cflags`" >> $config_mak
   fi
 fi
-if test $opengl = "yes"
+if test "$opengl" = "yes"
 then
     echo "#define CONFIG_OPENGL 1" >> $config_h
     echo "CONFIG_OPENGL=yes" >> $config_mak
@@ -1118,7 +1118,7 @@ then
     echo "SDL_LIBS+=-lXext" >> $config_mak
     echo "SDL_LIBS+=-lGL" >> $config_mak
 fi
-if test $opengl = "yes"
+if test "$opengl" = "yes"
 then
     echo "#define CONFIG_OPENGL 1" >> $config_h
     echo "CONFIG_OPENGL=yes" >> $config_mak
