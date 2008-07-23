@@ -26,3 +26,5 @@ echo '#include "xen-config-host.h"' >>config-host.h.new
 
 if test -f config-host.h~; then mv config-host.h~ config-host.h; fi
 cmp -s config-host.h.new config-host.h || mv config-host.h.new config-host.h
+
+echo 'qemu successfuly configured for Xen qemu-dm build'
