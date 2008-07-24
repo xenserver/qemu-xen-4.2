@@ -59,7 +59,7 @@ static void xen_platform_ioport_writeb(void *opaque, uint32_t addr, uint32_t val
     case 0: /* Platform flags */ {
         hvmmem_type_t mem_type = (val & PFFLAG_ROM_LOCK) ?
             HVMMEM_ram_ro : HVMMEM_ram_rw;
-        if (xc_hvm_set_mem_type(xc_handle, domid, mem_type, 0xc0, 0x20))
+        if (xc_hvm_set_mem_type(xc_handle, domid, mem_type, 0xc0, 0x40))
             fprintf(logfile,"xen_platform: unable to change ro/rw "
                     "state of ROM memory area!\n");
         else
