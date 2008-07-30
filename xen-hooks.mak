@@ -41,7 +41,7 @@ ifdef CONFIG_STUBDOM
 CONFIG_PASSTHROUGH=1
 else
   ifeq (,$(wildcard /usr/include/pci))
-$(warning *** pciutils-devl package not found - missing /usr/include/pci)
+$(warning *** pciutils-dev package not found - missing /usr/include/pci)
 $(warning *** PCI passthrough capability has been disabled)
   else
 CONFIG_PASSTHROUGH=1
