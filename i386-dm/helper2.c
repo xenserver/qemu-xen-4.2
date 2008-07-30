@@ -418,7 +418,8 @@ void cpu_ioreq_timeoffset(CPUState *env, ioreq_t *req)
 
     time_offset += (unsigned long)req->data;
 
-    fprintf(logfile, "Time offset set %ld, added offset %lld\n", time_offset, req->data);
+    fprintf(logfile, "Time offset set %ld, added offset %"PRId64"\n",
+        time_offset, req->data);
     sprintf(b, "%ld", time_offset);
     xenstore_vm_write(domid, "rtc/timeoffset", b);
 }
