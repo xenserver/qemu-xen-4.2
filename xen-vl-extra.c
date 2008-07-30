@@ -7,6 +7,7 @@
 /* There is no need for multiple-inclusion protection since
  * there is only one place where this file is included. */
 
+#include "qemu-xen.h"
 
 /* forward declarations of things in vl.c */
 
