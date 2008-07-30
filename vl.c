@@ -8698,10 +8698,10 @@ int main(int argc, char **argv)
     }
 #endif
 
+    bdrv_init();
+
     xc_handle = xc_interface_open();
     xenstore_parse_domain_config(domid);
-
-    bdrv_init();
 
     /* we always create the cdrom drive, even if no disk is there */
 
