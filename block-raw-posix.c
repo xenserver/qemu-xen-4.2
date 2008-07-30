@@ -22,6 +22,8 @@
  * THE SOFTWARE.
  */
 #include "qemu-common.h"
+#include "qemu-char.h"
+#include "qemu_socket.h"
 #ifndef QEMU_IMG
 #include "qemu-timer.h"
 #include "exec-all.h"
@@ -242,9 +244,13 @@ typedef struct RawAIOCB {
 static int aio_sig_num = SIGUSR2;
 static RawAIOCB *first_aio; /* AIO issued */
 static int aio_initialized = 0;
+static int aio_sig_pipe[2];
 
 static void aio_signal_handler(int signum)
 {
+    int e;
+    e = errno;
+    write(aio_sig_pipe[1],"",1); /* ignore errors as they should be EAGAIN */
 #ifndef QEMU_IMG
     CPUState *env = cpu_single_env;
     if (env) {
@@ -257,11 +263,31 @@ static void aio_signal_handler(int signum)
 #endif
     }
 #endif
+    errno = e;
+}
+
+static void qemu_aio_sig_pipe_read(void *opaque_ignored) {
+    qemu_aio_poll();
 }
 
 void qemu_aio_init(void)
 {
     struct sigaction act;
+    int ret;
+
+    ret = pipe(aio_sig_pipe);
+    if (ret) { perror("qemu_aio_init pipe failed"); exit(-1); }
+    fcntl(aio_sig_pipe[0], F_SETFL, O_NONBLOCK);
+    fcntl(aio_sig_pipe[1], F_SETFL, O_NONBLOCK);
+
+#ifndef QEMU_IMG
+    ret = qemu_set_fd_handler2(aio_sig_pipe[0], NULL,
+                               qemu_aio_sig_pipe_read, NULL, NULL);
+    if (ret) {
+        fputs("qemu_aio_init set_fd_handler failed\n",stderr);
+        exit(-1);
+    }
+#endif
 
     aio_initialized = 1;
 
@@ -288,6 +314,12 @@ void qemu_aio_poll(void)
 {
     RawAIOCB *acb, **pacb;
     int ret;
+
+    /* eat any pending signal notifications */
+    {
+        char dummy_buf[16];
+        read(aio_sig_pipe[0],dummy_buf,sizeof(dummy_buf));
+    }
 
     for(;;) {
         pacb = &first_aio;
@@ -345,29 +377,24 @@ void qemu_aio_wait_start(void)
 
     if (!aio_initialized)
         qemu_aio_init();
-    sigemptyset(&set);
-    sigaddset(&set, aio_sig_num);
-    sigprocmask(SIG_BLOCK, &set, &wait_oset);
 }
 
 void qemu_aio_wait(void)
 {
-    sigset_t set;
-    int nb_sigs;
+    fd_set check;
 
 #ifndef QEMU_IMG
     if (qemu_bh_poll())
         return;
 #endif
-    sigemptyset(&set);
-    sigaddset(&set, aio_sig_num);
-    sigwait(&set, &nb_sigs);
+    FD_ZERO(&check);
+    FD_SET(aio_sig_pipe[0], &check);
+    select(aio_sig_pipe[0]+1, &check,0,&check, 0);
     qemu_aio_poll();
 }
 
 void qemu_aio_wait_end(void)
 {
-    sigprocmask(SIG_SETMASK, &wait_oset, NULL);
 }
 
 static RawAIOCB *raw_aio_setup(BlockDriverState *bs,
