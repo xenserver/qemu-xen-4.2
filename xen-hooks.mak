@@ -3,7 +3,7 @@ CPPFLAGS+= -I$(XEN_ROOT)/tools/xenstore
 CPPFLAGS+= -I$(XEN_ROOT)/tools/include
 CPPFLAGS+= -I$(XEN_ROOT)/tools/blktap/lib
 
-SSE2 := $(call cc-option,$(CC),-msse2,)
+SSE2 := $(call cc-option,-msse2,)
 ifeq ($(SSE2),-msse2)
 CFLAGS += -DUSE_SSE2=1 -msse2
 endif
