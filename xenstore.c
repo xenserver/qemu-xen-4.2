@@ -92,6 +92,59 @@ static void waitForDevice(char *fn)
     return;
 }
 
+static int any_hdN;
+
+static int parse_drive_name(const char *dev, DriveInfo *out) {
+    /* alway sleaves out->bdrv unchanged */
+    /* on success, returns 0 and fills in out->type, ->bus, ->unit */
+    /* if drive name not understood, returns -1 and *out may be garbage */
+    int ch, max, per_bus;
+
+    /* Change xvdN to look like hdN */
+    if (!any_hdN && !strncmp(dev, "xvd", 3) && strlen(dev) == 4) {
+        ch = dev[3];
+        fprintf(logfile, "Using %s for guest's hd%c\n", dev, ch);
+        out->type = IF_IDE;
+    } else if (!strncmp(dev, "hd", 2) && strlen(dev) == 3) {
+        ch = dev[2];
+        out->type = IF_IDE;
+    } else if (!strncmp(dev, "sd", 2) && strlen(dev) == 3) {
+        ch = dev[2];
+        out->type = IF_SCSI;
+    } else {
+        fprintf(stderr, "qemu: ignoring not-understood drive `%s'\n", dev);
+        return -1;
+    }
+
+    if (out->type == IF_SCSI) {
+        max = MAX_SCSI_DEVS;
+        per_bus = max;
+    } else {
+        max = 4;
+        per_bus = 2;
+    }
+
+    ch = ch - 'a';
+    if (ch >= max) {
+        fprintf(stderr, "qemu: drive `%s' out of range\n", dev);
+        return -1;
+    }
+
+    out->bus = ch / per_bus;
+    out->unit = ch % per_bus;
+    
+    return 0;
+}       
+
+static int drive_name_to_index(const char *name) {
+    DriveInfo tmp;
+    int ret;
+
+    ret = parse_drive_name(name, &tmp);  if (ret) return -1;
+    ret = drive_get_index(tmp.type, tmp.bus, tmp.unit);
+    return ret;
+}
+
 #define DIRECT_PCI_STR_LEN 160
 char direct_pci_str[DIRECT_PCI_STR_LEN];
 void xenstore_parse_domain_config(int hvm_domid)
@@ -100,7 +153,7 @@ void xenstore_parse_domain_config(int hvm_domid)
     char *buf = NULL, *path;
     char *fpath = NULL, *bpath = NULL,
         *dev = NULL, *params = NULL, *type = NULL, *drv = NULL;
-    int i, is_scsi, is_hdN = 0;
+    int i, any_hdN = 0, ret;
     unsigned int len, num, hd_index, pci_devid = 0;
     BlockDriverState *bs;
     BlockDriver *format;
@@ -143,7 +196,7 @@ void xenstore_parse_domain_config(int hvm_domid)
         if (dev == NULL)
             continue;
         if (!strncmp(dev, "hd", 2)) {
-            is_hdN = 1;
+            any_hdN = 1;
             break;
         }
     }
@@ -165,26 +218,13 @@ void xenstore_parse_domain_config(int hvm_domid)
         dev = xs_read(xsh, XBT_NULL, buf, &len);
         if (dev == NULL)
             continue;
-        /* Change xvdN to look like hdN */
-        if (!is_hdN && !strncmp(dev, "xvd", 3)) {
-            fprintf(logfile, "Change xvd%c to look like hd%c\n",
-                    dev[3], dev[3]);
-            memmove(dev, dev+1, strlen(dev));
-            dev[0] = 'h';
-            dev[1] = 'd';
-        }
-        is_scsi = !strncmp(dev, "sd", 2);
-        if ((strncmp(dev, "hd", 2) && !is_scsi) || strlen(dev) != 3 )
-            continue;
-        hd_index = dev[2] - 'a';
 	if (nb_drives >= MAX_DRIVES) {
-	    fprintf(stderr, "qemu: too many drives\n");
+	    fprintf(stderr, "qemu: too many drives, skipping `%s'\n", dev);
 	    continue;
 	}
-        if (hd_index >= (is_scsi ? MAX_SCSI_DEVS : 4)) {
-	    fprintf(stderr, "qemu: drives %s out of range\n", dev);
+	ret = parse_drive_name(dev, &drives_table[nb_drives]);
+	if (ret)
 	    continue;
-	}
         /* read the type of the device */
         if (pasprintf(&buf, "%s/device/vbd/%s/device-type", path, e[i]) == -1)
             continue;
@@ -294,16 +334,6 @@ void xenstore_parse_domain_config(int hvm_domid)
                 fprintf(stderr, "qemu: could not open vbd '%s' or hard disk image '%s' (drv '%s' format '%s')\n", buf, params, drv ? drv : "?", format ? format->format_name : "0");
         }
 
-	assert(nb_drives<MAX_DRIVES);
-	if (is_scsi) {
-	    drives_table[nb_drives].type = IF_SCSI;
-	    drives_table[nb_drives].bus = 0;
-	    drives_table[nb_drives].unit = hd_index;
-	} else {
-	    drives_table[nb_drives].type = IF_IDE;
-	    drives_table[nb_drives].bus = hd_index / 2;
-	    drives_table[nb_drives].unit = hd_index % 2;
-	}
 	drives_table[nb_drives].bdrv = bs;
 	nb_drives++;
 
@@ -384,7 +414,6 @@ void xenstore_parse_domain_config(int hvm_domid)
             }
         }
     }
-
 
  out:
     free(type);
@@ -624,8 +653,19 @@ void xenstore_process_event(void *opaque)
     if (strncmp(vec[XS_WATCH_TOKEN], "hd", 2) ||
         strlen(vec[XS_WATCH_TOKEN]) != 3)
         goto out;
-    hd_index = vec[XS_WATCH_TOKEN][2] - 'a' - 1;
+
+    hd_index = drive_name_to_index(vec[XS_WATCH_TOKEN]);
+    if (hd_index == -1) {
+	fprintf(stderr,"medium change watch on `%s' -"
+		" unknown device, ignored\n", vec[XS_WATCH_TOKEN]);
+	goto out;
+    }
+
     image = xs_read(xsh, XBT_NULL, vec[XS_WATCH_PATH], &len);
+
+    fprintf(stderr,"medium change watch on `%s' (index: %d): %s\n",
+	    vec[XS_WATCH_TOKEN], hd_index, image ? image : "<none>");
+
     if (image == NULL)
         goto out;  /* gone */
 
