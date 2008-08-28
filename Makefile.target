@@ -559,7 +559,7 @@ ifeq ($(TARGET_BASE_ARCH), i386)
 # Hardware support
 ifdef CONFIG_AUDIO
 OBJS+= $(SOUND_HW) pcspk.o
-CPPFLAGS += -DHAS_AUDIO
+CPPFLAGS += -DHAS_AUDIO -DHAS_AUDIO_CHOICE
 endif
 OBJS+= ide.o pckbd.o ps2.o vga.o dma.o
 OBJS+= fdc.o mc146818rtc.o serial.o i8259.o i8254.o pc.o

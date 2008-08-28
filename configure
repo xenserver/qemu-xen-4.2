@@ -1118,14 +1118,6 @@ then
     echo "SDL_LIBS+=-lXext" >> $config_mak
     echo "SDL_LIBS+=-lGL" >> $config_mak
 fi
-if test "$opengl" = "yes"
-then
-    echo "#define CONFIG_OPENGL 1" >> $config_h
-    echo "CONFIG_OPENGL=yes" >> $config_mak
-    echo "SDL_CFLAGS+=-I/usr/include/GL" >> $config_mak
-    echo "SDL_LIBS+=-lXext" >> $config_mak
-    echo "SDL_LIBS+=-lGL" >> $config_mak
-fi
 if test "$cocoa" = "yes" ; then
   echo "#define CONFIG_COCOA 1" >> $config_h
   echo "CONFIG_COCOA=yes" >> $config_mak
