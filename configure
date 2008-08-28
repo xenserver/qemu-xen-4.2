@@ -341,7 +341,9 @@ for opt do
   esac
 done
 
-if [ "$bsd" = "yes" -o "$darwin" = "yes" -o "$mingw32" = "yes" ] ; then
+if [ "$bsd" = "yes" ] ; then
+    AIOLIBS="-lrt"
+elif [ "$darwin" = "yes" -o "$mingw32" = "yes" ] ; then
     AIOLIBS=
 else
     # Some Linux architectures (e.g. s390) don't imply -lpthread automatically.
