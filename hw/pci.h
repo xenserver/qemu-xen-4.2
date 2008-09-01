@@ -55,8 +55,6 @@ struct PCIDevice {
     /* do not access the following fields */
     PCIConfigReadFunc *config_read;
     PCIConfigWriteFunc *config_write;
-    /* ??? This is a PC-specific hack, and should be removed.  */
-    int irq_index;
 
     /* IRQ objects for the INTA-INTD pins.  */
     qemu_irq *irq;

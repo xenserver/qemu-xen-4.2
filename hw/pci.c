@@ -50,7 +50,6 @@ static void pci_update_mappings(PCIDevice *d);
 static void pci_set_irq(void *opaque, int irq_num, int level);
 
 target_phys_addr_t pci_mem_base;
-static int pci_irq_index;
 static PCIBus *first_bus;
 
 static int pcibus_load(QEMUFile *f, void *opaque, int version_id)
@@ -136,9 +135,6 @@ PCIDevice *pci_register_device(PCIBus *bus, const char *name,
 {
     PCIDevice *pci_dev;
 
-    if (pci_irq_index >= PCI_DEVICES_MAX)
-        return NULL;
-
     if (devfn < 0) {
         for(devfn = bus->devfn_min ; devfn < 256; devfn += 8) {
             if ( !bus->devices[devfn] &&
@@ -162,7 +158,6 @@ PCIDevice *pci_register_device(PCIBus *bus, const char *name,
         config_write = pci_default_write_config;
     pci_dev->config_read = config_read;
     pci_dev->config_write = config_write;
-    pci_dev->irq_index = pci_irq_index++;
     bus->devices[devfn] = pci_dev;
     pci_dev->irq = qemu_allocate_irqs(pci_set_irq, pci_dev, 4);
     return pci_dev;
