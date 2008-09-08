@@ -7514,7 +7514,6 @@ enum {
     QEMU_OPTION_smp,
     QEMU_OPTION_vnc,
     QEMU_OPTION_vncunused,
-    QEMU_OPTION_pci,
     QEMU_OPTION_no_acpi,
     QEMU_OPTION_curses,
     QEMU_OPTION_no_reboot,
@@ -7623,7 +7622,6 @@ const QEMUOption qemu_options[] = {
     { "smp", HAS_ARG, QEMU_OPTION_smp },
     { "vnc", HAS_ARG, QEMU_OPTION_vnc },
     { "vncunused", 0, QEMU_OPTION_vncunused },
-    { "pci", HAS_ARG, QEMU_OPTION_pci },
 #ifdef CONFIG_CURSES
     { "curses", 0, QEMU_OPTION_curses },
 #endif
