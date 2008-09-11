@@ -307,7 +307,9 @@ extern void *io_mem_opaque[IO_MEM_NB_ENTRIES];
 
 #include <spinlock.h>
 
-#elif defined(__hppa__)
+#else
+
+#if defined(__hppa__)
 
 typedef int spinlock_t[4];
 
@@ -517,6 +519,8 @@ static inline int spin_trylock(spinlock_t *lock)
 {
     return 1;
 }
+#endif
+
 #endif
 
 extern spinlock_t tb_lock;
