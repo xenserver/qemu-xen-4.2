@@ -31,6 +31,7 @@
 #include "pci.h"
 #include "console.h"
 #include "vga_int.h"
+#include "qemu-xen.h"
 
 #include "exec-all.h"
 

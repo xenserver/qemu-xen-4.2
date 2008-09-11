@@ -28,6 +28,7 @@
 #include "hw.h"
 #include "pci.h"
 #include "qemu-timer.h"
+#include "qemu-xen.h"
 
 struct xs_handle *xsh = NULL;
 static char *media_filename[MAX_DRIVES+1];

@@ -72,4 +72,10 @@ int xenstore_unsubscribe_from_hotplug_status(struct xs_handle *handle,
 int xenstore_vm_write(int domid, char *key, char *val);
 char *xenstore_vm_read(int domid, char *key, unsigned int *len);
 
+/* xenfbfront.c */
+int xenfb_pv_display_init(DisplayState *ds);
+int xenfb_pv_display_start(void *vram_start);
+int xenfb_connect_vkbd(const char *path);
+int xenfb_connect_vfb(const char *path);
+
 #endif /*QEMU_XEN_H*/
