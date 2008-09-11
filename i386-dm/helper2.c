@@ -196,7 +196,7 @@ void cpu_x86_set_a20(CPUX86State *env, int a20_state)
     }
 }
 
-target_ulong cpu_get_phys_page_debug(CPUState *env, target_ulong addr)
+target_phys_addr_t cpu_get_phys_page_debug(CPUState *env, target_ulong addr)
 {
         return addr;
 }
