@@ -22,7 +22,8 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
-#include "vl.h"
+#include "qemu-common.h"
+#include "audio/sys-queue.h"
 #include "block_int.h"
 #include <assert.h>
 #include <xenbus.h>

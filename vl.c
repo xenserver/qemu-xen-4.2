@@ -38,6 +38,7 @@
 #include "qemu-char.h"
 #include "block.h"
 #include "audio/audio.h"
+#include "qemu-xen.h"
 
 #include <unistd.h>
 #include <stdlib.h>
@@ -114,6 +115,7 @@ int inet_aton(const char *cp, struct in_addr *ia);
 #include <mmsystem.h>
 #define getopt_long_only getopt_long
 #define memalign(align, size) malloc(size)
+#define NO_UNIX_SOCKETS 1
 #endif
 
 #include "qemu_socket.h"
@@ -3104,7 +3106,7 @@ static void udp_chr_update_read_handler(CharDriverState *chr)
 }
 
 int parse_host_port(struct sockaddr_in *saddr, const char *str);
-#ifndef _WIN32
+#ifndef NO_UNIX_SOCKETS
 static int parse_unix_path(struct sockaddr_un *uaddr, const char *str);
 #endif
 int parse_host_src_port(struct sockaddr_in *haddr,
@@ -3312,7 +3314,7 @@ static void tcp_chr_accept(void *opaque)
     CharDriverState *chr = opaque;
     TCPCharDriver *s = chr->opaque;
     struct sockaddr_in saddr;
-#ifndef _WIN32
+#ifndef NO_UNIX_SOCKETS
     struct sockaddr_un uaddr;
 #endif
     struct sockaddr *addr;
@@ -3320,7 +3322,7 @@ static void tcp_chr_accept(void *opaque)
     int fd;
 
     for(;;) {
-#ifndef _WIN32
+#ifndef NO_UNIX_SOCKETS
 	if (s->is_unix) {
 	    len = sizeof(uaddr);
 	    addr = (struct sockaddr *)&uaddr;
@@ -3369,13 +3371,13 @@ static CharDriverState *qemu_chr_open_tcp(const char *host_str,
     int do_nodelay = 0;
     const char *ptr;
     struct sockaddr_in saddr;
-#ifndef _WIN32
+#ifndef NO_UNIX_SOCKETS
     struct sockaddr_un uaddr;
 #endif
     struct sockaddr *addr;
     socklen_t addrlen;
 
-#ifndef _WIN32
+#ifndef NO_UNIX_SOCKETS
     if (is_unix) {
 	addr = (struct sockaddr *)&uaddr;
 	addrlen = sizeof(uaddr);
@@ -3414,7 +3416,7 @@ static CharDriverState *qemu_chr_open_tcp(const char *host_str,
     if (!s)
         goto fail;
 
-#ifndef _WIN32
+#ifndef NO_UNIX_SOCKETS
     if (is_unix)
 	fd = socket(PF_UNIX, SOCK_STREAM, 0);
     else
@@ -3439,7 +3441,7 @@ static CharDriverState *qemu_chr_open_tcp(const char *host_str,
 
     if (is_listen) {
         /* allow fast reuse */
-#ifndef _WIN32
+#ifndef NO_UNIX_SOCKETS
 	if (is_unix) {
 	    char path[109];
 	    strncpy(path, uaddr.sun_path, 108);
@@ -4270,7 +4272,7 @@ static int tap_open(char *ifname, int ifname_size)
     fcntl(fd, F_SETFL, O_NONBLOCK);
     return fd;
 }
-#else
+#elif defined(__linux__)
 static int tap_open(char *ifname, int ifname_size)
 {
     struct ifreq ifr;
@@ -8699,7 +8701,17 @@ int main(int argc, char **argv)
     bdrv_init();
 
     xc_handle = xc_interface_open();
+#ifdef CONFIG_STUBDOM
+    {
+        char *domid_s, *msg;
+        if ((msg = xenbus_read(XBT_NIL, "domid", &domid_s)))
+            fprintf(stderr,"Can not read our own domid: %s\n", msg);
+        else
+            xenstore_parse_domain_config(atoi(domid_s));
+    }
+#else
     xenstore_parse_domain_config(domid);
+#endif /* CONFIG_STUBDOM */
 
     /* we always create the cdrom drive, even if no disk is there */
 
@@ -8729,6 +8741,10 @@ int main(int argc, char **argv)
 
     /* terminal init */
     memset(&display_state, 0, sizeof(display_state));
+#ifdef CONFIG_STUBDOM
+    if (xenfb_pv_display_init(ds) == 0) {
+    } else
+#endif
     if (nographic) {
         if (curses) {
             fprintf(stderr, "fatal: -nographic can't be used with -curses\n");

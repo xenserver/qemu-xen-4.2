@@ -88,3 +88,20 @@ void do_loadvm(const char *name)
 struct qemu_alarm_timer;
 static int unix_start_timer(struct qemu_alarm_timer *t) { return 0; }
 static void unix_stop_timer(struct qemu_alarm_timer *t) { }
+
+#ifdef CONFIG_STUBDOM
+#include <netfront.h>
+static int tap_open(char *ifname, int ifname_size)
+{
+    char nodename[64];
+    static int num = 1; // 0 is for our own TCP/IP networking
+    snprintf(nodename, sizeof(nodename), "device/vif/%d", num++);
+    return netfront_tap_open(nodename);
+}
+
+#undef DEFAULT_NETWORK_SCRIPT
+#define DEFAULT_NETWORK_SCRIPT ""
+#undef DEFAULT_NETWORK_DOWN_SCRIPT
+#define DEFAULT_NETWORK_DOWN_SCRIPT ""
+#endif
+

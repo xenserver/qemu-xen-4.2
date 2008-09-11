@@ -36,7 +36,7 @@ do { fprintf(stderr, "scsi-disk: " fmt , ##args); } while (0)
 
 #ifdef CONFIG_STUBDOM
 #include <xen/io/blkif.h>
-#define SCSI_DMA_BUF_SIZE    (BLKIF_MAX_SEGMENTS_PER_REQUEST * TARGET_PAGE_SIZE)
+#define SCSI_DMA_BUF_SIZE    ((BLKIF_MAX_SEGMENTS_PER_REQUEST - 1) * PAGE_SIZE)
 #else
 #define SCSI_DMA_BUF_SIZE    131072
 #endif

@@ -4,10 +4,11 @@
 #include <semaphore.h>
 #include <sched.h>
 #include <fbfront.h>
+#include <hw/hw.h>
+#include <hw/pc.h>
+#include <console.h>
 
 #include <hw/xenfb.h>
-
-#include "vl.h"
 
 typedef struct XenFBState {
     struct semaphore kbd_sem;
@@ -70,6 +71,7 @@ static void xenfb_pv_resize_shared(DisplayState *ds, int w, int h, int depth, in
     if (ds->shared_buf) {
         offset = pixels - xs->vga_vram;
         ds->data = pixels;
+        fbfront_resize(fb_dev, ds->width, ds->height, ds->linesize, ds->depth, offset);
     } else {
         ds->data = xs->nonshared_vram;
         fbfront_resize(fb_dev, w, h, linesize, ds->depth, VGA_RAM_SIZE);

@@ -305,8 +305,7 @@ void xenstore_parse_domain_config(int hvm_domid)
             continue;
 	if (bdrv_open2(bs, buf, 0 /* snapshot */, &bdrv_vbd) == 0) {
 	    pstrcpy(bs->filename, sizeof(bs->filename), params);
-	    continue;
-	}
+	} else
 #endif
 
         if (params[0]) {

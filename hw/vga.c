@@ -27,6 +27,9 @@
 #include "pci.h"
 #include "vga_int.h"
 #include <sys/mman.h>
+#include "sysemu.h"
+#include "qemu-xen.h"
+#include "exec-all.h"
 
 //#define DEBUG_VGA
 //#define DEBUG_VGA_MEM
