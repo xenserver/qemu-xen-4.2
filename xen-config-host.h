@@ -1,3 +1,9 @@
+#ifdef __MINIOS__
+#define CONFIG_STUBDOM
+#define NO_AIO 1
+#define NO_UNIX_SOCKETS 1
+#endif
+
 extern char domain_name[64];
 extern int domid;
 
@@ -11,7 +17,9 @@ extern int domid;
 
 #include "xenctrl.h"
 #include "xs.h"
+#ifndef CONFIG_STUBDOM
 #include "blktaplib.h"
+#endif
 
 #ifndef XEN_CONFIG_HOST_BOOL_WAS_DEFINED
 # undef bool
@@ -32,6 +40,9 @@ extern int vcpus;
 
 void xenstore_parse_domain_config(int domid);
 void xenstore_read_vncpasswd(int domid, char *pwbuf, size_t pwbuflen);
+#ifdef CONFIG_STUBDOM
+extern struct BlockDriver bdrv_vbd;
+#endif
 struct CharDriverState;
 void xenstore_store_serial_port_info(int i, struct CharDriverState *chr,
 				     const char *devname);
