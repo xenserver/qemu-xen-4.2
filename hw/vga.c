@@ -2074,7 +2074,8 @@ void xen_vga_vram_map(uint64_t vram_addr, int copy)
                                         pfn_list, nr_pfn);
 
     if (!vram) {
-        fprintf(stderr, "Failed to map vram\n");
+        fprintf(stderr, "Failed to map vram nr_pfn=%lu vram_addr=%lx: %s\n",
+                nr_pfn, (unsigned long)vram_addr, strerror(errno));
         exit(1);
     }
 
