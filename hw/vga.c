@@ -2023,7 +2023,8 @@ void xen_vga_populate_vram(uint64_t vram_addr)
     int i;
     int rc;
 
-    fprintf(logfile, "populating video RAM at %lx\n", vram_addr);
+    fprintf(logfile, "populating video RAM at %llx\n",
+	    (unsigned long long)vram_addr);
 
     nr_pfn = VGA_RAM_SIZE >> TARGET_PAGE_BITS;
 
@@ -2060,7 +2061,8 @@ void xen_vga_vram_map(uint64_t vram_addr, int copy)
     int i;
     void *vram;
 
-    fprintf(logfile, "mapping video RAM from %lx\n", vram_addr);
+    fprintf(logfile, "mapping video RAM from %llx\n",
+	    (unsigned long long)vram_addr);
 
     nr_pfn = VGA_RAM_SIZE >> TARGET_PAGE_BITS;
 
@@ -2074,8 +2076,8 @@ void xen_vga_vram_map(uint64_t vram_addr, int copy)
                                         pfn_list, nr_pfn);
 
     if (!vram) {
-        fprintf(stderr, "Failed to map vram nr_pfn=%lu vram_addr=%lx: %s\n",
-                nr_pfn, (unsigned long)vram_addr, strerror(errno));
+        fprintf(stderr, "Failed to map vram nr_pfn=0x%lx vram_addr=%llx: %s\n",
+                nr_pfn, (unsigned long long)vram_addr, strerror(errno));
         exit(1);
     }
 
@@ -2104,7 +2106,8 @@ void xen_vga_vram_map(uint64_t vram_addr, int copy)
 /* Called at boot time when the BIOS has allocated video RAM */
 void xen_vga_stolen_vram_addr(uint64_t stolen_vram_addr)
 {
-    fprintf(logfile, "stolen video RAM at %lx\n", stolen_vram_addr);
+    fprintf(logfile, "stolen video RAM at %llx\n",
+	    (unsigned long long)stolen_vram_addr);
 
     xen_vga_state->stolen_vram_addr = stolen_vram_addr;
 
