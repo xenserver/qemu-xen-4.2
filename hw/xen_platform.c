@@ -26,6 +26,7 @@
 #include "hw.h"
 #include "pci.h"
 #include "irq.h"
+#include "qemu-xen.h"
 
 #include <xenguest.h>
 
