@@ -29,6 +29,7 @@
 #include <xenbus.h>
 #include <blkfront.h>
 #include <malloc.h>
+#include "qemu-char.h"
 
 #define SECTOR_SIZE 512
 

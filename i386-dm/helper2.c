@@ -43,6 +43,7 @@
 #include <inttypes.h>
 #include <signal.h>
 #include <assert.h>
+#include <sys/select.h>
 
 #include <limits.h>
 #include <fcntl.h>
