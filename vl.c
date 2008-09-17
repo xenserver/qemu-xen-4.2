@@ -70,7 +70,7 @@
 #elif defined (__GLIBC__) && defined (__FreeBSD_kernel__)
 #include <freebsd/stdlib.h>
 #else
-#ifndef __sun__
+#ifdef __linux__
 #include <linux/if.h>
 #include <linux/if_tun.h>
 #include <pty.h>
@@ -84,7 +84,8 @@
 
 #include <linux/ppdev.h>
 #include <linux/parport.h>
-#else
+#endif
+#ifdef __sun__
 #include <sys/stat.h>
 #include <sys/ethernet.h>
 #include <sys/sockio.h>
@@ -1585,7 +1586,7 @@ static void win32_rearm_timer(struct qemu_alarm_timer *t)
 
 static void init_timer_alarm(void)
 {
-    struct qemu_alarm_timer *t;
+    struct qemu_alarm_timer *t = NULL;
     int i, err = -1;
 
     for (i = 0; alarm_timers[i].name; i++) {
