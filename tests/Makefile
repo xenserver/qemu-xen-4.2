@@ -1,3 +1,4 @@
+QEMU_ROOT ?= ..
 -include ../config-host.mak
 
 CFLAGS=-Wall -O2 -g -fno-strict-aliasing
