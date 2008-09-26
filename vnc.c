@@ -366,6 +366,13 @@ static void vnc_framebuffer_update(VncState *vs, int x, int y, int w, int h,
     vnc_write_s32(vs, encoding);
 }
 
+static int mult_overflows(int x, int y)
+{
+    if (x<=0 || y<=0 || x>=INT_MAX/y)
+        return 1;
+    else return 0;
+}
+
 static void vnc_dpy_resize_shared(DisplayState *ds, int w, int h, int depth, int linesize, void *pixels)
 {
     static int allocated;
@@ -373,6 +380,11 @@ static void vnc_dpy_resize_shared(DisplayState *ds, int w, int h, int depth, int
     VncState *vs = ds->opaque;
     int o;
 
+    if (mult_overflows(w, h) || mult_overflows(w*h, vs->depth) ||
+        mult_overflows(h, sizeof(vs->dirty_row[0]))) {
+        fprintf(stderr, "vnc: suspicious vnc_dpy_resize arguments, exiting\n");
+        exit(1);
+    }
     vnc_colourdepth(ds, depth);
     if (!ds->shared_buf) {
         ds->linesize = w * vs->depth;

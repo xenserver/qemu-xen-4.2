@@ -511,7 +511,7 @@ static int xenfb_configure_fb(struct xenfb *xenfb, size_t fb_len_lim,
 			depth);
 		return -1;
 	}
-	if (row_stride < 0 || row_stride > fb_len) {
+	if (row_stride <= 0 || row_stride > fb_len) {
 		fprintf(stderr,
 			"FB: invalid frontend stride %d\n", row_stride);
 		return -1;
