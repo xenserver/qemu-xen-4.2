@@ -380,12 +380,14 @@ static void vnc_dpy_resize_shared(DisplayState *ds, int w, int h, int depth, int
     VncState *vs = ds->opaque;
     int o;
 
+    vnc_colourdepth(ds, depth);
     if (mult_overflows(w, h) || mult_overflows(w*h, vs->depth) ||
         mult_overflows(h, sizeof(vs->dirty_row[0]))) {
-        fprintf(stderr, "vnc: suspicious vnc_dpy_resize arguments, exiting\n");
+        fprintf(stderr, "vnc: suspicious vnc_dpy_resize arguments"
+		" (w=%d h=%d depth=%d linesize=%d vs->depth=%d), exiting\n",
+		w, h, depth, linesize, vs->depth);
         exit(1);
     }
-    vnc_colourdepth(ds, depth);
     if (!ds->shared_buf) {
         ds->linesize = w * vs->depth;
         if (allocated)
