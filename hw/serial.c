@@ -311,6 +311,11 @@ static void serial_get_token(void)
 		;
 	    goto retry;
 	}
+        if (delta.tv_sec >= 2) {
+            /* avoid arithmetic overflow if it has been ages */
+            delta.tv_sec = 2;
+            delta.tv_nsec = 0;
+        }
 	generated = (delta.tv_sec * 1000000000) / TOKEN_PERIOD;
 	generated +=
 	    ((delta.tv_sec * 1000000000) % TOKEN_PERIOD + delta.tv_nsec) / TOKEN_PERIOD;
