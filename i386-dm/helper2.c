@@ -84,6 +84,14 @@ int xc_handle = -1;
 char domain_name[64] = "Xen-no-name";
 int domid;
 
+int domid_backend = 0;
+  /* 0 for now.  If we ever have non-dom0 backend domains, this
+   * will have to be the domid of the real backend domain.
+   * For stubdom, this is the domain of the _real_ backend
+   * not of the stubdom.  So still 0 unless we're in a driver
+   * domain case.
+   */
+
 long time_offset = 0;
 
 shared_iopage_t *shared_page = NULL;

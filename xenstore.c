@@ -146,21 +146,153 @@ static int drive_name_to_index(const char *name) {
     return ret;
 }
 
+static void xenstore_get_backend_path(char **backend, const char *devtype,
+				      const char *frontend_dompath,
+				      int frontend_domid,
+				      const char *inst_danger) {
+    /* On entry: *backend will be passed to free()
+     * On succcess: *backend will be from malloc
+     * On failure: *backend==0
+     */
+    char *bpath=0;
+    char *frontend_path=0;
+    char *backend_dompath=0;
+    char *expected_backend=0;
+    char *frontend_backend_path=0;
+    char *backend_frontend_path=0;
+    char *frontend_doublecheck=0;
+    int len;
+    const char *frontend_idpath_slash;
+
+    /* clear out return value for if we error out */
+    free(*backend);
+    *backend = 0;
+
+    if (strchr(inst_danger,'/')) {
+        fprintf(logfile, "xenstore_get_backend_path inst_danger has slash"
+                " which is forbidden (devtype %s)\n", devtype);
+	goto out;
+    }
+
+    if (pasprintf(&frontend_path, "%s/device/%s/%s",
+                  frontend_dompath, devtype, inst_danger)
+        == -1) goto out;
+
+    if (pasprintf(&frontend_backend_path, "%s/backend",
+                  frontend_path)
+        == -1) goto out;
+
+    bpath = xs_read(xsh, XBT_NULL, frontend_backend_path, &len);
+
+    /* now we must check that the backend is intended for use
+     * by this frontend, since the frontend's /backend xenstore node
+     * is writeable by the untrustworthy guest. */
+
+    backend_dompath = xs_get_domain_path(xsh, domid_backend);
+    if (!backend_dompath) goto out;
+    
+    if (pasprintf(&expected_backend, "%s/backend/%s/%lu/%s",
+                  backend_dompath, devtype, frontend_domid, inst_danger)
+        == -1) goto out;
+
+    if (strcmp(bpath, expected_backend)) {
+        fprintf(stderr, "frontend `%s' expected backend `%s' got `%s',"
+                " ignoring\n", frontend_path, expected_backend, bpath);
+        errno = EINVAL;
+        goto out;
+    }
+
+    if (pasprintf(&backend_frontend_path, "%s/frontend", bpath)
+        == -1) goto out;
+
+    frontend_doublecheck = xs_read(xsh, XBT_NULL, backend_frontend_path, &len);
+
+    if (strcmp(frontend_doublecheck, frontend_path)) {
+        fprintf(stderr, "frontend `%s' backend `%s' points to other frontend"
+                " `%s', ignoring\n", frontend_path, bpath, frontend_doublecheck);
+        errno = EINVAL;
+        goto out;
+    }
+
+    /* steal bpath */
+    *backend = bpath;
+    bpath = 0;
+
+ out:
+    free(bpath);
+    free(frontend_path);
+    free(backend_dompath);
+    free(expected_backend);
+    free(frontend_backend_path);
+    free(backend_frontend_path);
+    free(frontend_doublecheck);
+}
+
+const char *xenstore_get_guest_uuid(void) {
+#ifdef CONFIG_STUBDOM
+    return 0;
+#else
+
+    static char *already_computed;
+
+    xc_domaininfo_t info;
+    int xch = -1, r, i;
+    char *p;
+
+    if (already_computed)
+        return already_computed;
+
+    xch = xc_interface_open();
+    if (xch == -1) {
+        fprintf(logfile, "cannot get uuid - xc_interface_open() failed: %s\n",
+                strerror(errno));
+        goto out;
+    }
+    r = xc_domain_getinfolist(xch, domid, 1, &info);
+    if (r != 1) {
+        fprintf(logfile, "cannot get uuid - xc_domain_getinfolist() failed:"
+                " %s\n", strerror(errno));
+        goto out;
+    }
+    already_computed = malloc(37);
+    for (i = 0, p = already_computed; i < 16; i++, p += 2) {
+        if (i==4 || i==6 || i==8 || i==10)
+            *p++ = '-';
+        sprintf(p, "%02x", info.handle[i]);
+    }
+    close(xch);
+    return already_computed;
+
+ out:
+    if (xch != -1)
+        close(xch);
+    
+    return 0;
+#endif
+}
+
 #define DIRECT_PCI_STR_LEN 160
 char direct_pci_str[DIRECT_PCI_STR_LEN];
 void xenstore_parse_domain_config(int hvm_domid)
 {
-    char **e = NULL;
-    char *buf = NULL, *path;
+    char **e_danger = NULL;
+    char *buf = NULL;
     char *fpath = NULL, *bpath = NULL,
-        *dev = NULL, *params = NULL, *type = NULL, *drv = NULL;
+        *dev = NULL, *params = NULL, *drv = NULL;
     int i, any_hdN = 0, ret;
     unsigned int len, num, hd_index, pci_devid = 0;
     BlockDriverState *bs;
     BlockDriver *format;
 
+    /* paths controlled by untrustworthy guest, and values read from them */
+    char *danger_path;
+    char *danger_buf = NULL;
+    char *danger_type = NULL;
+
     for(i = 0; i < MAX_DRIVES + 1; i++)
         media_filename[i] = NULL;
+
+    xenstore_get_guest_uuid();
 
     xsh = xs_daemon_open();
     if (xsh == NULL) {
@@ -168,27 +300,25 @@ void xenstore_parse_domain_config(int hvm_domid)
         return;
     }
 
-    path = xs_get_domain_path(xsh, hvm_domid);
-    if (path == NULL) {
+    danger_path = xs_get_domain_path(xsh, hvm_domid);
+    if (danger_path == NULL) {
         fprintf(logfile, "xs_get_domain_path() error\n");
         goto out;
     }
 
-    if (pasprintf(&buf, "%s/device/vbd", path) == -1)
+    if (pasprintf(&danger_buf, "%s/device/vbd", danger_path) == -1)
         goto out;
 
-    e = xs_directory(xsh, XBT_NULL, buf, &num);
-    if (e == NULL)
+    e_danger = xs_directory(xsh, XBT_NULL, danger_buf, &num);
+    if (e_danger == NULL)
         num = 0;
 
     for (i = 0; i < num; i++) {
         /* read the backend path */
-        if (pasprintf(&buf, "%s/device/vbd/%s/backend", path, e[i]) == -1)
-            continue;
-        free(bpath);
-        bpath = xs_read(xsh, XBT_NULL, buf, &len);
+        xenstore_get_backend_path(&bpath, "vbd", danger_path, hvm_domid,
+				  e_danger[i]);
         if (bpath == NULL)
-            continue;
+            continue;    
         /* read the name of the device */
         if (pasprintf(&buf, "%s/dev", bpath) == -1)
             continue;
@@ -204,12 +334,8 @@ void xenstore_parse_domain_config(int hvm_domid)
         
     for (i = 0; i < num; i++) {
 	format = NULL; /* don't know what the format is yet */
-
         /* read the backend path */
-        if (pasprintf(&buf, "%s/device/vbd/%s/backend", path, e[i]) == -1)
-            continue;
-        free(bpath);
-        bpath = xs_read(xsh, XBT_NULL, buf, &len);
+        xenstore_get_backend_path(&bpath, "vbd", danger_path, hvm_domid, e_danger[i]);
         if (bpath == NULL)
             continue;
         /* read the name of the device */
@@ -227,10 +353,11 @@ void xenstore_parse_domain_config(int hvm_domid)
 	if (ret)
 	    continue;
         /* read the type of the device */
-        if (pasprintf(&buf, "%s/device/vbd/%s/device-type", path, e[i]) == -1)
+        if (pasprintf(&danger_buf, "%s/device/vbd/%s/device-type",
+                      danger_path, e_danger[i]) == -1)
             continue;
-        free(type);
-        type = xs_read(xsh, XBT_NULL, buf, &len);
+        free(danger_type);
+        danger_type = xs_read(xsh, XBT_NULL, danger_buf, &len);
         if (pasprintf(&buf, "%s/params", bpath) == -1)
             continue;
         free(params);
@@ -268,21 +395,29 @@ void xenstore_parse_domain_config(int hvm_domid)
 	    format = &bdrv_raw;
         }
 
+#if 0
+	/* Phantom VBDs are disabled because the use of paths
+	 * from guest-controlled areas in xenstore is unsafe.
+	 * Hopefully if they are really needed for something
+	 * someone will shout and then we will find out what for.
+	 */
         /* 
          * check if device has a phantom vbd; the phantom is hooked
          * to the frontend device (for ease of cleanup), so lookup 
          * the frontend device, and see if there is a phantom_vbd
          * if there is, we will use resolution as the filename
          */
-        if (pasprintf(&buf, "%s/device/vbd/%s/phantom_vbd", path, e[i]) == -1)
+        if (pasprintf(&danger_buf, "%s/device/vbd/%s/phantom_vbd", path, e_danger[i]) == -1)
             continue;
-        free(fpath);
-        fpath = xs_read(xsh, XBT_NULL, buf, &len);
-        if (fpath) {
-            if (pasprintf(&buf, "%s/dev", fpath) == -1)
+        free(danger_fpath);
+        danger_fpath = xs_read(xsh, XBT_NULL, danger_buf, &len);
+        if (danger_fpath) {
+            if (pasprintf(&danger_buf, "%s/dev", danger_fpath) == -1)
                 continue;
             free(params);
-            params = xs_read(xsh, XBT_NULL, buf , &len);
+	    params_danger = xs_read(xsh, XBT_NULL, danger_buf , &len);
+            DANGER DANGER params is supposedly trustworthy but here
+	                  we read it from untrusted part of xenstore
             if (params) {
                 /* 
                  * wait for device, on timeout silently fail because we will 
@@ -291,10 +426,11 @@ void xenstore_parse_domain_config(int hvm_domid)
                 waitForDevice(params);
             }
         }
+#endif
 
         bs = bdrv_new(dev);
         /* check if it is a cdrom */
-        if (type && !strcmp(type, "cdrom")) {
+        if (danger_type && !strcmp(danger_type, "cdrom")) {
             bdrv_set_type_hint(bs, BDRV_TYPE_CDROM);
             if (pasprintf(&buf, "%s/params", bpath) != -1)
                 xs_watch(xsh, buf, dev);
@@ -302,9 +438,9 @@ void xenstore_parse_domain_config(int hvm_domid)
 
         /* open device now if media present */
 #ifdef CONFIG_STUBDOM
-        if (pasprintf(&buf, "%s/device/vbd/%s", path, e[i]) == -1)
+        if (pasprintf(&danger_buf, "%s/device/vbd/%s", danger_path, e_danger[i]) == -1)
             continue;
-	if (bdrv_open2(bs, buf, 0 /* snapshot */, &bdrv_vbd) == 0) {
+	if (bdrv_open2(bs, danger_buf, 0 /* snapshot */, &bdrv_vbd) == 0) {
 	    pstrcpy(bs->filename, sizeof(bs->filename), params);
 	} else
 #endif
@@ -340,31 +476,31 @@ void xenstore_parse_domain_config(int hvm_domid)
     }
 
 #ifdef CONFIG_STUBDOM
-    if (pasprintf(&buf, "%s/device/vkbd", path) == -1)
+    if (pasprintf(&danger_buf, "%s/device/vkbd", danger_path) == -1)
         goto out;
 
-    free(e);
-    e = xs_directory(xsh, XBT_NULL, buf, &num);
+    free(e_danger);
+    e_danger = xs_directory(xsh, XBT_NULL, danger_buf, &num);
 
-    if (e) {
+    if (e_danger) {
         for (i = 0; i < num; i++) {
-            if (pasprintf(&buf, "%s/device/vkbd/%s", path, e[i]) == -1)
+            if (pasprintf(&danger_buf, "%s/device/vkbd/%s", danger_path, e_danger[i]) == -1)
                 continue;
-            xenfb_connect_vkbd(buf);
+            xenfb_connect_vkbd(danger_buf);
         }
     }
 
-    if (pasprintf(&buf, "%s/device/vfb", path) == -1)
+    if (pasprintf(&danger_buf, "%s/device/vfb", danger_path) == -1)
         goto out;
 
-    free(e);
-    e = xs_directory(xsh, XBT_NULL, buf, &num);
+    free(e_danger);
+    e_danger = xs_directory(xsh, XBT_NULL, danger_buf, &num);
 
-    if (e) {
+    if (e_danger) {
         for (i = 0; i < num; i++) {
-            if (pasprintf(&buf, "%s/device/vfb/%s", path, e[i]) == -1)
+            if (pasprintf(&danger_buf, "%s/device/vfb/%s", danger_path, e_danger[i]) == -1)
                 continue;
-            xenfb_connect_vfb(buf);
+            xenfb_connect_vfb(danger_buf);
         }
     }
 #endif
@@ -416,13 +552,14 @@ void xenstore_parse_domain_config(int hvm_domid)
     }
 
  out:
-    free(type);
+    free(danger_type);
     free(params);
     free(dev);
     free(bpath);
     free(buf);
-    free(path);
-    free(e);
+    free(danger_buf);
+    free(danger_path);
+    free(e_danger);
     free(drv);
     return;
 }
@@ -804,7 +941,7 @@ void xenstore_read_vncpasswd(int domid, char *pwbuf, size_t pwbuflen)
 /*
  * get all device instances of a certain type
  */
-char **xenstore_domain_get_devices(struct xs_handle *handle,
+char **xenstore_domain_get_devices_danger(struct xs_handle *handle,
                                    const char *devtype, unsigned int *num)
 {
     char *path;
@@ -829,11 +966,12 @@ char **xenstore_domain_get_devices(struct xs_handle *handle,
 /*
  * Check whether a domain has devices of the given type
  */
-int xenstore_domain_has_devtype(struct xs_handle *handle, const char *devtype)
+int xenstore_domain_has_devtype_danger(struct xs_handle *handle,
+                                    const char *devtype)
 {
     int rc = 0;
     unsigned int num;
-    char **e = xenstore_domain_get_devices(handle, devtype, &num);
+    char **e = xenstore_domain_get_devices_danger(handle, devtype, &num);
     if (e)
         rc = 1;
     free(e);
@@ -844,14 +982,22 @@ int xenstore_domain_has_devtype(struct xs_handle *handle, const char *devtype)
  * Function that creates a path to a variable of an instance of a
  * certain device
  */
-static char *get_device_variable_path(const char *devtype, const char *inst,
+static char *get_device_variable_path(const char *devtype,
+                                      const char *inst_danger,
                                       const char *var)
 {
     char *buf = NULL;
-    if (pasprintf(&buf, "/local/domain/0/backend/%s/%d/%s/%s",
+    if (strchr(inst_danger,'/')) {
+        fprintf(logfile, "get_device_variable_path inst_danger has slash"
+                " which is forbidden (devtype %s)\n", devtype);
+        return NULL;
+    }
+
+    if (pasprintf(&buf, "/local/domain/%d/backend/%s/%d/%s/%s",
+                  domid_backend,
                   devtype,
                   domid,
-                  inst,
+                  inst_danger /* safe now */,
                   var) == -1) {
         free(buf);
         buf = NULL;
@@ -860,14 +1006,15 @@ static char *get_device_variable_path(const char *devtype, const char *inst,
 }
 
 char *xenstore_backend_read_variable(struct xs_handle *handle,
-                                     const char *devtype, const char *inst,
+                                     const char *devtype,
+                                     const char *inst_danger,
                                      const char *var)
 {
     char *value = NULL;
     char *buf = NULL;
     unsigned int len;
 
-    buf = get_device_variable_path(devtype, inst, var);
+    buf = get_device_variable_path(devtype, inst_danger, var);
     if (NULL == buf)
         goto out;
 
@@ -884,9 +1031,10 @@ char *xenstore_backend_read_variable(struct xs_handle *handle,
   of device and its instance.
 */
 char *xenstore_read_hotplug_status(struct xs_handle *handle,
-                                   const char *devtype, const char *inst)
+                                   const char *devtype,
+                                   const char *inst_danger)
 {
-    return xenstore_backend_read_variable(handle, devtype, inst,
+    return xenstore_backend_read_variable(handle, devtype, inst_danger,
                                           "hotplug-status");
 }
 
@@ -897,11 +1045,11 @@ char *xenstore_read_hotplug_status(struct xs_handle *handle,
  */
 int xenstore_subscribe_to_hotplug_status(struct xs_handle *handle,
                                          const char *devtype,
-                                         const char *inst,
+                                         const char *inst_danger,
                                          const char *token)
 {
     int rc = 0;
-    char *path = get_device_variable_path(devtype, inst, "hotplug-status");
+    char *path = get_device_variable_path(devtype, inst_danger, "hotplug-status");
 
     if (path == NULL)
         return -1;
@@ -920,12 +1068,12 @@ int xenstore_subscribe_to_hotplug_status(struct xs_handle *handle,
  */
 int xenstore_unsubscribe_from_hotplug_status(struct xs_handle *handle,
                                              const char *devtype,
-                                             const char *inst,
+                                             const char *inst_danger,
                                              const char *token)
 {
     int rc = 0;
     char *path;
-    path = get_device_variable_path(devtype, inst, "hotplug-status");
+    path = get_device_variable_path(devtype, inst_danger, "hotplug-status");
     if (path == NULL)
         return -1;
 
@@ -937,72 +1085,53 @@ int xenstore_unsubscribe_from_hotplug_status(struct xs_handle *handle,
     return rc;
 }
 
+static char *xenstore_vm_key_path(int domid, char *key) {
+    const char *uuid;
+    char *buf = NULL;
+    
+    if (xsh == NULL)
+        return NULL;
+
+    uuid = xenstore_get_guest_uuid();
+    if (!uuid) return NULL;
+
+    if (pasprintf(&buf, "/vm/%s/%s", uuid, key) == -1)
+        return NULL;
+    return buf;
+}
+
 char *xenstore_vm_read(int domid, char *key, unsigned int *len)
 {
-    char *buf = NULL, *path = NULL, *value = NULL;
+    char *path = NULL, *value = NULL;
 
-    if (xsh == NULL)
-        goto out;
+    path = xenstore_vm_key_path(domid, key);
 
-    path = xs_get_domain_path(xsh, domid);
-    if (path == NULL) {
-        fprintf(logfile, "xs_get_domain_path(%d): error\n", domid);
-        goto out;
-    }
-
-    pasprintf(&buf, "%s/vm", path);
-    free(path);
-    path = xs_read(xsh, XBT_NULL, buf, NULL);
-    if (path == NULL) {
-        fprintf(logfile, "xs_read(%s): read error\n", buf);
-        goto out;
-    }
-
-    pasprintf(&buf, "%s/%s", path, key);
-    value = xs_read(xsh, XBT_NULL, buf, len);
+    value = xs_read(xsh, XBT_NULL, path, len);
     if (value == NULL) {
-        fprintf(logfile, "xs_read(%s): read error\n", buf);
+        fprintf(logfile, "xs_read(%s): read error\n", path);
         goto out;
     }
 
  out:
     free(path);
-    free(buf);
     return value;
 }
 
 int xenstore_vm_write(int domid, char *key, char *value)
 {
-    char *buf = NULL, *path = NULL;
+    char *path = NULL;
     int rc = -1;
 
-    if (xsh == NULL)
-        goto out;
+    path = xenstore_vm_key_path(domid, key);
 
-    path = xs_get_domain_path(xsh, domid);
-    if (path == NULL) {
-        fprintf(logfile, "xs_get_domain_path: error\n");
-        goto out;
-    }
-
-    pasprintf(&buf, "%s/vm", path);
-    free(path);
-    path = xs_read(xsh, XBT_NULL, buf, NULL);
-    if (path == NULL) {
-        fprintf(logfile, "xs_read(%s): read error\n", buf);
-        goto out;
-    }
-
-    pasprintf(&buf, "%s/%s", path, key);
-    rc = xs_write(xsh, XBT_NULL, buf, value, strlen(value));
+    rc = xs_write(xsh, XBT_NULL, path, value, strlen(value));
     if (rc == 0) {
-        fprintf(logfile, "xs_write(%s, %s): write error\n", buf, key);
+        fprintf(logfile, "xs_write(%s, %s): write error\n", path, key);
         goto out;
     }
 
  out:
     free(path);
-    free(buf);
     return rc;
 }
 

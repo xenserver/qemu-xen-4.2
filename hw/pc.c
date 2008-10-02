@@ -1050,7 +1050,7 @@ static void pc_init1(ram_addr_t ram_size, int vga_ram_size,
     }
 
 #ifdef HAS_TPM
-    if (has_tpm_device())
+    if (has_tpm_device_danger())
         tpm_tis_init(&i8259[11]);
 #endif
 

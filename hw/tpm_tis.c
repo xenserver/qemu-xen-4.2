@@ -1052,12 +1052,12 @@ static int TPM_Receive(tpmState *s, tpmBuffer *buffer)
    Helper functions for reading data from the xenstore such as
    reading virtual TPM instance information
  ****************************************************************************/
-int has_tpm_device(void)
+int has_tpm_device_danger(void)
 {
     int ret = 0;
     struct xs_handle *handle = xs_daemon_open();
     if (handle) {
-        ret = xenstore_domain_has_devtype(handle, "vtpm");
+        ret = xenstore_domain_has_devtype_danger(handle, "vtpm");
         xs_daemon_close(handle);
     }
     return ret;
@@ -1083,10 +1083,11 @@ static uint32_t vtpm_instance_from_xenstore(void)
     FD_ZERO(&readfds);
 
     if (handle) {
-        char **e = xenstore_domain_get_devices(handle, "vtpm", &num);
+        char **e_danger =
+            xenstore_domain_get_devices_danger(handle, "vtpm", &num);
         int fd = xs_fileno(handle);
         FD_SET(fd, &readfds);
-        if (e) {
+        if (e_danger) {
             do {
                 struct timeval tv = {
                     .tv_sec  = 30,
@@ -1095,12 +1096,12 @@ static uint32_t vtpm_instance_from_xenstore(void)
                 /* need to make sure that the hotplug scripts have finished */
                 char *status = xenstore_read_hotplug_status(handle,
                                                             "vtpm",
-                                                            e[0]);
+                                                            e_danger[0]);
                 if (status) {
                     if (!strcmp(status, "connected")) {
                         char *inst = xenstore_backend_read_variable(handle,
                                                                     "vtpm",
-                                                                    e[0],
+                                                                    e_danger[0],
                                                                    "instance");
                         if (1 != (sscanf(inst,"%d",&number)))
                             number = VTPM_BAD_INSTANCE;
@@ -1121,7 +1122,7 @@ static uint32_t vtpm_instance_from_xenstore(void)
                     if (!subscribed) {
                         rc = xenstore_subscribe_to_hotplug_status(handle,
                                                                   "vtpm",
-                                                                  e[0],
+                                                                  e_danger[0],
                                                                   token);
                         if (rc != 0)
                             break;
@@ -1136,13 +1137,13 @@ static uint32_t vtpm_instance_from_xenstore(void)
                         end = 1;
                 }
             } while (end == 0);
-            free(e);
+            free(e_danger);
         }
         if (subscribed) {
             /* clean up */
             xenstore_unsubscribe_from_hotplug_status(handle,
                                                      "vtpm",
-                                                     e[0],
+                                                     e_danger[0],
                                                      token);
         }
         xs_daemon_close(handle);
