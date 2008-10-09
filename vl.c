@@ -8670,6 +8670,14 @@ int main(int argc, char **argv)
     }
 
 #endif
+
+#if defined (__ia64__)
+    if (ram_size > VGA_IO_START)
+        ram_size += VGA_IO_SIZE; /* skip VGA I/O hole */
+    if (ram_size > MMIO_START)
+        ram_size += 1 * MEM_G; /* skip 3G-4G MMIO, LEGACY_IO_SPACE etc. */
+#endif
+
     /* init the memory */
     phys_ram_size = machine->ram_require & ~RAMSIZE_FIXED;
 
