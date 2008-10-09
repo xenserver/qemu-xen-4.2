@@ -30,11 +30,6 @@ typedef uint32_t td_flag_t;
 
 #define TD_RDONLY                1
 
-struct disk_id {
-	char *name;
-	int drivertype;
-};
-
 /* This structure represents the state of an active virtual disk.           */
 struct td_state {
 	BlockDriverState* bs;

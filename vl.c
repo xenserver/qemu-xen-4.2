@@ -5408,6 +5408,9 @@ static int drive_init(struct drive_opt *arg, int snapshot,
     case IF_PFLASH:
     case IF_MTD:
         break;
+    case IF_BLKTAP:
+        /* Cannot happen - silence gcc warning */
+        break;
     }
     if (!file[0])
         return 0;

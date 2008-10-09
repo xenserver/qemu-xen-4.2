@@ -32,6 +32,11 @@
 #include <errno.h>
 #include <stdlib.h>
 
+#ifndef QEMU_TOOL
+#include "qemu-common.h"
+#include "sysemu.h"
+#endif
+
 #include "xen_blktap.h"
 #include "block_int.h"
 #include "qemu-char.h"
@@ -217,13 +222,15 @@ static int map_new_dev(struct td_state *s, int minor)
 
 static int open_disk(struct td_state *s, char *path, int readonly)
 {
-	struct disk_id id;
 	BlockDriverState* bs;
+	char* devname;
+	static int devnumber = 0;
+	int i;
 
-	DPRINTF("Opening %s\n", path);
-	bs = calloc(1, sizeof(*bs));
-
-	memset(&id, 0, sizeof(struct disk_id));
+	DPRINTF("Opening %s as blktap%d\n", path, devnumber);
+	asprintf(&devname, "blktap%d", devnumber++);
+	bs = bdrv_new(devname);
+	free(devname);
 
 	if (bdrv_open(bs, path, 0) != 0) {
 		fprintf(stderr, "Could not open image file %s\n", path);
@@ -236,6 +243,18 @@ static int open_disk(struct td_state *s, char *path, int readonly)
 	s->sector_size = 512;
 
 	s->info = ((s->flags & TD_RDONLY) ? VDISK_READONLY : 0);
+
+#ifndef QEMU_TOOL
+	for (i = 0; i < MAX_DRIVES + 1; i++) {
+		if (drives_table[i].bdrv == NULL) {
+			drives_table[i].bdrv = bs;
+			drives_table[i].type = IF_BLKTAP;
+			drives_table[i].bus = 0;
+			drives_table[i].unit = 0;
+			break;
+		}
+	}
+#endif
 
 	return 0;
 }
