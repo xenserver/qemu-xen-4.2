@@ -191,16 +191,35 @@ static void xenstore_get_backend_path(char **backend, const char *devtype,
     backend_dompath = xs_get_domain_path(xsh, domid_backend);
     if (!backend_dompath) goto out;
     
-    if (pasprintf(&expected_backend, "%s/backend/%s/%lu/%s",
-                  backend_dompath, devtype, frontend_domid, inst_danger)
-        == -1) goto out;
+    const char *expected_devtypes[3];
+    const char **expected_devtype = expected_devtypes;
 
-    if (strcmp(bpath, expected_backend)) {
-        fprintf(stderr, "frontend `%s' expected backend `%s' got `%s',"
-                " ignoring\n", frontend_path, expected_backend, bpath);
-        errno = EINVAL;
-        goto out;
+    *expected_devtype++ = devtype;
+    if (!strcmp(devtype, "vbd")) *expected_devtype++ = "tap";
+    *expected_devtype = 0;
+    assert(expected_devtype <
+           expected_devtypes + ARRAY_SIZE(expected_devtypes));
+
+    for (expected_devtype = expected_devtypes;
+         *expected_devtype;
+         expected_devtype++) {
+    
+        if (pasprintf(&expected_backend, "%s/backend/%s/%lu/%s",
+                      backend_dompath, *expected_devtype,
+                      frontend_domid, inst_danger)
+            == -1) goto out;
+
+        if (!strcmp(bpath, expected_backend))
+            goto found;
     }
+
+    fprintf(stderr, "frontend `%s' devtype `%s' expected backend `%s'"
+            " got `%s', ignoring\n",
+            frontend_path, devtype, expected_backend, bpath);
+    errno = EINVAL;
+    goto out;
+
+ found:
 
     if (pasprintf(&backend_frontend_path, "%s/frontend", bpath)
         == -1) goto out;
