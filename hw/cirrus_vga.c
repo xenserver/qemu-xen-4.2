@@ -3214,6 +3214,11 @@ static int cirrus_vga_load(QEMUFile *f, void *opaque, int version_id)
             xen_vga_populate_vram(s->lfb_addr);
         } else
             xen_vga_vram_map(vga_acc ? s->lfb_addr : s->stolen_vram_addr, 0);
+
+        if (vga_acc) {
+            s->map_addr = s->lfb_addr;
+            s->map_end = s->lfb_end;
+        }
     } else {
         /* Old image, we have to populate and restore VRAM ourselves */
         xen_vga_populate_vram(s->lfb_addr);
