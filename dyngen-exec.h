@@ -32,13 +32,16 @@
    host headers do not allow that. */
 #include <stddef.h>
 
+#ifdef __OpenBSD__
+#include <sys/types.h>
+#else
 typedef unsigned char uint8_t;
 typedef unsigned short uint16_t;
 typedef unsigned int uint32_t;
 // Linux/Sparc64 defines uint64_t
-#if !(defined (__sparc_v9__) && defined(__linux__))
+#if !(defined (__sparc_v9__) && defined(__linux__)) && !(defined(__APPLE__) && defined(__x86_64__))
 /* XXX may be done for all 64 bits targets ? */
-#if defined (__x86_64__) || defined(__ia64) || defined(__s390x__) || defined(__alpha__) 
+#if defined (__x86_64__) || defined(__ia64) || defined(__s390x__) || defined(__alpha__) || defined(__powerpc64__)
 typedef unsigned long uint64_t;
 #else
 typedef unsigned long long uint64_t;
@@ -54,11 +57,12 @@ typedef signed char int8_t;
 typedef signed short int16_t;
 typedef signed int int32_t;
 // Linux/Sparc64 defines int64_t
-#if !(defined (__sparc_v9__) && defined(__linux__))
-#if defined (__x86_64__) || defined(__ia64) || defined(__s390x__) || defined(__alpha__)
+#if !(defined (__sparc_v9__) && defined(__linux__)) && !(defined(__APPLE__) && defined(__x86_64__))
+#if defined (__x86_64__) || defined(__ia64) || defined(__s390x__) || defined(__alpha__) || defined(__powerpc64__)
 typedef signed long int64_t;
 #else
 typedef signed long long int64_t;
+#endif
 #endif
 #endif
 
@@ -117,8 +121,6 @@ extern int printf(const char *, ...);
 #define AREG10 "r22"
 #define AREG11 "r23"
 #endif
-#define USE_INT_TO_FLOAT_HELPERS
-#define BUGGY_GCC_DIV64
 #elif defined(__arm__)
 #define AREG0 "r7"
 #define AREG1 "r4"
@@ -148,10 +150,9 @@ extern int printf(const char *, ...);
 #define AREG4 "g6"
 #else
 #ifdef __sparc_v9__
-#define AREG0 "g1"
-#define AREG1 "g4"
-#define AREG2 "g5"
-#define AREG3 "g7"
+#define AREG0 "g5"
+#define AREG1 "g6"
+#define AREG2 "g7"
 #else
 #define AREG0 "g6"
 #define AREG1 "g1"
@@ -287,6 +288,18 @@ extern int __op_jmp0, __op_jmp1, __op_jmp2, __op_jmp3;
 #define GOTO_LABEL_PARAM(n) asm volatile ("b,n " ASM_NAME(__op_gen_label) #n)
 #else
 #error unsupported CPU
+#endif
+
+/* The return address may point to the start of the next instruction.
+   Subtracting one gets us the call instruction itself.  */
+#if defined(__s390__)
+# define GETPC() ((void*)(((unsigned long)__builtin_return_address(0) & 0x7fffffffUL) - 1))
+#elif defined(__arm__)
+/* Thumb return addresses have the low bit set, so we need to subtract two.
+   This is still safe in ARM mode because instructions are 4 bytes.  */
+# define GETPC() ((void *)((unsigned long)__builtin_return_address(0) - 2))
+#else
+# define GETPC() ((void *)((unsigned long)__builtin_return_address(0) - 1))
 #endif
 
 #endif /* !defined(__DYNGEN_EXEC_H__) */

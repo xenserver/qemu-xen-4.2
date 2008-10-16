@@ -36,6 +36,7 @@
 #include "sysemu.h"
 #include "audio/audio.h"
 #include "boards.h"
+#include "qemu-log.h"
 
 //#define DEBUG_BOARD_INIT
 
@@ -58,8 +59,6 @@
 #define ENVP_ENTRY_SIZE	 	256
 
 #define MAX_IDE_BUS 2
-
-extern FILE *logfile;
 
 typedef struct {
     uint32_t leds;
@@ -155,7 +154,7 @@ static eeprom24c0x_t eeprom = {
     },
 };
 
-static uint8_t eeprom24c0x_read()
+static uint8_t eeprom24c0x_read(void)
 {
     logout("%u: scl = %u, sda = %u, data = 0x%02x\n",
         eeprom.tick, eeprom.scl, eeprom.sda, eeprom.data);
@@ -701,7 +700,8 @@ static int64_t load_kernel (CPUState *env)
     ram_addr_t initrd_offset;
 
     if (load_elf(loaderparams.kernel_filename, VIRT_TO_PHYS_ADDEND,
-                 &kernel_entry, &kernel_low, &kernel_high) < 0) {
+                 (uint64_t *)&kernel_entry, (uint64_t *)&kernel_low,
+                 (uint64_t *)&kernel_high) < 0) {
         fprintf(stderr, "qemu: could not load kernel '%s'\n",
                 loaderparams.kernel_filename);
         exit(1);
@@ -802,7 +802,6 @@ void mips_malta_init (ram_addr_t ram_size, int vga_ram_size,
         fprintf(stderr, "Unable to find CPU definition\n");
         exit(1);
     }
-    register_savevm("cpu", 0, 3, cpu_save, cpu_load, env);
     qemu_register_reset(main_cpu_reset, env);
 
     /* allocate RAM */
@@ -879,7 +878,6 @@ void mips_malta_init (ram_addr_t ram_size, int vga_ram_size,
     /* Init internal devices */
     cpu_mips_irq_init_cpu(env);
     cpu_mips_clock_init(env);
-    cpu_mips_irqctrl_init();
 
     /* Interrupt controller */
     /* The 8259 is attached to the MIPS CPU INT0 pin, ie interrupt 2 */
@@ -947,8 +945,10 @@ void mips_malta_init (ram_addr_t ram_size, int vga_ram_size,
 }
 
 QEMUMachine mips_malta_machine = {
-    "malta",
-    "MIPS Malta Core LV",
-    mips_malta_init,
-    VGA_RAM_SIZE + BIOS_SIZE,
+    .name = "malta",
+    .desc = "MIPS Malta Core LV",
+    .init = mips_malta_init,
+    .ram_require = VGA_RAM_SIZE + BIOS_SIZE,
+    .nodisk_ok = 1,
+    .max_cpus = 1,
 };

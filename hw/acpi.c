@@ -72,7 +72,7 @@ typedef struct PIIX4PMState {
 #define SMBHSTDAT1 0x06
 #define SMBBLKDAT 0x07
 
-PIIX4PMState *pm_state;
+static PIIX4PMState *pm_state;
 
 static uint32_t get_pmtmr(PIIX4PMState *s)
 {
@@ -105,7 +105,6 @@ static void pm_update_sci(PIIX4PMState *s)
     if ((s->pmen & TMROF_EN) && !(pmsts & TMROF_EN)) {
         expire_time = muldiv64(s->tmr_overflow_time, ticks_per_sec, PM_FREQ);
         qemu_mod_timer(s->tmr_timer, expire_time);
-        s->tmr_overflow_time += 0x800000;
     } else {
         qemu_del_timer(s->tmr_timer);
     }
@@ -146,7 +145,7 @@ static void pm_ioport_writew(void *opaque, uint32_t addr, uint32_t val)
             s->pmcntrl = val & ~(SUS_EN);
             if (val & SUS_EN) {
                 /* change suspend type */
-                sus_typ = (val >> 10) & 3;
+                sus_typ = (val >> 10) & 7;
                 switch(sus_typ) {
                 case 0: /* soft power off */
                     qemu_system_shutdown_request();
@@ -527,7 +526,9 @@ i2c_bus *piix4_pm_init(PCIBus *bus, int devfn, uint32_t smb_io_base,
 #if defined(TARGET_I386)
 void qemu_system_powerdown(void)
 {
-    if(pm_state->pmen & PWRBTN_EN) {
+    if (!pm_state) {
+        qemu_system_shutdown_request();
+    } else if (pm_state->pmen & PWRBTN_EN) {
         pm_state->pmsts |= PWRBTN_EN;
 	pm_update_sci(pm_state);
     }

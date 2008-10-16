@@ -151,10 +151,8 @@ void do_addmeo (void)
     T0 += xer_ca + (-1);
     xer_ov = ((uint32_t)T1 & ((uint32_t)T1 ^ (uint32_t)T0)) >> 31;
     xer_so |= xer_ov;
-    if (likely(T1 != 0))
+    if (likely((uint32_t)T1 != 0))
         xer_ca = 1;
-    else
-        xer_ca = 0;
 }
 
 #if defined(TARGET_PPC64)
@@ -164,10 +162,8 @@ void do_addmeo_64 (void)
     T0 += xer_ca + (-1);
     xer_ov = ((uint64_t)T1 & ((uint64_t)T1 ^ (uint64_t)T0)) >> 63;
     xer_so |= xer_ov;
-    if (likely(T1 != 0))
+    if (likely((uint64_t)T1 != 0))
         xer_ca = 1;
-    else
-        xer_ca = 0;
 }
 #endif
 
@@ -227,7 +223,7 @@ void do_divduo (void)
 
 void do_mullwo (void)
 {
-    int64_t res = (int64_t)T0 * (int64_t)T1;
+    int64_t res = (int64_t)(int32_t)T0 * (int64_t)(int32_t)T1;
 
     if (likely((int32_t)res == res)) {
         xer_ov = 0;
@@ -244,7 +240,7 @@ void do_mulldo (void)
     int64_t th;
     uint64_t tl;
 
-    muls64(&tl, &th, T0, T1);
+    muls64(&tl, (uint64_t *)&th, T0, T1);
     T0 = (int64_t)tl;
     /* If th != 0 && th != -1, then we had an overflow */
     if (likely((uint64_t)(th + 1) <= 1)) {
@@ -312,8 +308,6 @@ void do_subfmeo (void)
     xer_so |= xer_ov;
     if (likely((uint32_t)T1 != UINT32_MAX))
         xer_ca = 1;
-    else
-        xer_ca = 0;
 }
 
 #if defined(TARGET_PPC64)
@@ -325,8 +319,6 @@ void do_subfmeo_64 (void)
     xer_so |= xer_ov;
     if (likely((uint64_t)T1 != UINT64_MAX))
         xer_ca = 1;
-    else
-        xer_ca = 0;
 }
 #endif
 
@@ -2612,11 +2604,6 @@ DO_SPE_OP1(fsctuf);
 #if !defined (CONFIG_USER_ONLY)
 
 #define MMUSUFFIX _mmu
-#ifdef __s390__
-# define GETPC() ((void*)((unsigned long)__builtin_return_address(0) & 0x7fffffffUL))
-#else
-# define GETPC() (__builtin_return_address(0))
-#endif
 
 #define SHIFT 0
 #include "softmmu_template.h"

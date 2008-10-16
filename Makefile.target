@@ -24,7 +24,7 @@ TARGET_BASE_ARCH:=sparc
 endif
 TARGET_PATH=$(SRC_PATH)/target-$(TARGET_BASE_ARCH)
 VPATH=$(SRC_PATH):$(TARGET_PATH):$(SRC_PATH)/hw
-CPPFLAGS=-I. -I.. -I$(TARGET_PATH) -I$(SRC_PATH) -MMD -MP -DNEED_CPU_H
+CPPFLAGS=-I. -I.. -I$(TARGET_PATH) -I$(SRC_PATH) -MMD -MT $@ -MP -DNEED_CPU_H
 #CFLAGS+=-Werror
 LIBS=
 DYNGEN=../dyngen$(EXESUF)
@@ -73,7 +73,8 @@ endif
 PROGS=$(QEMU_PROG)
 
 # We require -O2 to avoid the stack setup prologue in EXIT_TB
-OP_CFLAGS := -Wall -O2 -g -fno-strict-aliasing
+OP_CFLAGS := -O2 -g -fno-strict-aliasing
+OP_CFLAGS += -Wall -Wundef -Wendif-labels -Wwrite-strings
 
 # cc-option
 # Usage: OP_CFLAGS+=$(call cc-option, -falign-functions=0, -malign-functions=0)
@@ -106,6 +107,7 @@ endif
 
 ifeq ($(ARCH),ppc)
 CPPFLAGS+= -D__powerpc__
+OP_CFLAGS+= -mlongcall
 endif
 
 ifeq ($(ARCH),sparc)
@@ -120,10 +122,12 @@ ifeq ($(ARCH),sparc)
 endif
 
 ifeq ($(ARCH),sparc64)
-  CFLAGS+=-ffixed-g1 -ffixed-g4 -ffixed-g5 -ffixed-g7
   OP_CFLAGS+=-mcpu=ultrasparc -m64 -fno-delayed-branch -ffixed-i0
   ifneq ($(CONFIG_SOLARIS),yes)
-    OP_CFLAGS+=-ffixed-g1 -ffixed-g4 -ffixed-g5 -ffixed-g7
+    CFLAGS+=-ffixed-g5 -ffixed-g6 -ffixed-g7
+    OP_CFLAGS+=-ffixed-g5 -ffixed-g6 -ffixed-g7
+  else
+    CFLAGS+=-ffixed-g1 -ffixed-g4 -ffixed-g5 -ffixed-g7
   endif
 endif
 
@@ -186,6 +190,7 @@ all: $(PROGS)
 LIBOBJS=exec.o kqemu.o translate-all.o cpu-exec.o\
         translate.o host-utils.o
 ifdef CONFIG_DYNGEN_OP
+exec.o: dyngen-opc.h
 LIBOBJS+=op.o
 endif
 # TCG code generator
@@ -200,45 +205,17 @@ else
 LIBOBJS+=fpu/softfloat-native.o
 endif
 CPPFLAGS+=-I$(SRC_PATH)/fpu
-
-ifeq ($(TARGET_ARCH), i386)
-LIBOBJS+=helper.o helper2.o
-endif
-
-ifeq ($(TARGET_ARCH), x86_64)
-LIBOBJS+=helper.o helper2.o
-endif
-
-ifeq ($(TARGET_BASE_ARCH), ppc)
 LIBOBJS+= op_helper.o helper.o
-endif
-
-ifeq ($(TARGET_BASE_ARCH), mips)
-LIBOBJS+= op_helper.o helper.o
-endif
-
-ifeq ($(TARGET_BASE_ARCH), sparc)
-LIBOBJS+= op_helper.o helper.o
-endif
 
 ifeq ($(TARGET_BASE_ARCH), arm)
-LIBOBJS+= op_helper.o helper.o neon_helper.o iwmmxt_helper.o
-endif
-
-ifeq ($(TARGET_BASE_ARCH), sh4)
-LIBOBJS+= op_helper.o helper.o
-endif
-
-ifeq ($(TARGET_BASE_ARCH), m68k)
-LIBOBJS+= op_helper.o helper.o
+LIBOBJS+= neon_helper.o iwmmxt_helper.o
 endif
 
 ifeq ($(TARGET_BASE_ARCH), alpha)
-LIBOBJS+= op_helper.o helper.o alpha_palcode.o
+LIBOBJS+= alpha_palcode.o
 endif
 
 ifeq ($(TARGET_BASE_ARCH), cris)
-LIBOBJS+= op_helper.o helper.o
 LIBOBJS+= cris-dis.o
 
 ifndef CONFIG_USER_ONLY
@@ -322,14 +299,8 @@ machine.o: machine.c
 
 # HELPER_CFLAGS is used for all the code compiled with static register
 # variables
-ifeq ($(TARGET_BASE_ARCH), i386)
-# XXX: rename helper.c to op_helper.c
-helper.o: helper.c
-	$(CC) $(HELPER_CFLAGS) $(CPPFLAGS) $(CFLAGS) $(I386_CFLAGS) -c -o $@ $<
-else
 op_helper.o: op_helper.c
-	$(CC) $(HELPER_CFLAGS) $(CPPFLAGS) $(CFLAGS) -c -o $@ $<
-endif
+	$(CC) $(HELPER_CFLAGS) $(CPPFLAGS) $(CFLAGS) $(I386_CFLAGS) -c -o $@ $<
 
 cpu-exec.o: cpu-exec.c $(OPC_H)
 	$(CC) $(HELPER_CFLAGS) $(CPPFLAGS) $(CFLAGS) -c -o $@ $<
@@ -371,6 +342,10 @@ LDFLAGS+=-Wl,-T,$(SRC_PATH)/$(ARCH).ld
 endif
 
 ifeq ($(ARCH),ppc)
+LDFLAGS+=-Wl,-T,$(SRC_PATH)/$(ARCH).ld
+endif
+
+ifeq ($(ARCH),ppc64)
 LDFLAGS+=-Wl,-T,$(SRC_PATH)/$(ARCH).ld
 endif
 
@@ -419,7 +394,7 @@ LDFLAGS+=-Wl,-T,$(SRC_PATH)/$(ARCH)el.ld
 endif
 endif
 
-OBJS= main.o syscall.o strace.o mmap.o signal.o path.o osdep.o thunk.o \
+OBJS= main.o syscall.o strace.o mmap.o signal.o path.o thunk.o \
       elfload.o linuxload.o uaccess.o
 LIBS+= $(AIOLIBS)
 ifdef TARGET_HAS_BFLT
@@ -447,14 +422,13 @@ OBJS+=gdbstub.o
 endif
 
 OBJS+= libqemu.a
-OBJS+= ../libqemu_common.a
 
 # Note: this is a workaround. The real fix is to avoid compiling
 # cpu_signal_handler() in cpu-exec.c.
 signal.o: signal.c
 	$(CC) $(HELPER_CFLAGS) $(CPPFLAGS) $(CFLAGS) -c -o $@ $<
 
-$(QEMU_PROG): $(OBJS)
+$(QEMU_PROG): $(OBJS) ../libqemu_user.a
 	$(CC) $(LDFLAGS) -o $@ $^  $(LIBS)
 ifeq ($(ARCH),alpha)
 # Mark as 32 bit binary, i. e. it will be mapped into the low 31 bit of
@@ -477,7 +451,7 @@ LDFLAGS+=-Wl,-segaddr,__STD_PROG_ZONE,0x1000 -image_base 0x0e000000
 
 LIBS+=-lmx
 
-OBJS= main.o commpage.o machload.o mmap.o osdep.o signal.o syscall.o thunk.o
+OBJS= main.o commpage.o machload.o mmap.o signal.o syscall.o thunk.o
 
 OBJS+= libqemu.a
 
@@ -499,7 +473,8 @@ endif #CONFIG_DARWIN_USER
 # System emulator target
 ifndef CONFIG_USER_ONLY
 
-OBJS=vl.o osdep.o monitor.o pci.o loader.o isa_mmio.o machine.o
+OBJS=vl.o osdep.o monitor.o pci.o loader.o isa_mmio.o machine.o net-checksum.o
+OBJS+=fw_cfg.o aio.o
 ifdef CONFIG_WIN32
 OBJS+=block-raw-win32.o
 else
@@ -513,11 +488,17 @@ endif
 ifdef CONFIG_ESD
 LIBS += -lesd
 endif
+ifdef CONFIG_PA
+LIBS += -lpulse-simple
+endif
 ifdef CONFIG_DSOUND
 LIBS += -lole32 -ldxguid
 endif
 ifdef CONFIG_FMOD
 LIBS += $(CONFIG_FMOD_LIB)
+endif
+ifdef CONFIG_OSS
+LIBS += $(CONFIG_OSS_LIB)
 endif
 
 SOUND_HW = sb16.o es1370.o
@@ -530,10 +511,17 @@ endif
 ifdef CONFIG_GUS
 SOUND_HW += gus.o gusemu_hal.o gusemu_mixer.o
 endif
+ifdef CONFIG_CS4231A
+SOUND_HW += cs4231a.o
+endif
 
 ifdef CONFIG_VNC_TLS
 CPPFLAGS += $(CONFIG_VNC_TLS_CFLAGS)
 LIBS += $(CONFIG_VNC_TLS_LIBS)
+endif
+
+ifdef CONFIG_BLUEZ
+LIBS += $(CONFIG_BLUEZ_LIBS)
 endif
 
 # SCSI layer
@@ -619,12 +607,12 @@ OBJS+= arm-semi.o
 OBJS+= pxa2xx.o pxa2xx_pic.o pxa2xx_gpio.o pxa2xx_timer.o pxa2xx_dma.o
 OBJS+= pxa2xx_lcd.o pxa2xx_mmci.o pxa2xx_pcmcia.o pxa2xx_keypad.o
 OBJS+= pflash_cfi01.o gumstix.o
-OBJS+= spitz.o ide.o serial.o nand.o ecc.o
+OBJS+= zaurus.o ide.o serial.o nand.o ecc.o spitz.o tosa.o tc6393xb.o
 OBJS+= omap1.o omap_lcdc.o omap_dma.o omap_clk.o omap_mmc.o omap_i2c.o
-OBJS+= omap2.o omap_dss.o
+OBJS+= omap2.o omap_dss.o soc_dma.o
 OBJS+= palm.o tsc210x.o
 OBJS+= nseries.o blizzard.o onenand.o vga.o cbus.o tusb6010.o usb-musb.o
-OBJS+= tsc2005.o
+OBJS+= tsc2005.o bt-hci-csr.o
 OBJS+= mst_fpga.o mainstone.o
 OBJS+= musicpal.o pflash_cfi02.o
 CPPFLAGS += -DHAS_AUDIO
@@ -682,7 +670,7 @@ main.o: CFLAGS+=-p
 endif
 
 $(QEMU_PROG): $(OBJS) ../libqemu_common.a libqemu.a
-	$(CC) $(LDFLAGS) -o $@ $^ $(LIBS) $(SDL_LIBS) $(COCOA_LIBS) $(CURSES_LIBS) $(BRLAPI_LIBS)
+	$(CC) $(LDFLAGS) -o $@ $^ $(LIBS) $(SDL_LIBS) $(COCOA_LIBS) $(CURSES_LIBS) $(BRLAPI_LIBS) $(VDE_LIBS)
 
 endif # !CONFIG_USER_ONLY
 

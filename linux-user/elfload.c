@@ -12,6 +12,15 @@
 #include "qemu.h"
 #include "disas.h"
 
+#ifdef __powerpc64__
+#undef ARCH_DLINFO
+#undef ELF_PLATFORM
+#undef ELF_HWCAP
+#undef ELF_CLASS
+#undef ELF_DATA
+#undef ELF_ARCH
+#endif
+
 /* from personality.h */
 
 /*
@@ -89,7 +98,7 @@ enum {
 static const char *get_elf_platform(void)
 {
     static char elf_platform[] = "i386";
-    int family = (global_env->cpuid_version >> 8) & 0xff;
+    int family = (thread_env->cpuid_version >> 8) & 0xff;
     if (family > 6)
         family = 6;
     if (family >= 3)
@@ -101,7 +110,7 @@ static const char *get_elf_platform(void)
 
 static uint32_t get_elf_hwcap(void)
 {
-  return global_env->cpuid_features;
+  return thread_env->cpuid_features;
 }
 
 #ifdef TARGET_X86_64
@@ -535,8 +544,6 @@ static inline void memcpy_fromfs(void * to, const void * from, unsigned long n)
 {
 	memcpy(to, from, n);
 }
-
-extern unsigned long x86_stack_size;
 
 static int load_aout_interp(void * exptr, int interp_fd);
 
@@ -1138,6 +1145,7 @@ int load_elf_binary(struct linux_binprm * bprm, struct target_pt_regs * regs,
     end_code = 0;
     start_data = 0;
     end_data = 0;
+    interp_ex.a_info = 0;
 
     for(i=0;i < elf_ex.e_phnum; i++) {
 	if (elf_ppnt->p_type == PT_INTERP) {
@@ -1230,7 +1238,7 @@ int load_elf_binary(struct linux_binprm * bprm, struct target_pt_regs * regs,
 	}
 
 	if (interp_elf_ex.e_ident[0] != 0x7f ||
-	    	strncmp(&interp_elf_ex.e_ident[1], "ELF",3) != 0) {
+            strncmp((char *)&interp_elf_ex.e_ident[1], "ELF",3) != 0) {
 	    interpreter_type &= ~INTERPRETER_ELF;
 	}
 

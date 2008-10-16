@@ -14,10 +14,14 @@ qemu.pod
 qemu-img.1
 qemu-img.pod
 qemu-img
+qemu-nbd
+qemu-nbd.8
 .gdbinit
+*.a
 *.aux
 *.cp
 *.dvi
+*.exe
 *.fn
 *.ky
 *.log
@@ -26,6 +30,5 @@ qemu-img
 *.tp
 *.vr
 *.d
-
-*.[oa]
+*.o
 *~

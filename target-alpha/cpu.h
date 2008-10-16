@@ -269,27 +269,21 @@ struct CPUAlphaState {
     uint64_t ps;
     uint64_t unique;
     int saved_mode; /* Used for HW_LD / HW_ST */
+    int intr_flag; /* For RC and RS */
 
 #if TARGET_LONG_BITS > HOST_LONG_BITS
     /* temporary fixed-point registers
      * used to emulate 64 bits target on 32 bits hosts
      */
-    target_ulong t0, t1, t2;
+    target_ulong t0, t1;
 #endif
-    /* */
-    double ft0, ft1, ft2;
 
     /* Those resources are used only in Qemu core */
     CPU_COMMON
 
-    jmp_buf jmp_env;
-    int user_mode_only; /* user mode only simulation */
     uint32_t hflags;
-    int halted;
 
-    int exception_index;
     int error_code;
-    int interrupt_request;
 
     uint32_t features;
     uint32_t amask;
@@ -313,6 +307,15 @@ static inline int cpu_mmu_index (CPUState *env)
 {
     return (env->ps >> 3) & 3;
 }
+
+#if defined(CONFIG_USER_ONLY)
+static inline void cpu_clone_regs(CPUState *env, target_ulong newsp)
+{
+    if (newsp)
+        env->ir[30] = newsp;
+    /* FIXME: Zero syscall return value.  */
+}
+#endif
 
 #include "cpu-all.h"
 
@@ -407,6 +410,12 @@ int cpu_alpha_mfpr (CPUState *env, int iprn, uint64_t *valp);
 int cpu_alpha_mtpr (CPUState *env, int iprn, uint64_t val, uint64_t *oldvalp);
 void cpu_loop_exit (void);
 void pal_init (CPUState *env);
+#if !defined (CONFIG_USER_ONLY)
+void call_pal (CPUState *env);
+#else
 void call_pal (CPUState *env, int palcode);
+#endif
+
+#define CPU_PC_FROM_TB(env, tb) env->pc = tb->pc
 
 #endif /* !defined (__CPU_ALPHA_H__) */

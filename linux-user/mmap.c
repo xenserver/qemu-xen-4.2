@@ -26,8 +26,99 @@
 #include <sys/mman.h>
 
 #include "qemu.h"
+#include "qemu-common.h"
 
 //#define DEBUG_MMAP
+
+#if defined(USE_NPTL)
+pthread_mutex_t mmap_mutex;
+static int __thread mmap_lock_count;
+
+void mmap_lock(void)
+{
+    if (mmap_lock_count++ == 0) {
+        pthread_mutex_lock(&mmap_mutex);
+    }
+}
+
+void mmap_unlock(void)
+{
+    if (--mmap_lock_count == 0) {
+        pthread_mutex_unlock(&mmap_mutex);
+    }
+}
+
+/* Grab lock to make sure things are in a consistent state after fork().  */
+void mmap_fork_start(void)
+{
+    if (mmap_lock_count)
+        abort();
+    pthread_mutex_lock(&mmap_mutex);
+}
+
+void mmap_fork_end(int child)
+{
+    if (child)
+        pthread_mutex_init(&mmap_mutex, NULL);
+    else
+        pthread_mutex_unlock(&mmap_mutex);
+}
+#else
+/* We aren't threadsafe to start with, so no need to worry about locking.  */
+void mmap_lock(void)
+{
+}
+
+void mmap_unlock(void)
+{
+}
+#endif
+
+void *qemu_vmalloc(size_t size)
+{
+    void *p;
+    unsigned long addr;
+    mmap_lock();
+    /* Use map and mark the pages as used.  */
+    p = mmap(NULL, size, PROT_READ | PROT_WRITE,
+             MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+
+    addr = (unsigned long)p;
+    if (addr == (target_ulong) addr) {
+        /* Allocated region overlaps guest address space.
+           This may recurse.  */
+        page_set_flags(addr & TARGET_PAGE_MASK, TARGET_PAGE_ALIGN(addr + size),
+                       PAGE_RESERVED);
+    }
+
+    mmap_unlock();
+    return p;
+}
+
+void *qemu_malloc(size_t size)
+{
+    char * p;
+    size += 16;
+    p = qemu_vmalloc(size);
+    *(size_t *)p = size;
+    return p + 16;
+}
+
+/* We use map, which is always zero initialized.  */
+void * qemu_mallocz(size_t size)
+{
+    return qemu_malloc(size);
+}
+
+void qemu_free(void *ptr)
+{
+    /* FIXME: We should unmark the reserved pages here.  However this gets
+       complicated when one target page spans multiple host pages, so we
+       don't bother.  */
+    size_t *p;
+    p = (size_t *)((char *)ptr - 16);
+    munmap(p, *p);
+}
 
 /* NOTE: all the constants are the HOST ones, but addresses are target. */
 int target_mprotect(abi_ulong start, abi_ulong len, int prot)
@@ -53,6 +144,7 @@ int target_mprotect(abi_ulong start, abi_ulong len, int prot)
     if (len == 0)
         return 0;
 
+    mmap_lock();
     host_start = start & qemu_host_page_mask;
     host_end = HOST_PAGE_ALIGN(end);
     if (start > host_start) {
@@ -69,7 +161,7 @@ int target_mprotect(abi_ulong start, abi_ulong len, int prot)
         }
         ret = mprotect(g2h(host_start), qemu_host_page_size, prot1 & PAGE_BITS);
         if (ret != 0)
-            return ret;
+            goto error;
         host_start += qemu_host_page_size;
     }
     if (end < host_end) {
@@ -80,7 +172,7 @@ int target_mprotect(abi_ulong start, abi_ulong len, int prot)
         ret = mprotect(g2h(host_end - qemu_host_page_size), qemu_host_page_size,
                        prot1 & PAGE_BITS);
         if (ret != 0)
-            return ret;
+            goto error;
         host_end -= qemu_host_page_size;
     }
 
@@ -88,10 +180,14 @@ int target_mprotect(abi_ulong start, abi_ulong len, int prot)
     if (host_start < host_end) {
         ret = mprotect(g2h(host_start), host_end - host_start, prot);
         if (ret != 0)
-            return ret;
+            goto error;
     }
     page_set_flags(start, start + len, prot | PAGE_VALID);
+    mmap_unlock();
     return 0;
+error:
+    mmap_unlock();
+    return ret;
 }
 
 /* map an incomplete host page */
@@ -157,6 +253,8 @@ static abi_ulong mmap_next_start = 0x18000000;
 static abi_ulong mmap_next_start = 0x40000000;
 #endif
 
+unsigned long last_brk;
+
 /* find a free memory area of size 'size'. The search starts at
    'start'. If 'start' == 0, then a default start address is used.
    Return -1 if error.
@@ -167,6 +265,20 @@ static abi_ulong mmap_find_vma(abi_ulong start, abi_ulong size)
 {
     abi_ulong addr, addr1, addr_start;
     int prot;
+    unsigned long new_brk;
+
+    new_brk = (unsigned long)sbrk(0);
+    if (last_brk && last_brk < new_brk && last_brk == (target_ulong)last_brk) {
+        /* This is a hack to catch the host allocating memory with brk().
+           If it uses mmap then we loose.
+           FIXME: We really want to avoid the host allocating memory in
+           the first place, and maybe leave some slack to avoid switching
+           to mmap.  */
+        page_set_flags(last_brk & TARGET_PAGE_MASK,
+                       TARGET_PAGE_ALIGN(new_brk),
+                       PAGE_RESERVED); 
+    }
+    last_brk = new_brk;
 
     size = HOST_PAGE_ALIGN(size);
     start = start & qemu_host_page_mask;
@@ -198,6 +310,7 @@ abi_long target_mmap(abi_ulong start, abi_ulong len, int prot,
     abi_ulong ret, end, real_start, real_end, retaddr, host_offset, host_len;
     unsigned long host_start;
 
+    mmap_lock();
 #ifdef DEBUG_MMAP
     {
         printf("mmap: start=0x" TARGET_FMT_lx
@@ -227,12 +340,12 @@ abi_long target_mmap(abi_ulong start, abi_ulong len, int prot,
 
     if (offset & ~TARGET_PAGE_MASK) {
         errno = EINVAL;
-        return -1;
+        goto fail;
     }
 
     len = TARGET_PAGE_ALIGN(len);
     if (len == 0)
-        return start;
+        goto the_end;
     real_start = start & qemu_host_page_mask;
 
     if (!(flags & MAP_FIXED)) {
@@ -244,7 +357,7 @@ abi_long target_mmap(abi_ulong start, abi_ulong len, int prot,
         mmap_start = mmap_find_vma(real_start, host_len);
         if (mmap_start == (abi_ulong)-1) {
             errno = ENOMEM;
-            return -1;
+            goto fail;
         }
         /* Note: we prefer to control the mapping address. It is
            especially important if qemu_host_page_size >
@@ -252,7 +365,7 @@ abi_long target_mmap(abi_ulong start, abi_ulong len, int prot,
         p = mmap(g2h(mmap_start),
                  host_len, prot, flags | MAP_FIXED, fd, host_offset);
         if (p == MAP_FAILED)
-            return -1;
+            goto fail;
         /* update start so that it points to the file position at 'offset' */
         host_start = (unsigned long)p;
         if (!(flags & MAP_ANONYMOUS))
@@ -264,7 +377,7 @@ abi_long target_mmap(abi_ulong start, abi_ulong len, int prot,
 
         if (start & ~TARGET_PAGE_MASK) {
             errno = EINVAL;
-            return -1;
+            goto fail;
         }
         end = start + len;
         real_end = HOST_PAGE_ALIGN(end);
@@ -273,7 +386,7 @@ abi_long target_mmap(abi_ulong start, abi_ulong len, int prot,
             flg = page_get_flags(addr);
             if (flg & PAGE_RESERVED) {
                 errno = ENXIO;
-                return -1;
+                goto fail;
             }
         }
 
@@ -286,18 +399,20 @@ abi_long target_mmap(abi_ulong start, abi_ulong len, int prot,
             if ((flags & MAP_TYPE) == MAP_SHARED &&
                 (prot & PROT_WRITE)) {
                 errno = EINVAL;
-                return -1;
+                goto fail;
             }
             retaddr = target_mmap(start, len, prot | PROT_WRITE,
                                   MAP_FIXED | MAP_PRIVATE | MAP_ANONYMOUS,
                                   -1, 0);
             if (retaddr == -1)
-                return -1;
+                goto fail;
             pread(fd, g2h(start), len, offset);
             if (!(prot & PROT_WRITE)) {
                 ret = target_mprotect(start, len, prot);
-                if (ret != 0)
-                    return ret;
+                if (ret != 0) {
+                    start = ret;
+                    goto the_end;
+                }
             }
             goto the_end;
         }
@@ -309,13 +424,13 @@ abi_long target_mmap(abi_ulong start, abi_ulong len, int prot,
                 ret = mmap_frag(real_start, start, end,
                                 prot, flags, fd, offset);
                 if (ret == -1)
-                    return ret;
+                    goto fail;
                 goto the_end1;
             }
             ret = mmap_frag(real_start, start, real_start + qemu_host_page_size,
                             prot, flags, fd, offset);
             if (ret == -1)
-                return ret;
+                goto fail;
             real_start += qemu_host_page_size;
         }
         /* handle the end of the mapping */
@@ -325,7 +440,7 @@ abi_long target_mmap(abi_ulong start, abi_ulong len, int prot,
                             prot, flags, fd,
                             offset + real_end - qemu_host_page_size - start);
             if (ret == -1)
-                return -1;
+                goto fail;
             real_end -= qemu_host_page_size;
         }
 
@@ -340,7 +455,7 @@ abi_long target_mmap(abi_ulong start, abi_ulong len, int prot,
             p = mmap(g2h(real_start), real_end - real_start,
                      prot, flags, fd, offset1);
             if (p == MAP_FAILED)
-                return -1;
+                goto fail;
         }
     }
  the_end1:
@@ -351,7 +466,11 @@ abi_long target_mmap(abi_ulong start, abi_ulong len, int prot,
     page_dump(stdout);
     printf("\n");
 #endif
+    mmap_unlock();
     return start;
+fail:
+    mmap_unlock();
+    return -1;
 }
 
 int target_munmap(abi_ulong start, abi_ulong len)
@@ -367,6 +486,7 @@ int target_munmap(abi_ulong start, abi_ulong len)
     len = TARGET_PAGE_ALIGN(len);
     if (len == 0)
         return -EINVAL;
+    mmap_lock();
     end = start + len;
     real_start = start & qemu_host_page_mask;
     real_end = HOST_PAGE_ALIGN(end);
@@ -395,15 +515,16 @@ int target_munmap(abi_ulong start, abi_ulong len)
             real_end -= qemu_host_page_size;
     }
 
+    ret = 0;
     /* unmap what we can */
     if (real_start < real_end) {
         ret = munmap(g2h(real_start), real_end - real_start);
-        if (ret != 0)
-            return ret;
     }
 
-    page_set_flags(start, start + len, 0);
-    return 0;
+    if (ret == 0)
+        page_set_flags(start, start + len, 0);
+    mmap_unlock();
+    return ret;
 }
 
 /* XXX: currently, we only handle MAP_ANONYMOUS and not MAP_FIXED
@@ -415,14 +536,18 @@ abi_long target_mremap(abi_ulong old_addr, abi_ulong old_size,
     int prot;
     unsigned long host_addr;
 
+    mmap_lock();
     /* XXX: use 5 args syscall */
     host_addr = (long)mremap(g2h(old_addr), old_size, new_size, flags);
-    if (host_addr == -1)
-        return -1;
-    new_addr = h2g(host_addr);
-    prot = page_get_flags(old_addr);
-    page_set_flags(old_addr, old_addr + old_size, 0);
-    page_set_flags(new_addr, new_addr + new_size, prot | PAGE_VALID);
+    if (host_addr == -1) {
+        new_addr = -1;
+    } else {
+        new_addr = h2g(host_addr);
+        prot = page_get_flags(old_addr);
+        page_set_flags(old_addr, old_addr + old_size, 0);
+        page_set_flags(new_addr, new_addr + new_size, prot | PAGE_VALID);
+    }
+    mmap_unlock();
     return new_addr;
 }
 

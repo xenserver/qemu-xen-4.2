@@ -629,7 +629,7 @@ static inline void stfq_be_p(void *ptr, float64 v)
 
 /* All direct uses of g2h and h2g need to go away for usermode softmmu.  */
 #define g2h(x) ((void *)((unsigned long)(x) + GUEST_BASE))
-#define h2g(x) ((target_ulong)(x - GUEST_BASE))
+#define h2g(x) ((target_ulong)((unsigned long)(x) - GUEST_BASE))
 
 #define saddr(x) g2h(x)
 #define laddr(x) g2h(x)
@@ -729,6 +729,7 @@ int page_get_flags(target_ulong address);
 void page_set_flags(target_ulong start, target_ulong end, int flags);
 int page_check_range(target_ulong start, target_ulong len, int flags);
 
+void cpu_exec_init_all(unsigned long tb_size);
 CPUState *cpu_copy(CPUState *env);
 
 void cpu_dump_state(CPUState *env, FILE *f,
@@ -743,6 +744,8 @@ void cpu_abort(CPUState *env, const char *fmt, ...)
     __attribute__ ((__noreturn__));
 extern CPUState *first_cpu;
 extern CPUState *cpu_single_env;
+extern int64_t qemu_icount;
+extern int use_icount;
 
 #define CPU_INTERRUPT_EXIT   0x01 /* wants exit from main loop */
 #define CPU_INTERRUPT_HARD   0x02 /* hardware interrupt pending */
@@ -758,10 +761,12 @@ extern CPUState *cpu_single_env;
 void cpu_interrupt(CPUState *s, int mask);
 void cpu_reset_interrupt(CPUState *env, int mask);
 
-int cpu_watchpoint_insert(CPUState *env, target_ulong addr);
+int cpu_watchpoint_insert(CPUState *env, target_ulong addr, int type);
 int cpu_watchpoint_remove(CPUState *env, target_ulong addr);
+void cpu_watchpoint_remove_all(CPUState *env);
 int cpu_breakpoint_insert(CPUState *env, target_ulong pc);
 int cpu_breakpoint_remove(CPUState *env, target_ulong pc);
+void cpu_breakpoint_remove_all(CPUState *env);
 
 #define SSTEP_ENABLE  0x1  /* Enable simulated HW single stepping */
 #define SSTEP_NOIRQ   0x2  /* Do not use IRQ while single stepping */
@@ -792,7 +797,7 @@ typedef struct CPULogItem {
     const char *help;
 } CPULogItem;
 
-extern CPULogItem cpu_log_items[];
+extern const CPULogItem cpu_log_items[];
 
 void cpu_set_log(int log_flags);
 void cpu_set_log_filename(const char *filename);
@@ -827,20 +832,33 @@ extern uint8_t *phys_ram_dirty;
 extern ram_addr_t ram_size;
 
 /* physical memory access */
-#define TLB_INVALID_MASK   (1 << 3)
-#define IO_MEM_SHIFT       4
+
+/* MMIO pages are identified by a combination of an IO device index and
+   3 flags.  The ROMD code stores the page ram offset in iotlb entry, 
+   so only a limited number of ids are avaiable.  */
+
+#define IO_MEM_SHIFT       3
 #define IO_MEM_NB_ENTRIES  (1 << (TARGET_PAGE_BITS  - IO_MEM_SHIFT))
 
 #define IO_MEM_RAM         (0 << IO_MEM_SHIFT) /* hardcoded offset */
 #define IO_MEM_ROM         (1 << IO_MEM_SHIFT) /* hardcoded offset */
 #define IO_MEM_UNASSIGNED  (2 << IO_MEM_SHIFT)
-#define IO_MEM_NOTDIRTY    (4 << IO_MEM_SHIFT) /* used internally, never use directly */
-/* acts like a ROM when read and like a device when written. As an
-   exception, the write memory callback gets the ram offset instead of
-   the physical address */
+#define IO_MEM_NOTDIRTY    (3 << IO_MEM_SHIFT)
+
+/* Acts like a ROM when read and like a device when written.  */
 #define IO_MEM_ROMD        (1)
 #define IO_MEM_SUBPAGE     (2)
 #define IO_MEM_SUBWIDTH    (4)
+
+/* Flags stored in the low bits of the TLB virtual address.  These are
+   defined so that fast path ram access is all zeros.  */
+/* Zero if TLB entry is valid.  */
+#define TLB_INVALID_MASK   (1 << 3)
+/* Set if TLB entry references a clean RAM page.  The iotlb entry will
+   contain the page physical address.  */
+#define TLB_NOTDIRTY    (1 << 4)
+/* Set if TLB entry is an IO callback.  */
+#define TLB_MMIO        (1 << 5)
 
 typedef void CPUWriteMemoryFunc(void *opaque, target_phys_addr_t addr, uint32_t value);
 typedef uint32_t CPUReadMemoryFunc(void *opaque, target_phys_addr_t addr);
@@ -886,8 +904,10 @@ void cpu_physical_memory_write_rom(target_phys_addr_t addr,
 int cpu_memory_rw_debug(CPUState *env, target_ulong addr,
                         uint8_t *buf, int len, int is_write);
 
-#define VGA_DIRTY_FLAG  0x01
-#define CODE_DIRTY_FLAG 0x02
+#define VGA_DIRTY_FLAG       0x01
+#define CODE_DIRTY_FLAG      0x02
+#define KQEMU_DIRTY_FLAG     0x04
+#define MIGRATION_DIRTY_FLAG 0x08
 
 /* read dirty bit (return 0 or 1) */
 static inline int cpu_physical_memory_is_dirty(ram_addr_t addr)
@@ -909,6 +929,10 @@ static inline void cpu_physical_memory_set_dirty(ram_addr_t addr)
 void cpu_physical_memory_reset_dirty(ram_addr_t start, ram_addr_t end,
                                      int dirty_flags);
 void cpu_tlb_update_dirty(CPUState *env);
+
+int cpu_physical_memory_set_dirty_tracking(int enable);
+
+int cpu_physical_memory_get_dirty_tracking(void);
 
 void dump_exec_info(FILE *f,
                     int (*cpu_fprintf)(FILE *f, const char *fmt, ...));
@@ -1061,19 +1085,6 @@ extern int64_t dev_time;
 extern int64_t kqemu_ret_int_count;
 extern int64_t kqemu_ret_excp_count;
 extern int64_t kqemu_ret_intr_count;
-
-extern int64_t dyngen_tb_count1;
-extern int64_t dyngen_tb_count;
-extern int64_t dyngen_op_count;
-extern int64_t dyngen_old_op_count;
-extern int64_t dyngen_tcg_del_op_count;
-extern int dyngen_op_count_max;
-extern int64_t dyngen_code_in_len;
-extern int64_t dyngen_code_out_len;
-extern int64_t dyngen_interm_time;
-extern int64_t dyngen_code_time;
-extern int64_t dyngen_restore_count;
-extern int64_t dyngen_restore_time;
 #endif
 
 #endif /* CPU_ALL_H */

@@ -56,7 +56,7 @@ uint32_t HELPER(neon_tbl)(uint32_t ireg, uint32_t def,
     for (shift = 0; shift < 32; shift += 8) {
         index = (ireg >> shift) & 0xff;
         if (index < maxindex) {
-            tmp = (table[index >> 3] >> (index & 7)) & 0xff;
+            tmp = (table[index >> 3] >> ((index & 7) << 3)) & 0xff;
             val |= tmp << shift;
         } else {
             val |= def & (0xff << shift);
@@ -68,11 +68,6 @@ uint32_t HELPER(neon_tbl)(uint32_t ireg, uint32_t def,
 #if !defined(CONFIG_USER_ONLY)
 
 #define MMUSUFFIX _mmu
-#ifdef __s390__
-# define GETPC() ((void*)((unsigned long)__builtin_return_address(0) & 0x7fffffffUL))
-#else
-# define GETPC() (__builtin_return_address(0))
-#endif
 
 #define SHIFT 0
 #include "softmmu_template.h"
@@ -102,7 +97,7 @@ void tlb_fill (target_ulong addr, int is_write, int mmu_idx, void *retaddr)
     saved_env = env;
     env = cpu_single_env;
     ret = cpu_arm_handle_mmu_fault(env, addr, is_write, mmu_idx, 1);
-    if (__builtin_expect(ret, 0)) {
+    if (unlikely(ret)) {
         if (retaddr) {
             /* now we have a real cpu fault */
             pc = (unsigned long)retaddr;
@@ -190,7 +185,6 @@ static inline uint32_t do_ssat(int32_t val, int shift)
     int32_t top;
     uint32_t mask;
 
-    shift = PARAM1;
     top = val >> shift;
     mask = (1u << shift) - 1;
     if (top > 0) {
@@ -208,7 +202,6 @@ static inline uint32_t do_usat(int32_t val, int shift)
 {
     uint32_t max;
 
-    shift = PARAM1;
     max = (1u << shift) - 1;
     if (val < 0) {
         env->QF = 1;

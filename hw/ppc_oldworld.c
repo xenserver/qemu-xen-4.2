@@ -143,7 +143,6 @@ static void ppc_heathrow_init (ram_addr_t ram_size, int vga_ram_size,
         cpu_ppc_tb_init(env, 100UL * 1000UL * 1000UL);
         env->osi_call = vga_osi_call;
         qemu_register_reset(&cpu_ppc_reset, env);
-        register_savevm("cpu", 0, 3, cpu_save, cpu_load, env);
         envs[i] = env;
     }
     if (env->nip < 0xFFF80000) {
@@ -367,8 +366,9 @@ static void ppc_heathrow_init (ram_addr_t ram_size, int vga_ram_size,
 }
 
 QEMUMachine heathrow_machine = {
-    "g3bw",
-    "Heathrow based PowerMAC",
-    ppc_heathrow_init,
-    BIOS_SIZE + VGA_RAM_SIZE,
+    .name = "g3bw",
+    .desc = "Heathrow based PowerMAC",
+    .init = ppc_heathrow_init,
+    .ram_require = BIOS_SIZE + VGA_RAM_SIZE,
+    .max_cpus = 1,
 };

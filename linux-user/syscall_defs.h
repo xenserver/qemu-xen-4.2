@@ -860,11 +860,14 @@ struct target_winsize {
 
 #include "termbits.h"
 
+/* Common */
 #define TARGET_MAP_SHARED	0x01		/* Share changes */
 #define TARGET_MAP_PRIVATE	0x02		/* Changes are private */
-#define TARGET_MAP_TYPE	0x0f		/* Mask for type of mapping */
-#define TARGET_MAP_FIXED	0x10		/* Interpret addr exactly */
+#define TARGET_MAP_TYPE		0x0f		/* Mask for type of mapping */
+
+/* Target specific */
 #if defined(TARGET_MIPS)
+#define TARGET_MAP_FIXED	0x10		/* Interpret addr exactly */
 #define TARGET_MAP_ANONYMOUS	0x0800		/* don't use a file */
 #define TARGET_MAP_GROWSDOWN	0x1000		/* stack-like segment */
 #define TARGET_MAP_DENYWRITE	0x2000		/* ETXTBSY */
@@ -873,18 +876,34 @@ struct target_winsize {
 #define TARGET_MAP_NORESERVE	0x0400		/* don't check for reservations */
 #define TARGET_MAP_POPULATE	0x10000		/* populate (prefault) pagetables */
 #define TARGET_MAP_NONBLOCK	0x20000		/* do not block on IO */
-#else
+#elif defined(TARGET_PPC)
+#define TARGET_MAP_FIXED	0x10		/* Interpret addr exactly */
 #define TARGET_MAP_ANONYMOUS	0x20		/* don't use a file */
 #define TARGET_MAP_GROWSDOWN	0x0100		/* stack-like segment */
 #define TARGET_MAP_DENYWRITE	0x0800		/* ETXTBSY */
 #define TARGET_MAP_EXECUTABLE	0x1000		/* mark it as an executable */
-#if defined(TARGET_PPC)
 #define TARGET_MAP_LOCKED	0x0080		/* pages are locked */
 #define TARGET_MAP_NORESERVE	0x0040		/* don't check for reservations */
+#define TARGET_MAP_POPULATE	0x8000		/* populate (prefault) pagetables */
+#define TARGET_MAP_NONBLOCK	0x10000		/* do not block on IO */
+#elif defined(TARGET_ALPHA)
+#define TARGET_MAP_ANONYMOUS	0x10		/* don't use a file */
+#define TARGET_MAP_FIXED	0x100		/* Interpret addr exactly */
+#define TARGET_MAP_GROWSDOWN	0x01000		/* stack-like segment */
+#define TARGET_MAP_DENYWRITE	0x02000		/* ETXTBSY */
+#define TARGET_MAP_EXECUTABLE	0x04000		/* mark it as an executable */
+#define TARGET_MAP_LOCKED	0x08000		/* lock the mapping */
+#define TARGET_MAP_NORESERVE	0x10000		/* no check for reservations */
+#define TARGET_MAP_POPULATE	0x20000		/* pop (prefault) pagetables */
+#define TARGET_MAP_NONBLOCK	0x40000		/* do not block on IO */
 #else
+#define TARGET_MAP_FIXED	0x10		/* Interpret addr exactly */
+#define TARGET_MAP_ANONYMOUS	0x20		/* don't use a file */
+#define TARGET_MAP_GROWSDOWN	0x0100		/* stack-like segment */
+#define TARGET_MAP_DENYWRITE	0x0800		/* ETXTBSY */
+#define TARGET_MAP_EXECUTABLE	0x1000		/* mark it as an executable */
 #define TARGET_MAP_LOCKED	0x2000		/* pages are locked */
 #define TARGET_MAP_NORESERVE	0x4000		/* don't check for reservations */
-#endif
 #define TARGET_MAP_POPULATE	0x8000		/* populate (prefault) pagetables */
 #define TARGET_MAP_NONBLOCK	0x10000		/* do not block on IO */
 #endif
@@ -1570,7 +1589,8 @@ struct target_statfs64 {
 	uint32_t	f_namelen;
 	uint32_t	f_spare[6];
 };
-#elif defined(TARGET_PPC64) && !defined(TARGET_ABI32)
+#elif (defined(TARGET_PPC64) || defined(TARGET_X86_64) || \
+       defined(TARGET_SPARC64)) && !defined(TARGET_ABI32)
 struct target_statfs {
 	abi_long f_type;
 	abi_long f_bsize;
@@ -1921,6 +1941,10 @@ struct target_eabi_flock64 {
 /* vfat ioctls */
 #define TARGET_VFAT_IOCTL_READDIR_BOTH    TARGET_IORU('r', 1)
 #define TARGET_VFAT_IOCTL_READDIR_SHORT   TARGET_IORU('r', 2)
+
+#define TARGET_MTIOCTOP        TARGET_IOW('m', 1, struct mtop)
+#define TARGET_MTIOCGET        TARGET_IOR('m', 2, struct mtget)
+#define TARGET_MTIOCPOS        TARGET_IOR('m', 3, struct mtpos)
 
 struct target_sysinfo {
     abi_long uptime;                /* Seconds since boot */

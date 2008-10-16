@@ -8,6 +8,8 @@ extern const char *bios_dir;
 
 extern int vm_running;
 extern const char *qemu_name;
+extern uint8_t qemu_uuid[];
+#define UUID_FMT "%02hhx%02hhx%02hhx%02hhx-%02hhx%02hhx-%02hhx%02hhx-%02hhx%02hhx-%02hhx%02hhx%02hhx%02hhx%02hhx%02hhx"
 
 typedef struct vm_change_state_entry VMChangeStateEntry;
 typedef void VMChangeStateHandler(void *opaque, int running);
@@ -41,15 +43,18 @@ void qemu_system_powerdown(void);
 #endif
 void qemu_system_reset(void);
 
-void cpu_save(QEMUFile *f, void *opaque);
-int cpu_load(QEMUFile *f, void *opaque, int version_id);
-
 void do_savevm(const char *name);
 void do_loadvm(const char *name);
 void do_delvm(const char *name);
 void do_info_snapshots(void);
 
 void main_loop_wait(int timeout);
+
+int qemu_savevm_state_begin(QEMUFile *f);
+int qemu_savevm_state_iterate(QEMUFile *f);
+int qemu_savevm_state_complete(QEMUFile *f);
+int qemu_savevm_state(QEMUFile *f);
+int qemu_loadvm_state(QEMUFile *f);
 
 /* Polling handling */
 
@@ -79,6 +84,7 @@ extern int vmsvga_enabled;
 extern int graphic_width;
 extern int graphic_height;
 extern int graphic_depth;
+extern int nographic;
 extern const char *keyboard_layout;
 extern int win2k_install_hack;
 extern int alt_grab;
@@ -88,7 +94,6 @@ extern int cursor_hide;
 extern int graphic_rotate;
 extern int no_quit;
 extern int semihosting_enabled;
-extern int autostart;
 extern int old_param;
 extern const char *bootp_filename;
 

@@ -246,10 +246,12 @@ static int cow_create(const char *filename, int64_t image_sectors,
     return 0;
 }
 
-static void cow_flush(BlockDriverState *bs)
+static int cow_flush(BlockDriverState *bs)
 {
     BDRVCowState *s = bs->opaque;
-    fsync(s->fd);
+    if (fsync(s->fd))
+        return errno;
+    return 0;
 }
 
 BlockDriver bdrv_cow = {

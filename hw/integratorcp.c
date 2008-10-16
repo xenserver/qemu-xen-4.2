@@ -494,7 +494,7 @@ static void integratorcp_init(ram_addr_t ram_size, int vga_ram_size,
     }
     ram_offset = qemu_ram_alloc(ram_size);
     /* ??? On a real system the first 1Mb is mapped as SSRAM or boot flash.  */
-    /* ??? RAM shoud repeat to fill physical memory space.  */
+    /* ??? RAM should repeat to fill physical memory space.  */
     /* SDRAM at address zero*/
     cpu_register_physical_memory(0, ram_size, ram_offset | IO_MEM_RAM);
     /* And again at address 0x80000000 */
@@ -540,8 +540,9 @@ static void integratorcp_init(ram_addr_t ram_size, int vga_ram_size,
 }
 
 QEMUMachine integratorcp_machine = {
-    "integratorcp",
-    "ARM Integrator/CP (ARM926EJ-S)",
-    integratorcp_init,
-    0x100000,
+    .name = "integratorcp",
+    .desc = "ARM Integrator/CP (ARM926EJ-S)",
+    .init = integratorcp_init,
+    .ram_require = 0x100000,
+    .max_cpus = 1,
 };

@@ -42,9 +42,8 @@ int cpu_cris_handle_mmu_fault(CPUState * env, target_ulong address, int rw,
                              int mmu_idx, int is_softmmu)
 {
 	env->exception_index = 0xaa;
-	env->debug1 = address;
+	env->pregs[PR_EDA] = address;
 	cpu_dump_state(env, stderr, fprintf, 0);
-	env->pregs[PR_ERP] = env->pc;
 	return 1;
 }
 
@@ -75,25 +74,27 @@ int cpu_cris_handle_mmu_fault (CPUState *env, target_ulong address, int rw,
 
 	D(printf ("%s addr=%x pc=%x rw=%x\n", __func__, address, env->pc, rw));
 	address &= TARGET_PAGE_MASK;
-	prot = PAGE_READ | PAGE_WRITE | PAGE_EXEC;
 	miss = cris_mmu_translate(&res, env, address, rw, mmu_idx);
 	if (miss)
 	{
-		if (env->exception_index == EXCP_MMU_FAULT)
+		if (env->exception_index == EXCP_BUSFAULT)
 			cpu_abort(env, 
 				  "CRIS: Illegal recursive bus fault."
 				  "addr=%x rw=%d\n",
 				  address, rw);
 
-		env->exception_index = EXCP_MMU_FAULT;
+		env->exception_index = EXCP_BUSFAULT;
 		env->fault_vector = res.bf_vec;
 		r = 1;
 	}
 	else
 	{
-		phy = res.phy;
+		/*
+		 * Mask off the cache selection bit. The ETRAX busses do not
+		 * see the top bit.
+		 */
+		phy = res.phy & ~0x80000000;
 		prot = res.prot;
-		address &= TARGET_PAGE_MASK;
 		r = tlb_set_page(env, address, phy, prot, mmu_idx, is_softmmu);
 	}
 	if (r > 0)
@@ -118,26 +119,32 @@ void do_interrupt(CPUState *env)
 			/* These exceptions are genereated by the core itself.
 			   ERP should point to the insn following the brk.  */
 			ex_vec = env->trap_vector;
-			env->pregs[PR_ERP] = env->pc + 2;
+			env->pregs[PR_ERP] = env->pc;
 			break;
 
-		case EXCP_MMU_FAULT:
+		case EXCP_NMI:
+			/* NMI is hardwired to vector zero.  */
+			ex_vec = 0;
+			env->pregs[PR_CCS] &= ~M_FLAG;
+			env->pregs[PR_NRP] = env->pc;
+			break;
+
+		case EXCP_BUSFAULT:
 			ex_vec = env->fault_vector;
 			env->pregs[PR_ERP] = env->pc;
 			break;
 
 		default:
-			/* Is the core accepting interrupts?  */
-			if (!(env->pregs[PR_CCS] & I_FLAG))
-				return;
-			/* The interrupt controller gives us the
-			   vector.  */
+			/* The interrupt controller gives us the vector.  */
 			ex_vec = env->interrupt_vector;
 			/* Normal interrupts are taken between
 			   TB's.  env->pc is valid here.  */
 			env->pregs[PR_ERP] = env->pc;
 			break;
 	}
+
+	/* Fill in the IDX field.  */
+	env->pregs[PR_EXS] = (ex_vec & 0xff) << 8;
 
 	if (env->dslot) {
 		D(fprintf(logfile, "excp isr=%x PC=%x ds=%d SP=%x"

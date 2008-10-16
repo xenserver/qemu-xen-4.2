@@ -26,6 +26,8 @@
 
 #include "qemu.h"
 #include "qemu-common.h"
+/* For tb_lock */
+#include "exec-all.h"
 
 #define DEBUG_LOGFILE "/tmp/qemu.log"
 
@@ -105,10 +107,12 @@ int cpu_inl(CPUState *env, int addr)
     return 0;
 }
 
+#if defined(TARGET_I386)
 int cpu_get_pic_interrupt(CPUState *env)
 {
     return -1;
 }
+#endif
 
 /* timers for rdtsc */
 
@@ -122,6 +126,135 @@ int64_t cpu_get_real_ticks(void)
 }
 
 #endif
+
+#if defined(USE_NPTL)
+/***********************************************************/
+/* Helper routines for implementing atomic operations.  */
+
+/* To implement exclusive operations we force all cpus to syncronise.
+   We don't require a full sync, only that no cpus are executing guest code.
+   The alternative is to map target atomic ops onto host equivalents,
+   which requires quite a lot of per host/target work.  */
+static pthread_mutex_t exclusive_lock = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t exclusive_cond = PTHREAD_COND_INITIALIZER;
+static pthread_cond_t exclusive_resume = PTHREAD_COND_INITIALIZER;
+static int pending_cpus;
+
+/* Make sure everything is in a consistent state for calling fork().  */
+void fork_start(void)
+{
+    mmap_fork_start();
+    pthread_mutex_lock(&tb_lock);
+    pthread_mutex_lock(&exclusive_lock);
+}
+
+void fork_end(int child)
+{
+    if (child) {
+        /* Child processes created by fork() only have a single thread.
+           Discard information about the parent threads.  */
+        first_cpu = thread_env;
+        thread_env->next_cpu = NULL;
+        pending_cpus = 0;
+        pthread_mutex_init(&exclusive_lock, NULL);
+        pthread_cond_init(&exclusive_cond, NULL);
+        pthread_cond_init(&exclusive_resume, NULL);
+        pthread_mutex_init(&tb_lock, NULL);
+    } else {
+        pthread_mutex_unlock(&exclusive_lock);
+        pthread_mutex_unlock(&tb_lock);
+    }
+    mmap_fork_end(child);
+}
+
+/* Wait for pending exclusive operations to complete.  The exclusive lock
+   must be held.  */
+static inline void exclusive_idle(void)
+{
+    while (pending_cpus) {
+        pthread_cond_wait(&exclusive_resume, &exclusive_lock);
+    }
+}
+
+/* Start an exclusive operation.
+   Must only be called from outside cpu_arm_exec.   */
+static inline void start_exclusive(void)
+{
+    CPUState *other;
+    pthread_mutex_lock(&exclusive_lock);
+    exclusive_idle();
+
+    pending_cpus = 1;
+    /* Make all other cpus stop executing.  */
+    for (other = first_cpu; other; other = other->next_cpu) {
+        if (other->running) {
+            pending_cpus++;
+            cpu_interrupt(other, CPU_INTERRUPT_EXIT);
+        }
+    }
+    if (pending_cpus > 1) {
+        pthread_cond_wait(&exclusive_cond, &exclusive_lock);
+    }
+}
+
+/* Finish an exclusive operation.  */
+static inline void end_exclusive(void)
+{
+    pending_cpus = 0;
+    pthread_cond_broadcast(&exclusive_resume);
+    pthread_mutex_unlock(&exclusive_lock);
+}
+
+/* Wait for exclusive ops to finish, and begin cpu execution.  */
+static inline void cpu_exec_start(CPUState *env)
+{
+    pthread_mutex_lock(&exclusive_lock);
+    exclusive_idle();
+    env->running = 1;
+    pthread_mutex_unlock(&exclusive_lock);
+}
+
+/* Mark cpu as not executing, and release pending exclusive ops.  */
+static inline void cpu_exec_end(CPUState *env)
+{
+    pthread_mutex_lock(&exclusive_lock);
+    env->running = 0;
+    if (pending_cpus > 1) {
+        pending_cpus--;
+        if (pending_cpus == 1) {
+            pthread_cond_signal(&exclusive_cond);
+        }
+    }
+    exclusive_idle();
+    pthread_mutex_unlock(&exclusive_lock);
+}
+#else /* if !USE_NPTL */
+/* These are no-ops because we are not threadsafe.  */
+static inline void cpu_exec_start(CPUState *env)
+{
+}
+
+static inline void cpu_exec_end(CPUState *env)
+{
+}
+
+static inline void start_exclusive(void)
+{
+}
+
+static inline void end_exclusive(void)
+{
+}
+
+void fork_start(void)
+{
+}
+
+void fork_end(int child)
+{
+}
+#endif
+
 
 #ifdef TARGET_I386
 /***********************************************************/
@@ -145,11 +278,11 @@ static void write_dt(void *ptr, unsigned long addr, unsigned long limit,
     e2 = ((addr >> 16) & 0xff) | (addr & 0xff000000) | (limit & 0x000f0000);
     e2 |= flags;
     p = ptr;
-    p[0] = tswapl(e1);
-    p[1] = tswapl(e2);
+    p[0] = tswap32(e1);
+    p[1] = tswap32(e2);
 }
 
-#if TARGET_X86_64
+#ifdef TARGET_X86_64
 uint64_t idt_table[512];
 
 static void set_gate64(void *ptr, unsigned int type, unsigned int dpl,
@@ -230,7 +363,7 @@ void cpu_loop(CPUX86State *env)
             info.si_errno = 0;
             info.si_code = TARGET_SI_KERNEL;
             info._sifields._sigfault._addr = 0;
-            queue_signal(info.si_signo, &info);
+            queue_signal(env, info.si_signo, &info);
             break;
         case EXCP0D_GPF:
             /* XXX: potential problem if ABI32 */
@@ -244,7 +377,7 @@ void cpu_loop(CPUX86State *env)
                 info.si_errno = 0;
                 info.si_code = TARGET_SI_KERNEL;
                 info._sifields._sigfault._addr = 0;
-                queue_signal(info.si_signo, &info);
+                queue_signal(env, info.si_signo, &info);
             }
             break;
         case EXCP0E_PAGE:
@@ -255,7 +388,7 @@ void cpu_loop(CPUX86State *env)
             else
                 info.si_code = TARGET_SEGV_ACCERR;
             info._sifields._sigfault._addr = env->cr[2];
-            queue_signal(info.si_signo, &info);
+            queue_signal(env, info.si_signo, &info);
             break;
         case EXCP00_DIVZ:
 #ifndef TARGET_X86_64
@@ -269,7 +402,7 @@ void cpu_loop(CPUX86State *env)
                 info.si_errno = 0;
                 info.si_code = TARGET_FPE_INTDIV;
                 info._sifields._sigfault._addr = env->eip;
-                queue_signal(info.si_signo, &info);
+                queue_signal(env, info.si_signo, &info);
             }
             break;
         case EXCP01_SSTP:
@@ -289,7 +422,7 @@ void cpu_loop(CPUX86State *env)
                     info.si_code = TARGET_SI_KERNEL;
                     info._sifields._sigfault._addr = 0;
                 }
-                queue_signal(info.si_signo, &info);
+                queue_signal(env, info.si_signo, &info);
             }
             break;
         case EXCP04_INTO:
@@ -304,7 +437,7 @@ void cpu_loop(CPUX86State *env)
                 info.si_errno = 0;
                 info.si_code = TARGET_SI_KERNEL;
                 info._sifields._sigfault._addr = 0;
-                queue_signal(info.si_signo, &info);
+                queue_signal(env, info.si_signo, &info);
             }
             break;
         case EXCP06_ILLOP:
@@ -312,7 +445,7 @@ void cpu_loop(CPUX86State *env)
             info.si_errno = 0;
             info.si_code = TARGET_ILL_ILLOPN;
             info._sifields._sigfault._addr = env->eip;
-            queue_signal(info.si_signo, &info);
+            queue_signal(env, info.si_signo, &info);
             break;
         case EXCP_INTERRUPT:
             /* just indicate that signals should be handled asap */
@@ -327,7 +460,7 @@ void cpu_loop(CPUX86State *env)
                     info.si_signo = sig;
                     info.si_errno = 0;
                     info.si_code = TARGET_TRAP_BRKPT;
-                    queue_signal(info.si_signo, &info);
+                    queue_signal(env, info.si_signo, &info);
                   }
             }
             break;
@@ -343,9 +476,6 @@ void cpu_loop(CPUX86State *env)
 #endif
 
 #ifdef TARGET_ARM
-
-/* XXX: find a better solution */
-extern void tb_invalidate_page_range(abi_ulong start, abi_ulong end);
 
 static void arm_cache_flush(abi_ulong start, abi_ulong last)
 {
@@ -365,6 +495,59 @@ static void arm_cache_flush(abi_ulong start, abi_ulong last)
     }
 }
 
+/* Handle a jump to the kernel code page.  */
+static int
+do_kernel_trap(CPUARMState *env)
+{
+    uint32_t addr;
+    uint32_t cpsr;
+    uint32_t val;
+
+    switch (env->regs[15]) {
+    case 0xffff0fa0: /* __kernel_memory_barrier */
+        /* ??? No-op. Will need to do better for SMP.  */
+        break;
+    case 0xffff0fc0: /* __kernel_cmpxchg */
+         /* XXX: This only works between threads, not between processes.
+            It's probably possible to implement this with native host
+            operations. However things like ldrex/strex are much harder so
+            there's not much point trying.  */
+        start_exclusive();
+        cpsr = cpsr_read(env);
+        addr = env->regs[2];
+        /* FIXME: This should SEGV if the access fails.  */
+        if (get_user_u32(val, addr))
+            val = ~env->regs[0];
+        if (val == env->regs[0]) {
+            val = env->regs[1];
+            /* FIXME: Check for segfaults.  */
+            put_user_u32(val, addr);
+            env->regs[0] = 0;
+            cpsr |= CPSR_C;
+        } else {
+            env->regs[0] = -1;
+            cpsr &= ~CPSR_C;
+        }
+        cpsr_write(env, cpsr, CPSR_C);
+        end_exclusive();
+        break;
+    case 0xffff0fe0: /* __kernel_get_tls */
+        env->regs[0] = env->cp15.c13_tls2;
+        break;
+    default:
+        return 1;
+    }
+    /* Jump back to the caller.  */
+    addr = env->regs[14];
+    if (addr & 1) {
+        env->thumb = 1;
+        addr &= ~1;
+    }
+    env->regs[15] = addr;
+
+    return 0;
+}
+
 void cpu_loop(CPUARMState *env)
 {
     int trapnr;
@@ -373,7 +556,9 @@ void cpu_loop(CPUARMState *env)
     uint32_t addr;
 
     for(;;) {
+        cpu_exec_start(env);
         trapnr = cpu_arm_exec(env);
+        cpu_exec_end(env);
         switch(trapnr) {
         case EXCP_UDEF:
             {
@@ -392,7 +577,7 @@ void cpu_loop(CPUARMState *env)
                     info.si_errno = 0;
                     info.si_code = TARGET_ILL_ILLOPN;
                     info._sifields._sigfault._addr = env->regs[15];
-                    queue_signal(info.si_signo, &info);
+                    queue_signal(env, info.si_signo, &info);
                 } else if (rc < 0) { /* FP exception */
                     int arm_fpe=0;
 
@@ -423,7 +608,7 @@ void cpu_loop(CPUARMState *env)
                       if (arm_fpe & BIT_IOC) info.si_code = TARGET_FPE_FLTINV;
 
                       info._sifields._sigfault._addr = env->regs[15];
-                      queue_signal(info.si_signo, &info);
+                      queue_signal(env, info.si_signo, &info);
                     } else {
                       env->regs[15] += 4;
                     }
@@ -489,14 +674,31 @@ void cpu_loop(CPUARMState *env)
                         n -= ARM_SYSCALL_BASE;
                         env->eabi = 0;
                     }
-                    env->regs[0] = do_syscall(env,
-                                              n,
-                                              env->regs[0],
-                                              env->regs[1],
-                                              env->regs[2],
-                                              env->regs[3],
-                                              env->regs[4],
-                                              env->regs[5]);
+                    if ( n > ARM_NR_BASE) {
+                        switch (n) {
+                        case ARM_NR_cacheflush:
+                            arm_cache_flush(env->regs[0], env->regs[1]);
+                            break;
+                        case ARM_NR_set_tls:
+                            cpu_set_tls(env, env->regs[0]);
+                            env->regs[0] = 0;
+                            break;
+                        default:
+                            gemu_log("qemu: Unsupported ARM syscall: 0x%x\n",
+                                     n);
+                            env->regs[0] = -TARGET_ENOSYS;
+                            break;
+                        }
+                    } else {
+                        env->regs[0] = do_syscall(env,
+                                                  n,
+                                                  env->regs[0],
+                                                  env->regs[1],
+                                                  env->regs[2],
+                                                  env->regs[3],
+                                                  env->regs[4],
+                                                  env->regs[5]);
+                    }
                 } else {
                     goto error;
                 }
@@ -506,10 +708,10 @@ void cpu_loop(CPUARMState *env)
             /* just indicate that signals should be handled asap */
             break;
         case EXCP_PREFETCH_ABORT:
-            addr = env->cp15.c6_data;
+            addr = env->cp15.c6_insn;
             goto do_segv;
         case EXCP_DATA_ABORT:
-            addr = env->cp15.c6_insn;
+            addr = env->cp15.c6_data;
             goto do_segv;
         do_segv:
             {
@@ -518,7 +720,7 @@ void cpu_loop(CPUARMState *env)
                 /* XXX: check env->error_code */
                 info.si_code = TARGET_SEGV_MAPERR;
                 info._sifields._sigfault._addr = addr;
-                queue_signal(info.si_signo, &info);
+                queue_signal(env, info.si_signo, &info);
             }
             break;
         case EXCP_DEBUG:
@@ -531,9 +733,13 @@ void cpu_loop(CPUARMState *env)
                     info.si_signo = sig;
                     info.si_errno = 0;
                     info.si_code = TARGET_TRAP_BRKPT;
-                    queue_signal(info.si_signo, &info);
+                    queue_signal(env, info.si_signo, &info);
                   }
             }
+            break;
+        case EXCP_KERNEL_TRAP:
+            if (do_kernel_trap(env))
+              goto error;
             break;
         default:
         error:
@@ -549,6 +755,7 @@ void cpu_loop(CPUARMState *env)
 #endif
 
 #ifdef TARGET_SPARC
+#define SPARC64_STACK_BIAS 2047
 
 //#define DEBUG_WIN
 
@@ -556,11 +763,11 @@ void cpu_loop(CPUARMState *env)
    can be found at http://www.sics.se/~psm/sparcstack.html */
 static inline int get_reg_index(CPUSPARCState *env, int cwp, int index)
 {
-    index = (index + cwp * 16) & (16 * NWINDOWS - 1);
+    index = (index + cwp * 16) % (16 * env->nwindows);
     /* wrap handling : if cwp is on the last window, then we use the
        registers 'after' the end */
-    if (index < 8 && env->cwp == (NWINDOWS - 1))
-        index += (16 * NWINDOWS);
+    if (index < 8 && env->cwp == env->nwindows - 1)
+        index += 16 * env->nwindows;
     return index;
 }
 
@@ -571,9 +778,13 @@ static inline void save_window_offset(CPUSPARCState *env, int cwp1)
     abi_ulong sp_ptr;
 
     sp_ptr = env->regbase[get_reg_index(env, cwp1, 6)];
+#ifdef TARGET_SPARC64
+    if (sp_ptr & 3)
+        sp_ptr += SPARC64_STACK_BIAS;
+#endif
 #if defined(DEBUG_WIN)
-    printf("win_overflow: sp_ptr=0x%x save_cwp=%d\n",
-           (int)sp_ptr, cwp1);
+    printf("win_overflow: sp_ptr=0x" TARGET_ABI_FMT_lx " save_cwp=%d\n",
+           sp_ptr, cwp1);
 #endif
     for(i = 0; i < 16; i++) {
         /* FIXME - what to do if put_user() fails? */
@@ -586,12 +797,12 @@ static void save_window(CPUSPARCState *env)
 {
 #ifndef TARGET_SPARC64
     unsigned int new_wim;
-    new_wim = ((env->wim >> 1) | (env->wim << (NWINDOWS - 1))) &
-        ((1LL << NWINDOWS) - 1);
-    save_window_offset(env, (env->cwp - 2) & (NWINDOWS - 1));
+    new_wim = ((env->wim >> 1) | (env->wim << (env->nwindows - 1))) &
+        ((1LL << env->nwindows) - 1);
+    save_window_offset(env, cpu_cwp_dec(env, env->cwp - 2));
     env->wim = new_wim;
 #else
-    save_window_offset(env, (env->cwp - 2) & (NWINDOWS - 1));
+    save_window_offset(env, cpu_cwp_dec(env, env->cwp - 2));
     env->cansave++;
     env->canrestore--;
 #endif
@@ -599,30 +810,40 @@ static void save_window(CPUSPARCState *env)
 
 static void restore_window(CPUSPARCState *env)
 {
-    unsigned int new_wim, i, cwp1;
+#ifndef TARGET_SPARC64
+    unsigned int new_wim;
+#endif
+    unsigned int i, cwp1;
     abi_ulong sp_ptr;
 
-    new_wim = ((env->wim << 1) | (env->wim >> (NWINDOWS - 1))) &
-        ((1LL << NWINDOWS) - 1);
+#ifndef TARGET_SPARC64
+    new_wim = ((env->wim << 1) | (env->wim >> (env->nwindows - 1))) &
+        ((1LL << env->nwindows) - 1);
+#endif
 
     /* restore the invalid window */
-    cwp1 = (env->cwp + 1) & (NWINDOWS - 1);
+    cwp1 = cpu_cwp_inc(env, env->cwp + 1);
     sp_ptr = env->regbase[get_reg_index(env, cwp1, 6)];
+#ifdef TARGET_SPARC64
+    if (sp_ptr & 3)
+        sp_ptr += SPARC64_STACK_BIAS;
+#endif
 #if defined(DEBUG_WIN)
-    printf("win_underflow: sp_ptr=0x%x load_cwp=%d\n",
-           (int)sp_ptr, cwp1);
+    printf("win_underflow: sp_ptr=0x" TARGET_ABI_FMT_lx " load_cwp=%d\n",
+           sp_ptr, cwp1);
 #endif
     for(i = 0; i < 16; i++) {
         /* FIXME - what to do if get_user() fails? */
         get_user_ual(env->regbase[get_reg_index(env, cwp1, 8 + i)], sp_ptr);
         sp_ptr += sizeof(abi_ulong);
     }
-    env->wim = new_wim;
 #ifdef TARGET_SPARC64
     env->canrestore++;
-    if (env->cleanwin < NWINDOWS - 1)
-	env->cleanwin++;
+    if (env->cleanwin < env->nwindows - 1)
+        env->cleanwin++;
     env->cansave--;
+#else
+    env->wim = new_wim;
 #endif
 }
 
@@ -633,15 +854,24 @@ static void flush_windows(CPUSPARCState *env)
     offset = 1;
     for(;;) {
         /* if restore would invoke restore_window(), then we can stop */
-        cwp1 = (env->cwp + offset) & (NWINDOWS - 1);
+        cwp1 = cpu_cwp_inc(env, env->cwp + offset);
+#ifndef TARGET_SPARC64
         if (env->wim & (1 << cwp1))
             break;
+#else
+        if (env->canrestore == 0)
+            break;
+        env->cansave++;
+        env->canrestore--;
+#endif
         save_window_offset(env, cwp1);
         offset++;
     }
+    cwp1 = cpu_cwp_inc(env, env->cwp + 1);
+#ifndef TARGET_SPARC64
     /* set wim so that restore will reload the registers */
-    cwp1 = (env->cwp + 1) & (NWINDOWS - 1);
     env->wim = 1 << cwp1;
+#endif
 #if defined(DEBUG_WIN)
     printf("flush_windows: nb=%d\n", offset - 1);
 #endif
@@ -710,7 +940,7 @@ void cpu_loop (CPUSPARCState *env)
                 /* XXX: check env->error_code */
                 info.si_code = TARGET_SEGV_MAPERR;
                 info._sifields._sigfault._addr = env->mmuregs[4];
-                queue_signal(info.si_signo, &info);
+                queue_signal(env, info.si_signo, &info);
             }
             break;
 #else
@@ -731,7 +961,7 @@ void cpu_loop (CPUSPARCState *env)
                     info._sifields._sigfault._addr = env->dmmuregs[4];
                 else
                     info._sifields._sigfault._addr = env->tsptr->tpc;
-                queue_signal(info.si_signo, &info);
+                queue_signal(env, info.si_signo, &info);
             }
             break;
 #ifndef TARGET_ABI32
@@ -758,7 +988,7 @@ void cpu_loop (CPUSPARCState *env)
                     info.si_signo = sig;
                     info.si_errno = 0;
                     info.si_code = TARGET_TRAP_BRKPT;
-                    queue_signal(info.si_signo, &info);
+                    queue_signal(env, info.si_signo, &info);
                   }
             }
             break;
@@ -879,7 +1109,7 @@ void cpu_loop(CPUPPCState *env)
                 break;
             }
             info._sifields._sigfault._addr = env->nip;
-            queue_signal(info.si_signo, &info);
+            queue_signal(env, info.si_signo, &info);
             break;
         case POWERPC_EXCP_ISI:      /* Instruction storage exception         */
             EXCP_DUMP(env, "Invalid instruction fetch: 0x\n" ADDRX "\n",
@@ -907,7 +1137,7 @@ void cpu_loop(CPUPPCState *env)
                 break;
             }
             info._sifields._sigfault._addr = env->nip - 4;
-            queue_signal(info.si_signo, &info);
+            queue_signal(env, info.si_signo, &info);
             break;
         case POWERPC_EXCP_EXTERNAL: /* External input                        */
             cpu_abort(env, "External interrupt while in user mode. "
@@ -920,7 +1150,7 @@ void cpu_loop(CPUPPCState *env)
             info.si_errno = 0;
             info.si_code = TARGET_BUS_ADRALN;
             info._sifields._sigfault._addr = env->nip - 4;
-            queue_signal(info.si_signo, &info);
+            queue_signal(env, info.si_signo, &info);
             break;
         case POWERPC_EXCP_PROGRAM:  /* Program exception                     */
             /* XXX: check this */
@@ -1013,7 +1243,7 @@ void cpu_loop(CPUPPCState *env)
                 break;
             }
             info._sifields._sigfault._addr = env->nip - 4;
-            queue_signal(info.si_signo, &info);
+            queue_signal(env, info.si_signo, &info);
             break;
         case POWERPC_EXCP_FPU:      /* Floating-point unavailable exception  */
             EXCP_DUMP(env, "No floating point allowed\n");
@@ -1021,7 +1251,7 @@ void cpu_loop(CPUPPCState *env)
             info.si_errno = 0;
             info.si_code = TARGET_ILL_COPROC;
             info._sifields._sigfault._addr = env->nip - 4;
-            queue_signal(info.si_signo, &info);
+            queue_signal(env, info.si_signo, &info);
             break;
         case POWERPC_EXCP_SYSCALL:  /* System call exception                 */
             cpu_abort(env, "Syscall exception while in user mode. "
@@ -1033,7 +1263,7 @@ void cpu_loop(CPUPPCState *env)
             info.si_errno = 0;
             info.si_code = TARGET_ILL_COPROC;
             info._sifields._sigfault._addr = env->nip - 4;
-            queue_signal(info.si_signo, &info);
+            queue_signal(env, info.si_signo, &info);
             break;
         case POWERPC_EXCP_DECR:     /* Decrementer exception                 */
             cpu_abort(env, "Decrementer interrupt while in user mode. "
@@ -1065,7 +1295,7 @@ void cpu_loop(CPUPPCState *env)
                     info.si_signo = sig;
                     info.si_errno = 0;
                     info.si_code = TARGET_TRAP_BRKPT;
-                    queue_signal(info.si_signo, &info);
+                    queue_signal(env, info.si_signo, &info);
                   }
             }
             break;
@@ -1075,7 +1305,7 @@ void cpu_loop(CPUPPCState *env)
             info.si_errno = 0;
             info.si_code = TARGET_ILL_COPROC;
             info._sifields._sigfault._addr = env->nip - 4;
-            queue_signal(info.si_signo, &info);
+            queue_signal(env, info.si_signo, &info);
             break;
         case POWERPC_EXCP_EFPDI:    /* Embedded floating-point data IRQ      */
             cpu_abort(env, "Embedded floating-point data IRQ not handled\n");
@@ -1139,7 +1369,7 @@ void cpu_loop(CPUPPCState *env)
             info.si_errno = 0;
             info.si_code = TARGET_ILL_COPROC;
             info._sifields._sigfault._addr = env->nip - 4;
-            queue_signal(info.si_signo, &info);
+            queue_signal(env, info.si_signo, &info);
             break;
         case POWERPC_EXCP_PIT:      /* Programmable interval timer IRQ       */
             cpu_abort(env, "Programable interval timer interrupt "
@@ -1572,8 +1802,8 @@ void cpu_loop(CPUMIPSState *env)
         trapnr = cpu_mips_exec(env);
         switch(trapnr) {
         case EXCP_SYSCALL:
-            syscall_num = env->gpr[env->current_tc][2] - 4000;
-            env->PC[env->current_tc] += 4;
+            syscall_num = env->active_tc.gpr[2] - 4000;
+            env->active_tc.PC += 4;
             if (syscall_num >= sizeof(mips_syscall_args)) {
                 ret = -ENOSYS;
             } else {
@@ -1582,7 +1812,7 @@ void cpu_loop(CPUMIPSState *env)
                 abi_ulong arg5 = 0, arg6 = 0, arg7 = 0, arg8 = 0;
 
                 nb_args = mips_syscall_args[syscall_num];
-                sp_reg = env->gpr[env->current_tc][29];
+                sp_reg = env->active_tc.gpr[29];
                 switch (nb_args) {
                 /* these arguments are taken from the stack */
                 /* FIXME - what to do if get_user() fails? */
@@ -1593,20 +1823,20 @@ void cpu_loop(CPUMIPSState *env)
                 default:
                     break;
                 }
-                ret = do_syscall(env, env->gpr[env->current_tc][2],
-                                 env->gpr[env->current_tc][4],
-                                 env->gpr[env->current_tc][5],
-                                 env->gpr[env->current_tc][6],
-                                 env->gpr[env->current_tc][7],
+                ret = do_syscall(env, env->active_tc.gpr[2],
+                                 env->active_tc.gpr[4],
+                                 env->active_tc.gpr[5],
+                                 env->active_tc.gpr[6],
+                                 env->active_tc.gpr[7],
                                  arg5, arg6/*, arg7, arg8*/);
             }
             if ((unsigned int)ret >= (unsigned int)(-1133)) {
-                env->gpr[env->current_tc][7] = 1; /* error flag */
+                env->active_tc.gpr[7] = 1; /* error flag */
                 ret = -ret;
             } else {
-                env->gpr[env->current_tc][7] = 0; /* error flag */
+                env->active_tc.gpr[7] = 0; /* error flag */
             }
-            env->gpr[env->current_tc][2] = ret;
+            env->active_tc.gpr[2] = ret;
             break;
         case EXCP_TLBL:
         case EXCP_TLBS:
@@ -1615,7 +1845,7 @@ void cpu_loop(CPUMIPSState *env)
             info.si_signo = TARGET_SIGILL;
             info.si_errno = 0;
             info.si_code = 0;
-            queue_signal(info.si_signo, &info);
+            queue_signal(env, info.si_signo, &info);
             break;
         case EXCP_INTERRUPT:
             /* just indicate that signals should be handled asap */
@@ -1630,7 +1860,7 @@ void cpu_loop(CPUMIPSState *env)
                     info.si_signo = sig;
                     info.si_errno = 0;
                     info.si_code = TARGET_TRAP_BRKPT;
-                    queue_signal(info.si_signo, &info);
+                    queue_signal(env, info.si_signo, &info);
                   }
             }
             break;
@@ -1657,6 +1887,7 @@ void cpu_loop (CPUState *env)
 
         switch (trapnr) {
         case 0x160:
+            env->pc += 2;
             ret = do_syscall(env,
                              env->gregs[3],
                              env->gregs[4],
@@ -1666,7 +1897,6 @@ void cpu_loop (CPUState *env)
                              env->gregs[0],
                              env->gregs[1]);
             env->gregs[0] = ret;
-            env->pc += 2;
             break;
         case EXCP_INTERRUPT:
             /* just indicate that signals should be handled asap */
@@ -1681,7 +1911,7 @@ void cpu_loop (CPUState *env)
                     info.si_signo = sig;
                     info.si_errno = 0;
                     info.si_code = TARGET_TRAP_BRKPT;
-                    queue_signal(info.si_signo, &info);
+                    queue_signal(env, info.si_signo, &info);
                   }
             }
             break;
@@ -1691,7 +1921,7 @@ void cpu_loop (CPUState *env)
             info.si_errno = 0;
             info.si_code = TARGET_SEGV_MAPERR;
             info._sifields._sigfault._addr = env->tea;
-            queue_signal(info.si_signo, &info);
+            queue_signal(env, info.si_signo, &info);
 	    break;
 
         default:
@@ -1719,8 +1949,8 @@ void cpu_loop (CPUState *env)
                 info.si_errno = 0;
                 /* XXX: check env->error_code */
                 info.si_code = TARGET_SEGV_MAPERR;
-                info._sifields._sigfault._addr = env->debug1;
-                queue_signal(info.si_signo, &info);
+                info._sifields._sigfault._addr = env->pregs[PR_EDA];
+                queue_signal(env, info.si_signo, &info);
             }
             break;
 	case EXCP_INTERRUPT:
@@ -1736,7 +1966,6 @@ void cpu_loop (CPUState *env)
                              env->pregs[7], 
                              env->pregs[11]);
             env->regs[10] = ret;
-            env->pc += 2;
             break;
         case EXCP_DEBUG:
             {
@@ -1748,7 +1977,7 @@ void cpu_loop (CPUState *env)
                     info.si_signo = sig;
                     info.si_errno = 0;
                     info.si_code = TARGET_TRAP_BRKPT;
-                    queue_signal(info.si_signo, &info);
+                    queue_signal(env, info.si_signo, &info);
                   }
             }
             break;
@@ -1799,7 +2028,7 @@ void cpu_loop(CPUM68KState *env)
             info.si_errno = 0;
             info.si_code = TARGET_ILL_ILLOPN;
             info._sifields._sigfault._addr = env->pc;
-            queue_signal(info.si_signo, &info);
+            queue_signal(env, info.si_signo, &info);
             break;
         case EXCP_TRAP0:
             {
@@ -1826,7 +2055,7 @@ void cpu_loop(CPUM68KState *env)
                 /* XXX: check env->error_code */
                 info.si_code = TARGET_SEGV_MAPERR;
                 info._sifields._sigfault._addr = env->mmu.ar;
-                queue_signal(info.si_signo, &info);
+                queue_signal(env, info.si_signo, &info);
             }
             break;
         case EXCP_DEBUG:
@@ -1839,7 +2068,7 @@ void cpu_loop(CPUM68KState *env)
                     info.si_signo = sig;
                     info.si_errno = 0;
                     info.si_code = TARGET_TRAP_BRKPT;
-                    queue_signal(info.si_signo, &info);
+                    queue_signal(env, info.si_signo, &info);
                   }
             }
             break;
@@ -1913,7 +2142,6 @@ void cpu_loop (CPUState *env)
             exit(1);
             break;
         case EXCP_CALL_PAL ... (EXCP_CALL_PALP - 1):
-            fprintf(stderr, "Call to PALcode\n");
             call_pal(env, (trapnr >> 6) | 0x80);
             break;
         case EXCP_CALL_PALP ... (EXCP_CALL_PALE - 1):
@@ -1930,7 +2158,7 @@ void cpu_loop (CPUState *env)
                     info.si_signo = sig;
                     info.si_errno = 0;
                     info.si_code = TARGET_TRAP_BRKPT;
-                    queue_signal(info.si_signo, &info);
+                    queue_signal(env, info.si_signo, &info);
                   }
             }
             break;
@@ -1944,7 +2172,7 @@ void cpu_loop (CPUState *env)
 }
 #endif /* TARGET_ALPHA */
 
-void usage(void)
+static void usage(void)
 {
     printf("qemu-" TARGET_ARCH " version " QEMU_VERSION ", Copyright (c) 2003-2008 Fabrice Bellard\n"
            "usage: qemu-" TARGET_ARCH " [options] program [arguments...]\n"
@@ -1974,12 +2202,21 @@ void usage(void)
     _exit(1);
 }
 
-/* XXX: currently only used for async signals (see signal.c) */
-CPUState *global_env;
+THREAD CPUState *thread_env;
 
-/* used to free thread contexts */
-TaskState *first_task_state;
-
+/* Assumes contents are already zeroed.  */
+void init_task_state(TaskState *ts)
+{
+    int i;
+ 
+    ts->used = 1;
+    ts->first_free = ts->sigqueue_table;
+    for (i = 0; i < MAX_SIGQUEUE_SIZE - 1; i++) {
+        ts->sigqueue_table[i].next = &ts->sigqueue_table[i + 1];
+    }
+    ts->sigqueue_table[i].next = NULL;
+}
+ 
 int main(int argc, char **argv)
 {
     const char *filename;
@@ -2014,7 +2251,7 @@ int main(int argc, char **argv)
             break;
         } else if (!strcmp(r, "d")) {
             int mask;
-            CPULogItem *item;
+            const CPULogItem *item;
 
 	    if (optind >= argc)
 		break;
@@ -2115,6 +2352,7 @@ int main(int argc, char **argv)
         cpu_model = "any";
 #endif
     }
+    cpu_exec_init_all(0);
     /* NOTE: we need to init the CPU at this stage to get
        qemu_host_page_size */
     env = cpu_init(cpu_model);
@@ -2122,7 +2360,7 @@ int main(int argc, char **argv)
         fprintf(stderr, "Unable to find CPU definition\n");
         exit(1);
     }
-    global_env = env;
+    thread_env = env;
 
     if (getenv("QEMU_STRACE")) {
         do_strace = 1;
@@ -2175,9 +2413,9 @@ int main(int argc, char **argv)
 
     /* build Task State */
     memset(ts, 0, sizeof(TaskState));
-    env->opaque = ts;
-    ts->used = 1;
+    init_task_state(ts);
     ts->info = info;
+    env->opaque = ts;
     env->user_mode_only = 1;
 
 #if defined(TARGET_I386)
@@ -2349,9 +2587,9 @@ int main(int argc, char **argv)
         int i;
 
         for(i = 0; i < 32; i++) {
-            env->gpr[env->current_tc][i] = regs->regs[i];
+            env->active_tc.gpr[i] = regs->regs[i];
         }
-        env->PC[env->current_tc] = regs->cp0_epc;
+        env->active_tc.PC = regs->cp0_epc;
     }
 #elif defined(TARGET_SH4)
     {

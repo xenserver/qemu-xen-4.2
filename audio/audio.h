@@ -70,7 +70,7 @@ struct capture_ops {
 typedef struct CaptureState {
     void *opaque;
     struct capture_ops ops;
-    QEMU_LIST_ENTRY (CaptureState) entries;
+    LIST_ENTRY (CaptureState) entries;
 } CaptureState;
 
 typedef struct SWVoiceOut SWVoiceOut;
@@ -80,7 +80,7 @@ typedef struct SWVoiceIn SWVoiceIn;
 typedef struct QEMUSoundCard {
     AudioState *audio;
     char *name;
-    QEMU_LIST_ENTRY (QEMUSoundCard) entries;
+    LIST_ENTRY (QEMUSoundCard) entries;
 } QEMUSoundCard;
 
 typedef struct QEMUAudioTimeStamp {
@@ -169,5 +169,8 @@ uint32_t lsbindex (uint32_t u);
 #define audio_MIN(a, b) ((a)>(b)?(b):(a))
 #define audio_MAX(a, b) ((a)<(b)?(b):(a))
 #endif
+
+int wav_start_capture (CaptureState *s, const char *path, int freq,
+                       int bits, int nchannels);
 
 #endif  /* audio.h */

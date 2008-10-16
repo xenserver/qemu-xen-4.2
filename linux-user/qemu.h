@@ -37,6 +37,12 @@ typedef target_long abi_long;
 #include "target_signal.h"
 #include "gdbstub.h"
 
+#if defined(USE_NPTL)
+#define THREAD __thread
+#else
+#define THREAD
+#endif
+
 /* This struct is used to hold certain information about the image.
  * Basically, it replicates in user space what would be certain
  * task_struct fields in the kernel
@@ -82,6 +88,20 @@ struct vm86_saved_state {
 #include "nwfpe/fpa11.h"
 #endif
 
+#define MAX_SIGQUEUE_SIZE 1024
+
+struct sigqueue {
+    struct sigqueue *next;
+    target_siginfo_t info;
+};
+
+struct emulated_sigtable {
+    int pending; /* true if signal is pending */
+    struct sigqueue *first;
+    struct sigqueue info; /* in order to always have memory for the
+                             first signal, we put it here */
+};
+
 /* NOTE: we force a big alignment so that the stack stored after is
    aligned too */
 typedef struct TaskState {
@@ -109,10 +129,16 @@ typedef struct TaskState {
 #endif
     int used; /* non zero if used */
     struct image_info *info;
+
+    struct emulated_sigtable sigtab[TARGET_NSIG];
+    struct sigqueue sigqueue_table[MAX_SIGQUEUE_SIZE]; /* siginfo queue */
+    struct sigqueue *first_free; /* first free siginfo queue entry */
+    int signal_pending; /* non zero if a signal may be pending */
+
     uint8_t stack[0];
 } __attribute__((aligned(16))) TaskState;
 
-extern TaskState *first_task_state;
+void init_task_state(TaskState *ts);
 extern const char *qemu_uname_release;
 
 /* ??? See if we can avoid exposing so much of the loader internals.  */
@@ -164,15 +190,16 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
                     abi_long arg2, abi_long arg3, abi_long arg4,
                     abi_long arg5, abi_long arg6);
 void gemu_log(const char *fmt, ...) __attribute__((format(printf,1,2)));
-extern CPUState *global_env;
+extern THREAD CPUState *thread_env;
 void cpu_loop(CPUState *env);
 void init_paths(const char *prefix);
 const char *path(const char *pathname);
 char *target_strerror(int err);
 int get_osversion(void);
+void fork_start(void);
+void fork_end(int child);
 
-extern int loglevel;
-extern FILE *logfile;
+#include "qemu-log.h"
 
 /* strace.c */
 void print_syscall(int num,
@@ -182,11 +209,12 @@ void print_syscall_ret(int num, abi_long arg1);
 extern int do_strace;
 
 /* signal.c */
-void process_pending_signals(void *cpu_env);
+void process_pending_signals(CPUState *cpu_env);
 void signal_init(void);
-int queue_signal(int sig, target_siginfo_t *info);
+int queue_signal(CPUState *env, int sig, target_siginfo_t *info);
 void host_to_target_siginfo(target_siginfo_t *tinfo, const siginfo_t *info);
 void target_to_host_siginfo(siginfo_t *info, const target_siginfo_t *tinfo);
+int target_to_host_signal(int sig);
 long do_sigreturn(CPUState *env);
 long do_rt_sigreturn(CPUState *env);
 abi_long do_sigaltstack(abi_ulong uss_addr, abi_ulong uoss_addr, abi_ulong sp);
@@ -211,6 +239,16 @@ abi_long target_mremap(abi_ulong old_addr, abi_ulong old_size,
                        abi_ulong new_size, unsigned long flags,
                        abi_ulong new_addr);
 int target_msync(abi_ulong start, abi_ulong len, int flags);
+extern unsigned long last_brk;
+void mmap_lock(void);
+void mmap_unlock(void);
+#if defined(USE_NPTL)
+void mmap_fork_start(void);
+void mmap_fork_end(int child);
+#endif
+
+/* main.c */
+extern unsigned long x86_stack_size;
 
 /* user access */
 
@@ -364,7 +402,7 @@ static inline void *lock_user(int type, abi_ulong guest_addr, long len, int copy
 }
 
 /* Unlock an area of guest memory.  The first LEN bytes must be
-   flushed back to guest memory. host_ptr = NULL is explicitely
+   flushed back to guest memory. host_ptr = NULL is explicitly
    allowed and does nothing. */
 static inline void unlock_user(void *host_ptr, abi_ulong guest_addr,
                                long len)
@@ -400,5 +438,9 @@ static inline void *lock_user_string(abi_ulong guest_addr)
     (host_ptr = lock_user(type, guest_addr, sizeof(*host_ptr), copy))
 #define unlock_user_struct(host_ptr, guest_addr, copy)		\
     unlock_user(host_ptr, guest_addr, (copy) ? sizeof(*host_ptr) : 0)
+
+#if defined(USE_NPTL)
+#include <pthread.h>
+#endif
 
 #endif /* QEMU_H */

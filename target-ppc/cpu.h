@@ -27,23 +27,11 @@
 
 #if defined (TARGET_PPC64)
 /* PowerPC 64 definitions */
-typedef uint64_t ppc_gpr_t;
 #define TARGET_LONG_BITS 64
 #define TARGET_PAGE_BITS 12
 
 #else /* defined (TARGET_PPC64) */
 /* PowerPC 32 definitions */
-#if (HOST_LONG_BITS >= 64)
-/* When using 64 bits temporary registers,
- * we can use 64 bits GPR with no extra cost
- * It's even an optimization as this will prevent
- * the compiler to do unuseful masking in the micro-ops.
- */
-typedef uint64_t ppc_gpr_t;
-#else /* (HOST_LONG_BITS >= 64) */
-typedef uint32_t ppc_gpr_t;
-#endif /* (HOST_LONG_BITS >= 64) */
-
 #define TARGET_LONG_BITS 32
 
 #if defined(TARGET_PPCEMB)
@@ -315,7 +303,7 @@ struct ppc_spr_t {
     void (*hea_read)(void *opaque, int spr_num);
     void (*hea_write)(void *opaque, int spr_num);
 #endif
-    const unsigned char *name;
+    const char *name;
 };
 
 /* Altivec registers (128 bits) */
@@ -541,26 +529,29 @@ struct CPUPPCState {
     /* First are the most commonly used resources
      * during translated code execution
      */
-#if (HOST_LONG_BITS == 32)
+#if TARGET_LONG_BITS > HOST_LONG_BITS
+    target_ulong t0, t1, t2;
+#endif
+#if !defined(TARGET_PPC64)
     /* temporary fixed-point registers
-     * used to emulate 64 bits registers on 32 bits hosts
+     * used to emulate 64 bits registers on 32 bits targets
      */
-    uint64_t t0, t1, t2;
+    uint64_t t0_64, t1_64, t2_64;
 #endif
     ppc_avr_t avr0, avr1, avr2;
 
     /* general purpose registers */
-    ppc_gpr_t gpr[32];
+    target_ulong gpr[32];
 #if !defined(TARGET_PPC64)
     /* Storage for GPR MSB, used by the SPE extension */
-    ppc_gpr_t gprh[32];
+    target_ulong gprh[32];
 #endif
     /* LR */
     target_ulong lr;
     /* CTR */
     target_ulong ctr;
     /* condition register */
-    uint8_t crf[8];
+    uint32_t crf[8];
     /* XER */
     /* XXX: We use only 5 fields, but we want to keep the structure aligned */
     uint8_t xer[8];
@@ -571,7 +562,7 @@ struct CPUPPCState {
     /* machine state register */
     target_ulong msr;
     /* temporary general purpose registers */
-    ppc_gpr_t tgpr[4]; /* Used to speed-up TLB assist handlers */
+    target_ulong tgpr[4]; /* Used to speed-up TLB assist handlers */
 
     /* Floating point execution context */
     /* temporary float registers */
@@ -585,8 +576,6 @@ struct CPUPPCState {
     uint32_t fpscr;
 
     CPU_COMMON
-
-    int halted; /* TRUE if the CPU is in suspend state */
 
     int access_type; /* when a memory exception occurs, the access
                         type is stored here */
@@ -626,7 +615,7 @@ struct CPUPPCState {
     ppc_avr_t avr[32];
     uint32_t vscr;
     /* SPE registers */
-    ppc_gpr_t spe_acc;
+    target_ulong spe_acc;
     float_status spe_status;
     uint32_t spe_fscr;
 
@@ -648,9 +637,7 @@ struct CPUPPCState {
     int bfd_mach;
     uint32_t flags;
 
-    int exception_index;
     int error_code;
-    int interrupt_request;
     uint32_t pending_interrupts;
 #if !defined(CONFIG_USER_ONLY)
     /* This is the IRQ controller, which is implementation dependant
@@ -674,8 +661,6 @@ struct CPUPPCState {
     opc_handler_t *opcodes[0x40];
 
     /* Those resources are used only in Qemu core */
-    jmp_buf jmp_env;
-    int user_mode_only; /* user mode only simulation */
     target_ulong hflags;      /* hflags is a MSR & HFLAGS_MASK         */
     target_ulong hflags_nmsr; /* specific hflags, not comming from MSR */
     int mmu_idx;         /* precomputed MMU index to speed up mem accesses */
@@ -701,6 +686,7 @@ struct mmu_ctx_t {
 
 /*****************************************************************************/
 CPUPPCState *cpu_ppc_init (const char *cpu_model);
+void ppc_translate_init(void);
 int cpu_ppc_exec (CPUPPCState *s);
 void cpu_ppc_close (CPUPPCState *s);
 /* you can call this signal handler from your SIGBUS and SIGSEGV
@@ -747,7 +733,7 @@ void cpu_ppc_reset (void *opaque);
 
 void ppc_cpu_list (FILE *f, int (*cpu_fprintf)(FILE *f, const char *fmt, ...));
 
-const ppc_def_t *cpu_ppc_find_by_name (const unsigned char *name);
+const ppc_def_t *cpu_ppc_find_by_name (const char *name);
 int cpu_ppc_register_internal (CPUPPCState *env, const ppc_def_t *def);
 
 /* Time-base and decrementer management */
@@ -816,6 +802,8 @@ int ppc_dcr_write (ppc_dcr_t *dcr_env, int dcrn, target_ulong val);
 #define cpu_signal_handler cpu_ppc_signal_handler
 #define cpu_list ppc_cpu_list
 
+#define CPU_SAVE_VERSION 3
+
 /* MMU modes definitions */
 #define MMU_MODE0_SUFFIX _user
 #define MMU_MODE1_SUFFIX _kernel
@@ -825,6 +813,19 @@ static inline int cpu_mmu_index (CPUState *env)
 {
     return env->mmu_idx;
 }
+
+#if defined(CONFIG_USER_ONLY)
+static inline void cpu_clone_regs(CPUState *env, target_ulong newsp)
+{
+    int i;
+    if (newsp)
+        env->gpr[1] = newsp;
+    for (i = 7; i < 32; i++)
+        env->gpr[i] = 0;
+}
+#endif
+
+#define CPU_PC_FROM_TB(env, tb) env->nip = tb->pc
 
 #include "cpu-all.h"
 

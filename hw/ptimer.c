@@ -100,6 +100,9 @@ void ptimer_set_count(ptimer_state *s, uint64_t count)
 
 void ptimer_run(ptimer_state *s, int oneshot)
 {
+    if (s->enabled) {
+        return;
+    }
     if (s->period == 0) {
         fprintf(stderr, "Timer with period zero, disabling\n");
         return;
@@ -162,9 +165,9 @@ void qemu_put_ptimer(QEMUFile *f, ptimer_state *s)
     qemu_put_be64s(f, &s->limit);
     qemu_put_be64s(f, &s->delta);
     qemu_put_be32s(f, &s->period_frac);
-    qemu_put_be64s(f, &s->period);
-    qemu_put_be64s(f, &s->last_event);
-    qemu_put_be64s(f, &s->next_event);
+    qemu_put_sbe64s(f, &s->period);
+    qemu_put_sbe64s(f, &s->last_event);
+    qemu_put_sbe64s(f, &s->next_event);
     qemu_put_timer(f, s->timer);
 }
 
@@ -174,9 +177,9 @@ void qemu_get_ptimer(QEMUFile *f, ptimer_state *s)
     qemu_get_be64s(f, &s->limit);
     qemu_get_be64s(f, &s->delta);
     qemu_get_be32s(f, &s->period_frac);
-    qemu_get_be64s(f, &s->period);
-    qemu_get_be64s(f, &s->last_event);
-    qemu_get_be64s(f, &s->next_event);
+    qemu_get_sbe64s(f, &s->period);
+    qemu_get_sbe64s(f, &s->last_event);
+    qemu_get_sbe64s(f, &s->next_event);
     qemu_get_timer(f, s->timer);
 }
 

@@ -29,60 +29,19 @@
 
 #include "cpu-defs.h"
 
-/* at least 4 register variables are defined */
 register struct CPUX86State *env asm(AREG0);
 
-#ifndef CPU_NO_GLOBAL_REGS
+#include "qemu-log.h"
 
-#if TARGET_LONG_BITS > HOST_LONG_BITS
-
-/* no registers can be used */
-#define T0 (env->t0)
-#define T1 (env->t1)
-#define T2 (env->t2)
-
-#else
-
-/* XXX: use unsigned long instead of target_ulong - better code will
-   be generated for 64 bit CPUs */
-register target_ulong T0 asm(AREG1);
-register target_ulong T1 asm(AREG2);
-register target_ulong T2 asm(AREG3);
-
-#endif /* ! (TARGET_LONG_BITS > HOST_LONG_BITS) */
-
-#endif /* ! CPU_NO_GLOBAL_REGS */
-
-#define A0 T2
-
-extern FILE *logfile;
-extern int loglevel;
-
-#ifndef reg_EAX
 #define EAX (env->regs[R_EAX])
-#endif
-#ifndef reg_ECX
 #define ECX (env->regs[R_ECX])
-#endif
-#ifndef reg_EDX
 #define EDX (env->regs[R_EDX])
-#endif
-#ifndef reg_EBX
 #define EBX (env->regs[R_EBX])
-#endif
-#ifndef reg_ESP
 #define ESP (env->regs[R_ESP])
-#endif
-#ifndef reg_EBP
 #define EBP (env->regs[R_EBP])
-#endif
-#ifndef reg_ESI
 #define ESI (env->regs[R_ESI])
-#endif
-#ifndef reg_EDI
 #define EDI (env->regs[R_EDI])
-#endif
-#define EIP  (env->eip)
+#define EIP (env->eip)
 #define DF  (env->df)
 
 #define CC_SRC (env->cc_src)
@@ -98,31 +57,10 @@ extern int loglevel;
 #include "cpu.h"
 #include "exec-all.h"
 
-typedef struct CCTable {
-    int (*compute_all)(void); /* return all the flags */
-    int (*compute_c)(void);  /* return the C flag */
-} CCTable;
-
-extern CCTable cc_table[];
-
-void helper_load_seg(int seg_reg, int selector);
-void helper_ljmp_protected_T0_T1(int next_eip);
-void helper_lcall_real_T0_T1(int shift, int next_eip);
-void helper_lcall_protected_T0_T1(int shift, int next_eip);
-void helper_iret_real(int shift);
-void helper_iret_protected(int shift, int next_eip);
-void helper_lret_protected(int shift, int addend);
-void helper_movl_crN_T0(int reg);
-void helper_movl_drN_T0(int reg);
-void helper_invlpg(target_ulong addr);
-void cpu_x86_update_cr0(CPUX86State *env, uint32_t new_cr0);
 void cpu_x86_update_cr3(CPUX86State *env, target_ulong new_cr3);
 void cpu_x86_update_cr4(CPUX86State *env, uint32_t new_cr4);
-void cpu_x86_flush_tlb(CPUX86State *env, target_ulong addr);
 int cpu_x86_handle_mmu_fault(CPUX86State *env, target_ulong addr,
                              int is_write, int mmu_idx, int is_softmmu);
-void tlb_fill(target_ulong addr, int is_write, int mmu_idx,
-              void *retaddr);
 void __hidden cpu_lock(void);
 void __hidden cpu_unlock(void);
 void do_interrupt(int intno, int is_int, int error_code,
@@ -139,19 +77,21 @@ void __hidden cpu_loop_exit(void);
 void OPPROTO op_movl_eflags_T0(void);
 void OPPROTO op_movl_T0_eflags(void);
 
+/* n must be a constant to be efficient */
+static inline target_long lshift(target_long x, int n)
+{
+    if (n >= 0)
+        return x << n;
+    else
+        return x >> (-n);
+}
+
 #include "helper.h"
 
-void helper_mulq_EAX_T0(void);
-void helper_imulq_EAX_T0(void);
-void helper_imulq_T0_T1(void);
-void helper_cmpxchg8b(void);
-
-void check_iob_T0(void);
-void check_iow_T0(void);
-void check_iol_T0(void);
-void check_iob_DX(void);
-void check_iow_DX(void);
-void check_iol_DX(void);
+static inline void svm_check_intercept(uint32_t type)
+{
+    helper_svm_check_intercept_param(type, 0);
+}
 
 #if !defined(CONFIG_USER_ONLY)
 
@@ -176,16 +116,6 @@ void check_iol_DX(void);
 #define floatx_round_to_int floatx80_round_to_int
 #define floatx_compare floatx80_compare
 #define floatx_compare_quiet floatx80_compare_quiet
-#define sin sinl
-#define cos cosl
-#define sqrt sqrtl
-#define pow powl
-#define log logl
-#define tan tanl
-#define atan2 atan2l
-#define floor floorl
-#define ceil ceill
-#define ldexp ldexpl
 #else
 #define floatx_to_int32 float64_to_int32
 #define floatx_to_int64 float64_to_int64
@@ -203,16 +133,6 @@ void check_iol_DX(void);
 #define floatx_compare float64_compare
 #define floatx_compare_quiet float64_compare_quiet
 #endif
-
-extern CPU86_LDouble sin(CPU86_LDouble x);
-extern CPU86_LDouble cos(CPU86_LDouble x);
-extern CPU86_LDouble sqrt(CPU86_LDouble x);
-extern CPU86_LDouble pow(CPU86_LDouble, CPU86_LDouble);
-extern CPU86_LDouble log(CPU86_LDouble x);
-extern CPU86_LDouble tan(CPU86_LDouble x);
-extern CPU86_LDouble atan2(CPU86_LDouble, CPU86_LDouble);
-extern CPU86_LDouble floor(CPU86_LDouble x);
-extern CPU86_LDouble ceil(CPU86_LDouble x);
 
 #define RC_MASK         0xc00
 #define RC_NEAR		0x000
@@ -363,7 +283,6 @@ extern const CPU86_LDouble f15rk[7];
 void fpu_raise_exception(void);
 void restore_native_fp_state(CPUState *env);
 void save_native_fp_state(CPUState *env);
-void vmexit(uint64_t exit_code, uint64_t exit_info_1);
 
 extern const uint8_t parity_table[256];
 extern const uint8_t rclw_table[32];
@@ -380,7 +299,7 @@ static inline void load_eflags(int eflags, int update_mask)
     CC_SRC = eflags & (CC_O | CC_S | CC_Z | CC_A | CC_P | CC_C);
     DF = 1 - (2 * ((eflags >> 10) & 1));
     env->eflags = (env->eflags & ~update_mask) |
-        (eflags & update_mask);
+        (eflags & update_mask) | 0x2;
 }
 
 static inline void env_to_regs(void)
@@ -441,15 +360,26 @@ static inline void regs_to_env(void)
 
 static inline int cpu_halted(CPUState *env) {
     /* handle exit of HALTED state */
-    if (!(env->hflags & HF_HALTED_MASK))
+    if (!env->halted)
         return 0;
     /* disable halt condition */
     if (((env->interrupt_request & CPU_INTERRUPT_HARD) &&
          (env->eflags & IF_MASK)) ||
         (env->interrupt_request & CPU_INTERRUPT_NMI)) {
-        env->hflags &= ~HF_HALTED_MASK;
+        env->halted = 0;
         return 0;
     }
     return EXCP_HALTED;
 }
 
+/* load efer and update the corresponding hflags. XXX: do consistency
+   checks with cpuid bits ? */
+static inline void cpu_load_efer(CPUState *env, uint64_t val)
+{
+    env->efer = val;
+    env->hflags &= ~(HF_LMA_MASK | HF_SVME_MASK);
+    if (env->efer & MSR_EFER_LMA)
+        env->hflags |= HF_LMA_MASK;
+    if (env->efer & MSR_EFER_SVME)
+        env->hflags |= HF_SVME_MASK;
+}

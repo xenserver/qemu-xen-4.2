@@ -103,7 +103,6 @@ static void ppc_core99_init (ram_addr_t ram_size, int vga_ram_size,
         env->osi_call = vga_osi_call;
 #endif
         qemu_register_reset(&cpu_ppc_reset, env);
-        register_savevm("cpu", 0, 3, cpu_save, cpu_load, env);
         envs[i] = env;
     }
     if (env->nip < 0xFFF80000) {
@@ -332,8 +331,9 @@ static void ppc_core99_init (ram_addr_t ram_size, int vga_ram_size,
 }
 
 QEMUMachine core99_machine = {
-    "mac99",
-    "Mac99 based PowerMAC",
-    ppc_core99_init,
-    BIOS_SIZE + VGA_RAM_SIZE,
+    .name = "mac99",
+    .desc = "Mac99 based PowerMAC",
+    .init = ppc_core99_init,
+    .ram_require = BIOS_SIZE + VGA_RAM_SIZE,
+    .max_cpus = 1,
 };

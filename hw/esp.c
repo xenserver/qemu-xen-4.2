@@ -496,6 +496,7 @@ static void esp_mem_writeb(void *opaque, target_phys_addr_t addr, uint32_t val)
             //s->ti_size = 0;
             s->rregs[ESP_RINTR] = INTR_FC;
             s->rregs[ESP_RSEQ] = 0;
+            s->rregs[ESP_RFLAGS] = 0;
             break;
         case CMD_RESET:
             DPRINTF("Chip reset (%2.2x)\n", val);
@@ -568,7 +569,7 @@ static CPUReadMemoryFunc *esp_mem_read[3] = {
 static CPUWriteMemoryFunc *esp_mem_write[3] = {
     esp_mem_writeb,
     NULL,
-    NULL,
+    esp_mem_writeb,
 };
 
 static void esp_save(QEMUFile *f, void *opaque)
@@ -577,7 +578,7 @@ static void esp_save(QEMUFile *f, void *opaque)
 
     qemu_put_buffer(f, s->rregs, ESP_REGS);
     qemu_put_buffer(f, s->wregs, ESP_REGS);
-    qemu_put_be32s(f, &s->ti_size);
+    qemu_put_sbe32s(f, &s->ti_size);
     qemu_put_be32s(f, &s->ti_rptr);
     qemu_put_be32s(f, &s->ti_wptr);
     qemu_put_buffer(f, s->ti_buf, TI_BUFSZ);
@@ -599,7 +600,7 @@ static int esp_load(QEMUFile *f, void *opaque, int version_id)
 
     qemu_get_buffer(f, s->rregs, ESP_REGS);
     qemu_get_buffer(f, s->wregs, ESP_REGS);
-    qemu_get_be32s(f, &s->ti_size);
+    qemu_get_sbe32s(f, &s->ti_size);
     qemu_get_be32s(f, &s->ti_rptr);
     qemu_get_be32s(f, &s->ti_wptr);
     qemu_get_buffer(f, s->ti_buf, TI_BUFSZ);

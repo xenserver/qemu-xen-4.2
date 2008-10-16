@@ -28,6 +28,7 @@
 //#define DEBUG_CONSOLE
 #define DEFAULT_BACKSCROLL 512
 #define MAX_CONSOLES 12
+#define DEFAULT_MONITOR_SIZE "800x600"
 
 #define QEMU_RGBA(r, g, b, a) (((a) << 24) | ((r) << 16) | ((g) << 8) | (b))
 #define QEMU_RGB(r, g, b) QEMU_RGBA(r, g, b, 0xff)
@@ -167,10 +168,15 @@ void vga_hw_invalidate(void)
 
 void vga_hw_screen_dump(const char *filename)
 {
-    /* There is currently no was of specifying which screen we want to dump,
-       so always dump the dirst one.  */
+    TextConsole *previous_active_console;
+
+    previous_active_console = active_console;
+    active_console = consoles[0];
+    /* There is currently no way of specifying which screen we want to dump,
+       so always dump the first one.  */
     if (consoles[0]->hw_screen_dump)
         consoles[0]->hw_screen_dump(consoles[0]->hw, filename);
+    active_console = previous_active_console;
 }
 
 void vga_hw_text_update(console_ch_t *chardata)
@@ -1041,6 +1047,9 @@ void console_select(unsigned int index)
     s = consoles[index];
     if (s) {
         active_console = s;
+        if (s->console_type != TEXT_CONSOLE && s->g_width && s->g_height
+            && (s->g_width != s->ds->width || s->g_height != s->ds->height))
+            dpy_resize(s->ds, s->g_width, s->g_height);
         vga_hw_invalidate();
     }
 }
@@ -1149,16 +1158,13 @@ static void text_console_invalidate(void *opaque)
 {
     TextConsole *s = (TextConsole *) opaque;
 
-    if (s->console_type != GRAPHIC_CONSOLE) {
-        if (s->g_width != s->ds->width ||
-            s->g_height != s->ds->height) {
-            if (s->console_type == TEXT_CONSOLE_FIXED_SIZE)
-                dpy_resize(s->ds, s->g_width, s->g_height);
-            else {
-                s->g_width = s->ds->width;
-                s->g_height = s->ds->height;
-                text_console_resize(s);
-            }
+    if (s->g_width != s->ds->width || s->g_height != s->ds->height) {
+        if (s->console_type == TEXT_CONSOLE_FIXED_SIZE)
+            dpy_resize(s->ds, s->g_width, s->g_height);
+        else {
+            s->g_width = s->ds->width;
+            s->g_height = s->ds->height;
+            text_console_resize(s);
         }
     }
     console_refresh(s);
@@ -1246,6 +1252,11 @@ int is_graphic_console(void)
     return active_console && active_console->console_type == GRAPHIC_CONSOLE;
 }
 
+int is_fixedsize_console(void)
+{
+    return active_console && active_console->console_type != TEXT_CONSOLE;
+}
+
 void console_color_init(DisplayState *ds)
 {
     int i, j;
@@ -1331,4 +1342,30 @@ CharDriverState *text_console_init(DisplayState *ds, const char *p)
     qemu_chr_reset(chr);
 
     return chr;
+}
+
+void qemu_console_resize(QEMUConsole *console, int width, int height)
+{
+    if (console->g_width != width || console->g_height != height
+        || !console->ds->data) {
+        console->g_width = width;
+        console->g_height = height;
+        if (active_console == console) {
+            dpy_resize(console->ds, width, height);
+        }
+    }
+}
+
+void qemu_console_copy(QEMUConsole *console, int src_x, int src_y,
+                int dst_x, int dst_y, int w, int h)
+{
+    if (active_console == console) {
+        if (console->ds->dpy_copy)
+            console->ds->dpy_copy(console->ds,
+                            src_x, src_y, dst_x, dst_y, w, h);
+        else {
+            /* TODO */
+            console->ds->dpy_update(console->ds, dst_x, dst_y, w, h);
+        }
+    }
 }

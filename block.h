@@ -1,6 +1,8 @@
 #ifndef BLOCK_H
 #define BLOCK_H
 
+#include "qemu-aio.h"
+
 /* block.c */
 typedef struct BlockDriver BlockDriver;
 
@@ -16,6 +18,7 @@ extern BlockDriver bdrv_vpc;
 extern BlockDriver bdrv_vvfat;
 extern BlockDriver bdrv_qcow2;
 extern BlockDriver bdrv_parallels;
+extern BlockDriver bdrv_nbd;
 
 typedef struct BlockDriverInfo {
     /* in bytes, 0 if irrelevant */
@@ -48,10 +51,8 @@ typedef struct QEMUSnapshotInfo {
 #define BDRV_O_EXTENDABLE  0x0080 /* allow writes out of original size range;
 				     only effective for some drivers */
 
-#ifndef QEMU_IMG
 void bdrv_info(void);
 void bdrv_info_stats(void);
-#endif
 
 void bdrv_init(void);
 BlockDriver *bdrv_find_format(const char *format_name);
@@ -92,17 +93,14 @@ BlockDriverAIOCB *bdrv_aio_flush(BlockDriverState *bs,
                                  BlockDriverCompletionFunc *cb, void *opaque);
 void bdrv_aio_cancel(BlockDriverAIOCB *acb);
 
-void qemu_aio_init(void);
-void qemu_aio_poll(void);
-void qemu_aio_flush(void);
-void qemu_aio_wait_start(void);
-void qemu_aio_wait(void);
-void qemu_aio_wait_end(void);
-
 int qemu_key_check(BlockDriverState *bs, const char *name);
 
 /* Ensure contents are flushed to disk.  */
 int bdrv_flush(BlockDriverState *bs);
+int bdrv_flush_all(void);
+
+int bdrv_is_allocated(BlockDriverState *bs, int64_t sector_num, int nb_sectors,
+	int *pnum);
 
 #define BDRV_TYPE_HD     0
 #define BDRV_TYPE_CDROM  1

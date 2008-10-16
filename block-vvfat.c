@@ -93,7 +93,6 @@ static inline void array_free(array_t* array)
 
 /* does not automatically grow */
 static inline void* array_get(array_t* array,unsigned int index) {
-    assert(index >= 0);
     assert(index < array->next);
     return array->pointer + index * array->item_size;
 }
@@ -102,7 +101,7 @@ static inline int array_ensure_allocated(array_t* array, int index)
 {
     if((index + 1) * array->item_size > array->size) {
 	int new_size = (index + 32) * array->item_size;
-	array->pointer = realloc(array->pointer, new_size);
+	array->pointer = qemu_realloc(array->pointer, new_size);
 	if (!array->pointer)
 	    return -1;
 	array->size = new_size;
@@ -128,7 +127,7 @@ static inline void* array_get_next(array_t* array) {
 static inline void* array_insert(array_t* array,unsigned int index,unsigned int count) {
     if((array->next+count)*array->item_size>array->size) {
 	int increment=count*array->item_size;
-	array->pointer=realloc(array->pointer,array->size+increment);
+	array->pointer=qemu_realloc(array->pointer,array->size+increment);
 	if(!array->pointer)
 	    return 0;
 	array->size+=increment;
@@ -195,7 +194,6 @@ static int array_remove(array_t* array,int index)
 static int array_index(array_t* array, void* pointer)
 {
     size_t offset = (char*)pointer - array->pointer;
-    assert(offset >= 0);
     assert((offset % array->item_size) == 0);
     assert(offset/array->item_size < array->next);
     return offset/array->item_size;
@@ -454,8 +452,7 @@ static inline direntry_t* create_long_filename(BDRVVVFATState* s,const char* fil
 
 static char is_free(const direntry_t* direntry)
 {
-    /* return direntry->name[0]==0 ; */
-    return direntry->attributes == 0 || direntry->name[0]==0xe5;
+    return direntry->name[0]==0xe5 || direntry->name[0]==0x00;
 }
 
 static char is_volume_label(const direntry_t* direntry)
@@ -1409,7 +1406,12 @@ static void schedule_mkdir(BDRVVVFATState* s, uint32_t cluster, char* path)
 }
 
 typedef struct {
-    unsigned char name[1024];
+    /*
+     * Since the sequence number is at most 0x3f, and the filename
+     * length is at most 13 times the sequence number, the maximal
+     * filename length is 0x3f * 13 bytes.
+     */
+    unsigned char name[0x3f * 13 + 1];
     int checksum, len;
     int sequence_number;
 } long_file_name;
@@ -1434,6 +1436,7 @@ static int parse_long_name(long_file_name* lfn,
 	lfn->sequence_number = pointer[0] & 0x3f;
 	lfn->checksum = pointer[13];
 	lfn->name[0] = 0;
+	lfn->name[lfn->sequence_number * 13] = 0;
     } else if ((pointer[0] & 0x3f) != --lfn->sequence_number)
 	return -1;
     else if (pointer[13] != lfn->checksum)
@@ -1728,7 +1731,7 @@ static int check_directory_consistency(BDRVVVFATState *s,
     char path2[PATH_MAX];
 
     assert(path_len < PATH_MAX); /* len was tested before! */
-    strcpy(path2, path);
+    pstrcpy(path2, sizeof(path2), path);
     path2[path_len] = '/';
     path2[path_len + 1] = '\0';
 
@@ -1802,7 +1805,8 @@ DLOG(fprintf(stderr, "check direntry %d: \n", i); print_direntry(direntries + i)
 		fprintf(stderr, "Name too long: %s/%s\n", path, lfn.name);
 		goto fail;
 	    }
-	    strcpy(path2 + path_len + 1, (char*)lfn.name);
+            pstrcpy(path2 + path_len + 1, sizeof(path2) - path_len - 1,
+                    (char*)lfn.name);
 
 	    if (is_directory(direntries + i)) {
 		if (begin_of_direntry(direntries + i) == 0) {
@@ -2231,7 +2235,6 @@ static int commit_one_file(BDRVVVFATState* s,
 
 	assert((size - offset == 0 && fat_eof(s, c)) ||
 		(size > offset && c >=2 && !fat_eof(s, c)));
-	assert(size >= 0);
 
 	ret = vvfat_read(s->bs, cluster2sector(s, c),
 	    (uint8_t*)cluster, (rest_size + 0x1ff) / 0x200);
@@ -2368,8 +2371,9 @@ static int handle_renames_and_mkdirs(BDRVVVFATState* s)
 
 			    assert(!strncmp(m->path, mapping->path, l2));
 
-			    strcpy(new_path, mapping->path);
-			    strcpy(new_path + l1, m->path + l2);
+                            pstrcpy(new_path, l + diff + 1, mapping->path);
+                            pstrcpy(new_path + l1, l + diff + 1 - l1,
+                                    m->path + l2);
 
 			    schedule_rename(s, m->begin, new_path);
 			}

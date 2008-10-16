@@ -22,13 +22,13 @@
 #include <assert.h>
 #include "exec.h"
 #include "mmu.h"
+#include "helper.h"
+
+#define D(x)
+
+#if !defined(CONFIG_USER_ONLY)
 
 #define MMUSUFFIX _mmu
-#ifdef __s390__
-# define GETPC() ((void*)((unsigned long)__builtin_return_address(0) & 0x7fffffffUL))
-#else
-# define GETPC() (__builtin_return_address(0))
-#endif
 
 #define SHIFT 0
 #include "softmmu_template.h"
@@ -41,8 +41,6 @@
 
 #define SHIFT 3
 #include "softmmu_template.h"
-
-#define D(x)
 
 /* Try to fill the TLB and return an exception if error. If retaddr is
    NULL, it means that the function was called in C code (i.e. not
@@ -63,7 +61,7 @@ void tlb_fill (target_ulong addr, int is_write, int mmu_idx, void *retaddr)
     D(fprintf(logfile, "%s pc=%x tpc=%x ra=%x\n", __func__, 
 	     env->pc, env->debug1, retaddr));
     ret = cpu_cris_handle_mmu_fault(env, addr, is_write, mmu_idx, 1);
-    if (__builtin_expect(ret, 0)) {
+    if (unlikely(ret)) {
         if (retaddr) {
             /* now we have a real cpu fault */
             pc = (unsigned long)retaddr;
@@ -72,12 +70,17 @@ void tlb_fill (target_ulong addr, int is_write, int mmu_idx, void *retaddr)
                 /* the PC is inside the translated code. It means that we have
                    a virtual CPU fault */
                 cpu_restore_state(tb, env, pc, NULL);
+
+		/* Evaluate flags after retranslation.  */
+                helper_top_evaluate_flags();
             }
         }
         cpu_loop_exit();
     }
     env = saved_env;
 }
+
+#endif
 
 void helper_raise_exception(uint32_t index)
 {
@@ -88,23 +91,23 @@ void helper_raise_exception(uint32_t index)
 void helper_tlb_flush_pid(uint32_t pid)
 {
 #if !defined(CONFIG_USER_ONLY)
-	cris_mmu_flush_pid(env, pid);
+	pid &= 0xff;
+	if (pid != (env->pregs[PR_PID] & 0xff))
+		cris_mmu_flush_pid(env, env->pregs[PR_PID]);
 #endif
 }
 
-void helper_tlb_flush(void)
+void helper_spc_write(uint32_t new_spc)
 {
-	tlb_flush(env, 1);
+#if !defined(CONFIG_USER_ONLY)
+	tlb_flush_page(env, env->pregs[PR_SPC]);
+	tlb_flush_page(env, new_spc);
+#endif
 }
 
-void helper_dump(uint32_t a0, uint32_t a1)
+void helper_dump(uint32_t a0, uint32_t a1, uint32_t a2)
 {
 	(fprintf(logfile, "%s: a0=%x a1=%x\n", __func__, a0, a1)); 
-}
-
-void helper_dummy(void)
-{
-
 }
 
 /* Used by the tlb decoder.  */
@@ -123,8 +126,8 @@ void helper_movl_sreg_reg (uint32_t sreg, uint32_t reg)
 		if (sreg == 6) {
 			/* Writes to tlb-hi write to mm_cause as a side 
 			   effect.  */
-			env->sregs[SFR_RW_MM_TLB_HI] = T0;
-			env->sregs[SFR_R_MM_CAUSE] = T0;
+			env->sregs[SFR_RW_MM_TLB_HI] = env->regs[reg];
+			env->sregs[SFR_R_MM_CAUSE] = env->regs[reg];
 		}
 		else if (sreg == 5) {
 			uint32_t set;
@@ -208,6 +211,8 @@ static void cris_ccs_rshift(CPUState *env)
 
 void helper_rfe(void)
 {
+	int rflag = env->pregs[PR_CCS] & R_FLAG;
+
 	D(fprintf(logfile, "rfe: erp=%x pid=%x ccs=%x btarget=%x\n", 
 		 env->pregs[PR_ERP], env->pregs[PR_PID],
 		 env->pregs[PR_CCS],
@@ -216,24 +221,34 @@ void helper_rfe(void)
 	cris_ccs_rshift(env);
 
 	/* RFE sets the P_FLAG only if the R_FLAG is not set.  */
-	if (!(env->pregs[PR_CCS] & R_FLAG))
+	if (!rflag)
 		env->pregs[PR_CCS] |= P_FLAG;
 }
 
-void helper_store(uint32_t a0)
+void helper_rfn(void)
 {
-	if (env->pregs[PR_CCS] & P_FLAG )
-	{
-		cpu_abort(env, "cond_store_failed! pc=%x a0=%x\n",
-			  env->pc, a0);
-	}
+	int rflag = env->pregs[PR_CCS] & R_FLAG;
+
+	D(fprintf(logfile, "rfn: erp=%x pid=%x ccs=%x btarget=%x\n", 
+		 env->pregs[PR_ERP], env->pregs[PR_PID],
+		 env->pregs[PR_CCS],
+		 env->btarget));
+
+	cris_ccs_rshift(env);
+
+	/* Set the P_FLAG only if the R_FLAG is not set.  */
+	if (!rflag)
+		env->pregs[PR_CCS] |= P_FLAG;
+
+    /* Always set the M flag.  */
+    env->pregs[PR_CCS] |= M_FLAG;
 }
 
 void do_unassigned_access(target_phys_addr_t addr, int is_write, int is_exec,
-                          int is_asi)
+                          int is_asi, int size)
 {
-	D(printf("%s addr=%x w=%d ex=%d asi=%d\n", 
-		__func__, addr, is_write, is_exec, is_asi));
+	D(printf("%s addr=%x w=%d ex=%d asi=%d, size=%d\n",
+		__func__, addr, is_write, is_exec, is_asi, size));
 }
 
 static void evaluate_flags_writeback(uint32_t flags)
@@ -241,13 +256,7 @@ static void evaluate_flags_writeback(uint32_t flags)
 	int x;
 
 	/* Extended arithmetics, leave the z flag alone.  */
-	env->debug3 = env->pregs[PR_CCS];
-
-	if (env->cc_x_live)
-		x = env->cc_x;
-	else
-		x = env->pregs[PR_CCS] & X_FLAG;
-
+	x = env->cc_x;
 	if ((x || env->cc_op == CC_OP_ADDC)
 	    && flags & Z_FLAG)
 		env->cc_mask &= ~Z_FLAG;
@@ -364,7 +373,23 @@ void  helper_evaluate_flags_alu_4(void)
 
 	src = env->cc_src;
 	dst = env->cc_dest;
-	res = env->cc_result;
+
+	/* Reconstruct the result.  */
+	switch (env->cc_op)
+	{
+		case CC_OP_SUB:
+			res = dst - src;
+			break;
+		case CC_OP_ADD:
+			res = dst + src;
+			break;
+		default:
+			res = env->cc_result;
+			break;
+	}
+
+	if (env->cc_op == CC_OP_SUB || env->cc_op == CC_OP_CMP)
+		src = ~src;
 
 	if ((res & 0x80000000L) != 0L)
 	{
@@ -401,11 +426,9 @@ void  helper_evaluate_flags_alu_4(void)
 
 void  helper_evaluate_flags_move_4 (void)
 {
-	uint32_t src;
 	uint32_t res;
 	uint32_t flags = 0;
 
-	src = env->cc_src;
 	res = env->cc_result;
 
 	if ((int32_t)res < 0)
@@ -445,6 +468,8 @@ void helper_evaluate_flags (void)
 	dst = env->cc_dest;
 	res = env->cc_result;
 
+	if (env->cc_op == CC_OP_SUB || env->cc_op == CC_OP_CMP)
+		src = ~src;
 
 	/* Now, evaluate the flags. This stuff is based on
 	   Per Zander's CRISv10 simulator.  */
@@ -552,4 +577,56 @@ void helper_evaluate_flags (void)
 		flags ^= C_FLAG;
 	}
 	evaluate_flags_writeback(flags);
+}
+
+void helper_top_evaluate_flags(void)
+{
+	switch (env->cc_op)
+	{
+		case CC_OP_MCP:
+			helper_evaluate_flags_mcp();
+			break;
+		case CC_OP_MULS:
+			helper_evaluate_flags_muls();
+			break;
+		case CC_OP_MULU:
+			helper_evaluate_flags_mulu();
+			break;
+		case CC_OP_MOVE:
+		case CC_OP_AND:
+		case CC_OP_OR:
+		case CC_OP_XOR:
+		case CC_OP_ASR:
+		case CC_OP_LSR:
+		case CC_OP_LSL:
+			switch (env->cc_size)
+			{
+				case 4:
+					helper_evaluate_flags_move_4();
+					break;
+				case 2:
+					helper_evaluate_flags_move_2();
+					break;
+				default:
+					helper_evaluate_flags();
+					break;
+			}
+			break;
+		case CC_OP_FLAGS:
+			/* live.  */
+			break;
+		default:
+		{
+			switch (env->cc_size)
+			{
+				case 4:
+					helper_evaluate_flags_alu_4();
+					break;
+				default:
+					helper_evaluate_flags();
+					break;
+			}
+		}
+		break;
+	}
 }
