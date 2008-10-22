@@ -38,5 +38,8 @@ i386-dm/Makefile
 i386-dm/config.mak
 i386-dm/qemu-dm
 qemu-img-xen
+qemu-nbd-xen
 dyngen-xen
 dist
+
+i386-dm/gdbstub-xml.c
