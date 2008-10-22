@@ -28,6 +28,7 @@
 #include "pci.h"
 #include "sysemu.h"
 #include "qemu-xen.h"
+#include "battery_mgmt.h"
 
 #include <xen/hvm/ioreq.h>
 #include <xen/hvm/params.h>
@@ -188,6 +189,8 @@ static void acpi_map(PCIDevice *pci_dev, int region_num,
     /* Word access */
     register_ioport_write(addr + 4, 2, 2, acpiPm1Control_writew, d);
     register_ioport_read(addr + 4, 2, 2, acpiPm1Control_readw, d);
+
+    battery_mgmt_init(pci_dev);
 }
 
 #ifdef CONFIG_PASSTHROUGH

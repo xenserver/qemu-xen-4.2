@@ -1154,6 +1154,86 @@ int xenstore_vm_write(int domid, char *key, char *value)
     return rc;
 }
 
+char *xenstore_device_model_read(int domid, char *key, unsigned int *len)
+{
+    char *path = NULL, *value = NULL;
+
+    if (pasprintf(&path, "/local/domain/0/device-model/%d/%s", domid, key) == -1)
+        return NULL;
+
+    value = xs_read(xsh, XBT_NULL, path, len);
+    if (value == NULL)
+        fprintf(logfile, "xs_read(%s): read error\n", path);
+
+    free(path);
+    return value;
+}
+
+char *xenstore_extended_power_mgmt_read(char *key, unsigned int *len)
+{
+    char *path = NULL, *value = NULL;
+    
+    if (pasprintf(&path, "/pm/%s", key) == -1)
+        return NULL;
+
+    value = xs_read(xsh, XBT_NULL, path, len);
+    if (value == NULL)
+        fprintf(logfile, "xs_read(%s): read error\n", path);
+
+    free(path);
+    return value;
+}
+
+int xenstore_extended_power_mgmt_write(char * key, char * value)
+{
+    int ret;
+    char *path = NULL;
+    
+    if (pasprintf(&path, "/pm/%s", key) == -1)
+        return NULL;
+
+    ret = xs_write(xsh, XBT_NULL, path, value, strlen(value));
+    free(path);
+    return ret;
+}
+
+int xenstore_extended_power_mgmt_event_trigger(char *key, char * value)
+{
+    int ret;
+    char *path = NULL;
+    
+    if (pasprintf(&path, "events/%s", key) == -1)
+        return NULL;
+
+    ret = xenstore_extended_power_mgmt_write(path, value);
+    free(path);
+    return ret;
+}
+
+/*
+ * Xen power management daemon stores battery generic information
+ * like model, make, design volt, capacity etc. under /pm/bif and 
+ * battery status information like charging/discharging rate
+ * under /pm/bst in xenstore.
+ */
+char *xenstore_read_battery_data(int battery_status)
+{
+    if ( battery_status == 1 )
+        return xenstore_extended_power_mgmt_read("bst", NULL);
+    else
+        return xenstore_extended_power_mgmt_read("bif", NULL);
+}
+
+/*
+ * We set /pm/events/refreshbatterystatus xenstore entry
+ * to refresh battert status info stored under /pm/bst
+ * Xen power management daemon watches for changes to this
+ * entry and triggers a refresh.   
+ */
+int xenstore_refresh_battery_status()
+{
+    return xenstore_extended_power_mgmt_event_trigger("refreshbatterystatus", "1");
+}
 
 /*
  * Create a store entry for a device (e.g., monitor, serial/parallel lines).
