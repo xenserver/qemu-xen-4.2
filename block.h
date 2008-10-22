@@ -47,7 +47,11 @@ typedef struct QEMUSnapshotInfo {
                                      use a disk image format on top of
                                      it (default for
                                      bdrv_file_open()) */
-#define BDRV_O_DIRECT      0x0020
+#define BDRV_O_NOCACHE     0x0020 /* do not use the host page cache */
+#define BDRV_O_CACHE_WB    0x0040 /* use write-back caching */
+
+#define BDRV_O_CACHE_MASK  (BDRV_O_NOCACHE | BDRV_O_CACHE_WB)
+
 #define BDRV_O_EXTENDABLE  0x0080 /* allow writes out of original size range;
 				     only effective for some drivers */
 

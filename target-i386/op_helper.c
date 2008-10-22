@@ -2026,7 +2026,10 @@ void helper_cpuid(void)
 #if defined(USE_KQEMU)
             EAX = 0x00000020;	/* 32 bits physical */
 #else
-            EAX = 0x00000024;	/* 36 bits physical */
+            if (env->cpuid_features & CPUID_PSE36)
+                EAX = 0x00000024; /* 36 bits physical */
+            else
+                EAX = 0x00000020; /* 32 bits physical */
 #endif
         }
         EBX = 0;
@@ -2034,10 +2037,10 @@ void helper_cpuid(void)
         EDX = 0;
         break;
     case 0x8000000A:
-        EAX = 0x00000001;
-        EBX = 0;
+        EAX = 0x00000001; /* SVM Revision */
+        EBX = 0x00000010; /* nr of ASIDs */
         ECX = 0;
-        EDX = 0;
+        EDX = 0; /* optional features */
         break;
     default:
         /* reserved values: zero */
