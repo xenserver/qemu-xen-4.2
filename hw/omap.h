@@ -71,6 +71,7 @@ struct omap_target_agent_s;
 struct omap_target_agent_s *omap_l4ta_get(struct omap_l4_s *bus, int cs);
 target_phys_addr_t omap_l4_attach(struct omap_target_agent_s *ta, int region,
                 int iotype);
+# define l4_register_io_memory	cpu_register_io_memory
 
 struct omap_intr_handler_s;
 struct omap_intr_handler_s *omap_inth_init(target_phys_addr_t base,
@@ -416,14 +417,14 @@ enum omap_dma_model {
     omap_dma_4,
 };
 
-struct omap_dma_s;
-struct omap_dma_s *omap_dma_init(target_phys_addr_t base, qemu_irq *irqs,
+struct soc_dma_s;
+struct soc_dma_s *omap_dma_init(target_phys_addr_t base, qemu_irq *irqs,
                 qemu_irq lcd_irq, struct omap_mpu_state_s *mpu, omap_clk clk,
                 enum omap_dma_model model);
-struct omap_dma_s *omap_dma4_init(target_phys_addr_t base, qemu_irq *irqs,
+struct soc_dma_s *omap_dma4_init(target_phys_addr_t base, qemu_irq *irqs,
                 struct omap_mpu_state_s *mpu, int fifo,
                 int chans, omap_clk iclk, omap_clk fclk);
-void omap_dma_reset(struct omap_dma_s *s);
+void omap_dma_reset(struct soc_dma_s *s);
 
 struct dma_irq_map {
     int ih;
@@ -493,7 +494,7 @@ struct omap_dma_lcd_channel_s {
     ram_addr_t phys_framebuffer[2];
     qemu_irq irq;
     struct omap_mpu_state_s *mpu;
-} *omap_dma_get_lcdch(struct omap_dma_s *s);
+} *omap_dma_get_lcdch(struct soc_dma_s *s);
 
 /*
  * DMA request numbers for OMAP1
@@ -659,6 +660,7 @@ struct omap_uart_s *omap2_uart_init(struct omap_target_agent_s *ta,
                 qemu_irq irq, omap_clk fclk, omap_clk iclk,
                 qemu_irq txdma, qemu_irq rxdma, CharDriverState *chr);
 void omap_uart_reset(struct omap_uart_s *s);
+void omap_uart_attach(struct omap_uart_s *s, CharDriverState *chr);
 
 struct omap_mpuio_s;
 struct omap_mpuio_s *omap_mpuio_init(target_phys_addr_t base,
@@ -736,6 +738,10 @@ struct omap_lpg_s *omap_lpg_init(target_phys_addr_t base, omap_clk clk);
 
 void omap_tap_init(struct omap_target_agent_s *ta,
                 struct omap_mpu_state_s *mpu);
+
+struct omap_eac_s;
+struct omap_eac_s *omap_eac_init(struct omap_target_agent_s *ta,
+                qemu_irq irq, qemu_irq *drq, omap_clk fclk, omap_clk iclk);
 
 /* omap_lcdc.c */
 struct omap_lcd_panel_s;
@@ -877,7 +883,7 @@ struct omap_mpu_state_s {
     /* MPU private TIPB peripherals */
     struct omap_intr_handler_s *ih[2];
 
-    struct omap_dma_s *dma;
+    struct soc_dma_s *dma;
 
     struct omap_mpu_timer_s *timer[3];
     struct omap_watchdog_timer_s *wdt;
@@ -956,6 +962,8 @@ struct omap_mpu_state_s {
     struct omap_mcspi_s *mcspi[2];
 
     struct omap_dss_s *dss;
+
+    struct omap_eac_s *eac;
 };
 
 /* omap1.c */
@@ -1133,6 +1141,15 @@ inline static int debug_register_io_memory(int io_index,
     return cpu_register_io_memory(io_index, io_readfn, io_writefn, s);
 }
 #  define cpu_register_io_memory	debug_register_io_memory
+# endif
+
+/* Define when we want to reduce the number of IO regions registered.  */
+/*# define L4_MUX_HACK*/
+
+# ifdef L4_MUX_HACK
+#  undef l4_register_io_memory
+int l4_register_io_memory(int io_index, CPUReadMemoryFunc **mem_read,
+                CPUWriteMemoryFunc **mem_write, void *opaque);
 # endif
 
 #endif /* hw_omap_h */

@@ -78,6 +78,8 @@ typedef struct USBHIDState {
     int kind;
     int protocol;
     int idle;
+    void *datain_opaque;
+    void (*datain)(void *);
 } USBHIDState;
 
 /* mostly the same values as the Bochs USB Mouse device */
@@ -317,9 +319,9 @@ static const uint8_t qemu_tablet_hid_report_descriptor[] = {
     0x09, 0x30,		/*     Usage (X) */
     0x09, 0x31,		/*     Usage (Y) */
     0x15, 0x00,		/*     Logical Minimum (0) */
-    0x26, 0xfe, 0x7f,	/*     Logical Maximum (0x7fff) */
+    0x26, 0xff, 0x7f,	/*     Logical Maximum (0x7fff) */
     0x35, 0x00,		/*     Physical Minimum (0) */
-    0x46, 0xfe, 0x7f,	/*     Physical Maximum (0x7fff) */
+    0x46, 0xff, 0x7f,	/*     Physical Maximum (0x7fff) */
     0x75, 0x10,		/*     Report Size (16) */
     0x95, 0x02,		/*     Report Count (2) */
     0x81, 0x02,		/*     Input (Data, Variable, Absolute) */
@@ -413,6 +415,12 @@ static const uint8_t usb_hid_usage_keys[0x100] = {
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
 };
 
+static void usb_notify_datain_cb(USBHIDState *hs)
+{
+    if (hs->datain)
+        hs->datain(hs->datain_opaque);
+}
+
 static void usb_pointer_event_clear(USBPointerEvent *e, int buttons) {
     e->xdx = e->ydy = e->dz = 0;
     e->buttons_state = buttons;
@@ -463,6 +471,8 @@ static void usb_pointer_event(void *hs_v, int x1, int y1, int z1,
 	usb_pointer_event_clear(&s->queue[use_slot], buttons_state);
     }
     usb_pointer_event_combine(&s->queue[use_slot],s->xyrel, x1,y1,z1);
+
+    usb_notify_datain_cb(hs);
 }
 
 static void usb_keyboard_event(void *opaque, int keycode)
@@ -477,6 +487,7 @@ static void usb_keyboard_event(void *opaque, int keycode)
     s->modifiers &= ~(1 << 8);
 
     s->changed = 1;
+    usb_notify_datain_cb(hs);
 
     switch (hid_code) {
     case 0x00:
@@ -502,14 +513,19 @@ static void usb_keyboard_event(void *opaque, int keycode)
             if (s->key[i] == hid_code) {
                 s->key[i] = s->key[-- s->keys];
                 s->key[s->keys] = 0x00;
-                return;
+                break;
             }
+        if (i < 0)
+            return;
     } else {
         for (i = s->keys - 1; i >= 0; i --)
             if (s->key[i] == hid_code)
-                return;
-        if (s->keys < sizeof(s->key))
-            s->key[s->keys ++] = hid_code;
+                break;
+        if (i < 0) {
+            if (s->keys < sizeof(s->key))
+                s->key[s->keys ++] = hid_code;
+        } else
+            return;
     }
 }
 
@@ -550,11 +566,11 @@ static int usb_pointer_poll(USBHIDState *hs, uint8_t *buf, int len)
 
     e = &s->queue[s->head];
 
-    dz = int_clamp(e->dz, -127, 127);
+    dz = int_clamp(e->dz, -128, 127);
 
     if (s->xyrel) {
-        dx = int_clamp(e->xdx, -127, 127);
-        dy = int_clamp(e->ydy, -127, 127);
+        dx = int_clamp(e->xdx, -128, 127);
+        dy = int_clamp(e->ydy, -128, 127);
 	e->xdx -= dx;
 	e->ydy -= dy;
     } else {
@@ -569,6 +585,9 @@ static int usb_pointer_poll(USBHIDState *hs, uint8_t *buf, int len)
 	/* that deals with this event */
 	QUEUE_INCR(s->head);
     }
+
+    /* Appears we have to invert the wheel direction */
+    dz = 0 - dz;
 
     b = 0;
     if (e->buttons_state & MOUSE_EVENT_LBUTTON)
@@ -927,4 +946,12 @@ USBDevice *usb_keyboard_init(void)
     pstrcpy(s->dev.devname, sizeof(s->dev.devname), "QEMU USB Keyboard");
 
     return (USBDevice *) s;
+}
+
+void usb_hid_datain_cb(USBDevice *dev, void *opaque, void (*datain)(void *))
+{
+    USBHIDState *s = (USBHIDState *)dev;
+
+    s->datain_opaque = opaque;
+    s->datain = datain;
 }

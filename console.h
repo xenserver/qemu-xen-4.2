@@ -9,6 +9,9 @@
 #define MOUSE_EVENT_RBUTTON 0x02
 #define MOUSE_EVENT_MBUTTON 0x04
 
+/* in ms */
+#define GUI_REFRESH_INTERVAL 30
+
 typedef void QEMUPutKBDEvent(void *opaque, int keycode);
 typedef void QEMUPutMouseEvent(void *opaque, int dx, int dy, int dz, int buttons_state);
 
@@ -76,8 +79,7 @@ struct DisplayState {
     uint32_t *palette;
     struct QEMUTimer *gui_timer;
     uint64_t gui_timer_interval;
-    int idle;
-
+    int idle; /* there is nothing to update (window invisible), set by vnc/sdl */
     int shared_buf;
 
     void (*dpy_update)(struct DisplayState *s, int x, int y, int w, int h);
@@ -89,6 +91,7 @@ struct DisplayState {
                      int dst_x, int dst_y, int w, int h);
     void (*dpy_fill)(struct DisplayState *s, int x, int y,
                      int w, int h, uint32_t c);
+    void (*dpy_text_cursor)(struct DisplayState *s, int x, int y);
 };
 
 static inline void dpy_update(DisplayState *s, int x, int y, int w, int h)
@@ -104,8 +107,17 @@ static inline void dpy_resize_shared(DisplayState *s, int w, int h, int depth, i
 {
     s->dpy_resize_shared(s, w, h, depth, linesize, pixels);
 }
+static inline void dpy_cursor(DisplayState *s, int x, int y)
+{
+    if (s->dpy_text_cursor)
+        s->dpy_text_cursor(s, x, y);
+}
 
 typedef unsigned long console_ch_t;
+static inline void console_write_ch(console_ch_t *dest, uint32_t ch)
+{
+    cpu_to_le32wu((uint32_t *) dest, ch);
+}
 
 typedef void (*vga_hw_update_ptr)(void *);
 typedef void (*vga_hw_invalidate_ptr)(void *);
@@ -122,9 +134,13 @@ void vga_hw_invalidate(void);
 void vga_hw_screen_dump(const char *filename);
 
 int is_graphic_console(void);
+int is_fixedsize_console(void);
 CharDriverState *text_console_init(DisplayState *ds, const char *p);
 void console_select(unsigned int index);
-void set_color_table(DisplayState *ds);
+void console_color_init(DisplayState *ds);
+void qemu_console_resize(QEMUConsole *console, int width, int height);
+void qemu_console_copy(QEMUConsole *console, int src_x, int src_y,
+                int dst_x, int dst_y, int w, int h);
 
 /* sdl.c */
 void sdl_display_init(DisplayState *ds, int full_screen, int no_frame, int opengl_enabled);
@@ -154,6 +170,8 @@ void term_flush(void);
 void term_print_help(void);
 void monitor_readline(const char *prompt, int is_password,
                       char *buf, int buf_size);
+void monitor_suspend(void);
+void monitor_resume(void);
 
 /* readline.c */
 typedef void ReadLineFunc(void *opaque, const char *str);

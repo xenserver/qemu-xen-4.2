@@ -20,6 +20,15 @@
 #define unlikely(x)   __builtin_expect(!!(x), 0)
 #endif
 
+#ifndef offsetof
+#define offsetof(TYPE, MEMBER) ((size_t) &((TYPE *) 0)->MEMBER)
+#endif
+#ifndef container_of
+#define container_of(ptr, type, member) ({                      \
+        const typeof(((type *) 0)->member) *__mptr = (ptr);     \
+        (type *) ((char *) __mptr - offsetof(type, member));})
+#endif
+
 #ifndef MIN
 #define MIN(a, b) (((a) < (b)) ? (a) : (b))
 #endif
@@ -36,9 +45,11 @@
 #define always_inline inline
 #else
 #define always_inline __attribute__ (( always_inline )) __inline__
-#endif
-#endif
 #define inline always_inline
+#endif
+#else
+#define inline always_inline
+#endif
 
 #ifdef __i386__
 #define REGPARM __attribute((regparm(3)))

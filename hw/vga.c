@@ -26,10 +26,15 @@
 #include "pc.h"
 #include "pci.h"
 #include "vga_int.h"
+//<<<<<<< HEAD/hw/vga.c
 #include <sys/mman.h>
 #include "sysemu.h"
 #include "qemu-xen.h"
 #include "exec-all.h"
+//=======
+//#include "pixel_ops.h"
+#include "qemu-timer.h"
+//>>>>>>> 3df1a17b0ab8a8be4e3c9d6b2fa0812c652520f1/hw/vga.c
 
 //#define DEBUG_VGA
 //#define DEBUG_VGA_MEM
@@ -152,6 +157,138 @@ static uint8_t expand4to8[16];
 
 static void vga_screen_dump(void *opaque, const char *filename);
 
+static void vga_dumb_update_retrace_info(VGAState *s)
+{
+    (void) s;
+}
+
+static void vga_precise_update_retrace_info(VGAState *s)
+{
+    int htotal_chars;
+    int hretr_start_char;
+    int hretr_skew_chars;
+    int hretr_end_char;
+
+    int vtotal_lines;
+    int vretr_start_line;
+    int vretr_end_line;
+
+    int div2, sldiv2, dots;
+    int clocking_mode;
+    int clock_sel;
+    const int hz[] = {25175000, 28322000, 25175000, 25175000};
+    int64_t chars_per_sec;
+    struct vga_precise_retrace *r = &s->retrace_info.precise;
+
+    htotal_chars = s->cr[0x00] + 5;
+    hretr_start_char = s->cr[0x04];
+    hretr_skew_chars = (s->cr[0x05] >> 5) & 3;
+    hretr_end_char = s->cr[0x05] & 0x1f;
+
+    vtotal_lines = (s->cr[0x06]
+                    | (((s->cr[0x07] & 1) | ((s->cr[0x07] >> 4) & 2)) << 8)) + 2
+        ;
+    vretr_start_line = s->cr[0x10]
+        | ((((s->cr[0x07] >> 2) & 1) | ((s->cr[0x07] >> 6) & 2)) << 8)
+        ;
+    vretr_end_line = s->cr[0x11] & 0xf;
+
+
+    div2 = (s->cr[0x17] >> 2) & 1;
+    sldiv2 = (s->cr[0x17] >> 3) & 1;
+
+    clocking_mode = (s->sr[0x01] >> 3) & 1;
+    clock_sel = (s->msr >> 2) & 3;
+    dots = (s->msr & 1) ? 8 : 9;
+
+    chars_per_sec = hz[clock_sel] / dots;
+
+    htotal_chars <<= clocking_mode;
+
+    r->total_chars = vtotal_lines * htotal_chars;
+    r->total_chars = (vretr_start_line + vretr_end_line + 1) * htotal_chars;
+    if (r->freq) {
+        r->ticks_per_char = ticks_per_sec / (r->total_chars * r->freq);
+    } else {
+        r->ticks_per_char = ticks_per_sec / chars_per_sec;
+    }
+
+    r->vstart = vretr_start_line;
+    r->vend = r->vstart + vretr_end_line + 1;
+
+    r->hstart = hretr_start_char + hretr_skew_chars;
+    r->hend = r->hstart + hretr_end_char + 1;
+    r->htotal = htotal_chars;
+
+#if 0
+    printf("hz=%f\n",
+    printf (
+        "hz=%f\n"
+        "htotal = %d\n"
+        "hretr_start = %d\n"
+        "hretr_skew = %d\n"
+        "hretr_end = %d\n"
+        "vtotal = %d\n"
+        "vretr_start = %d\n"
+        "vretr_end = %d\n"
+        "div2 = %d sldiv2 = %d\n"
+        "clocking_mode = %d\n"
+        "clock_sel = %d %d\n"
+        "dots = %d\n"
+        "ticks/char = %lld\n"
+        "\n",
+        (double) ticks_per_sec / (r->ticks_per_char * r->total_chars),
+        htotal_chars,
+        hretr_start_char,
+        hretr_skew_chars,
+        hretr_end_char,
+        vtotal_lines,
+        vretr_start_line,
+        vretr_end_line,
+        div2, sldiv2,
+        clocking_mode,
+        clock_sel,
+        hz[clock_sel],
+        dots,
+        r->ticks_per_char
+        );
+#endif
+}
+
+static uint8_t vga_precise_retrace(VGAState *s)
+{
+    struct vga_precise_retrace *r = &s->retrace_info.precise;
+    uint8_t val = s->st01 & ~(ST01_V_RETRACE | ST01_DISP_ENABLE);
+
+    if (r->total_chars) {
+        int cur_line, cur_line_char, cur_char;
+        int64_t cur_tick;
+
+        cur_tick = qemu_get_clock(vm_clock);
+
+        cur_char = (cur_tick / r->ticks_per_char) % r->total_chars;
+        cur_line = cur_char / r->htotal;
+
+        if (cur_line >= r->vstart && cur_line <= r->vend) {
+            val |= ST01_V_RETRACE | ST01_DISP_ENABLE;
+        } else {
+            cur_line_char = cur_char % r->htotal;
+            if (cur_line_char >= r->hstart && cur_line_char <= r->hend) {
+                val |= ST01_DISP_ENABLE;
+            }
+        }
+
+        return val;
+    } else {
+        return s->st01 ^ (ST01_V_RETRACE | ST01_DISP_ENABLE);
+    }
+}
+
+static uint8_t vga_dumb_retrace(VGAState *s)
+{
+    return s->st01 ^ (ST01_V_RETRACE | ST01_DISP_ENABLE);
+}
+
 static uint32_t vga_ioport_read(void *opaque, uint32_t addr)
 {
     VGAState *s = opaque;
@@ -231,8 +368,7 @@ static uint32_t vga_ioport_read(void *opaque, uint32_t addr)
         case 0x3ba:
         case 0x3da:
             /* just toggle to fool polling */
-            s->st01 ^= ST01_V_RETRACE | ST01_DISP_ENABLE;
-            val = s->st01;
+            val = s->st01 = s->retrace(s);
             s->ar_flip_flop = 0;
             break;
         default:
@@ -294,6 +430,7 @@ static void vga_ioport_write(void *opaque, uint32_t addr, uint32_t val)
         break;
     case 0x3c2:
         s->msr = val & ~0x10;
+        s->update_retrace_info(s);
         break;
     case 0x3c4:
         s->sr_index = val & 7;
@@ -303,6 +440,7 @@ static void vga_ioport_write(void *opaque, uint32_t addr, uint32_t val)
         printf("vga: write SR%x = 0x%02x\n", s->sr_index, val);
 #endif
         s->sr[s->sr_index] = val & sr_mask[s->sr_index];
+        if (s->sr_index == 1) s->update_retrace_info(s);
         break;
     case 0x3c7:
         s->dac_read_index = val;
@@ -358,6 +496,18 @@ static void vga_ioport_write(void *opaque, uint32_t addr, uint32_t val)
             break;
         default:
             s->cr[s->cr_index] = val;
+            break;
+        }
+
+        switch(s->cr_index) {
+        case 0x00:
+        case 0x04:
+        case 0x05:
+        case 0x06:
+        case 0x07:
+        case 0x11:
+        case 0x17:
+            s->update_retrace_info(s);
             break;
         }
         break;
@@ -1164,6 +1314,40 @@ static void vga_draw_text(VGAState *s, int full_update)
     line_offset = s->line_offset;
     s1 = s->vram_ptr + (s->start_addr * 4);
 
+    /* total width & height */
+    cheight = (s->cr[9] & 0x1f) + 1;
+    cw = 8;
+    if (!(s->sr[1] & 0x01))
+        cw = 9;
+    if (s->sr[1] & 0x08)
+        cw = 16; /* NOTE: no 18 pixel wide */
+    x_incr = cw * ((s->ds->depth + 7) >> 3);
+    width = (s->cr[0x01] + 1);
+    if (s->cr[0x06] == 100) {
+        /* ugly hack for CGA 160x100x16 - explain me the logic */
+        height = 100;
+    } else {
+        height = s->cr[0x12] |
+            ((s->cr[0x07] & 0x02) << 7) |
+            ((s->cr[0x07] & 0x40) << 3);
+        height = (height + 1) / cheight;
+    }
+    if ((height * width) > CH_ATTR_SIZE) {
+        /* better than nothing: exit if transient size is too big */
+        return;
+    }
+
+    if (width != s->last_width || height != s->last_height ||
+        cw != s->last_cw || cheight != s->last_ch) {
+        s->last_scr_width = width * cw;
+        s->last_scr_height = height * cheight;
+        qemu_console_resize(s->console, s->last_scr_width, s->last_scr_height);
+        s->last_width = width;
+        s->last_height = height;
+        s->last_ch = cheight;
+        s->last_cw = cw;
+        full_update = 1;
+    }
     cursor_offset = ((s->cr[0x0e] << 8) | s->cr[0x0f]) - s->start_addr;
     if (cursor_offset != s->cursor_offset ||
         s->cr[0xa] != s->cursor_start ||
@@ -1724,6 +1908,168 @@ static void vga_reset(VGAState *s)
     s->graphic_mode = -1; /* force full update */
 }
 
+#define TEXTMODE_X(x)	((x) % width)
+#define TEXTMODE_Y(x)	((x) / width)
+#define VMEM2CHTYPE(v)	((v & 0xff0007ff) | \
+        ((v & 0x00000800) << 10) | ((v & 0x00007000) >> 1))
+/* relay text rendering to the display driver
+ * instead of doing a full vga_update_display() */
+static void vga_update_text(void *opaque, console_ch_t *chardata)
+{
+    VGAState *s = (VGAState *) opaque;
+    int graphic_mode, i, cursor_offset, cursor_visible;
+    int cw, cheight, width, height, size, c_min, c_max;
+    uint32_t *src;
+    console_ch_t *dst, val;
+    char msg_buffer[80];
+    int full_update = 0;
+
+    if (!(s->ar_index & 0x20)) {
+        graphic_mode = GMODE_BLANK;
+    } else {
+        graphic_mode = s->gr[6] & 1;
+    }
+    if (graphic_mode != s->graphic_mode) {
+        s->graphic_mode = graphic_mode;
+        full_update = 1;
+    }
+    if (s->last_width == -1) {
+        s->last_width = 0;
+        full_update = 1;
+    }
+
+    switch (graphic_mode) {
+    case GMODE_TEXT:
+        /* TODO: update palette */
+        full_update |= update_basic_params(s);
+
+        /* total width & height */
+        cheight = (s->cr[9] & 0x1f) + 1;
+        cw = 8;
+        if (!(s->sr[1] & 0x01))
+            cw = 9;
+        if (s->sr[1] & 0x08)
+            cw = 16; /* NOTE: no 18 pixel wide */
+        width = (s->cr[0x01] + 1);
+        if (s->cr[0x06] == 100) {
+            /* ugly hack for CGA 160x100x16 - explain me the logic */
+            height = 100;
+        } else {
+            height = s->cr[0x12] | 
+                ((s->cr[0x07] & 0x02) << 7) | 
+                ((s->cr[0x07] & 0x40) << 3);
+            height = (height + 1) / cheight;
+        }
+
+        size = (height * width);
+        if (size > CH_ATTR_SIZE) {
+            if (!full_update)
+                return;
+
+            snprintf(msg_buffer, sizeof(msg_buffer), "%i x %i Text mode",
+                     width, height);
+            break;
+        }
+
+        if (width != s->last_width || height != s->last_height ||
+            cw != s->last_cw || cheight != s->last_ch) {
+            s->last_scr_width = width * cw;
+            s->last_scr_height = height * cheight;
+            qemu_console_resize(s->console, width, height);
+            s->last_width = width;
+            s->last_height = height;
+            s->last_ch = cheight;
+            s->last_cw = cw;
+            full_update = 1;
+        }
+
+        /* Update "hardware" cursor */
+        cursor_offset = ((s->cr[0x0e] << 8) | s->cr[0x0f]) - s->start_addr;
+        if (cursor_offset != s->cursor_offset ||
+            s->cr[0xa] != s->cursor_start ||
+            s->cr[0xb] != s->cursor_end || full_update) {
+            cursor_visible = !(s->cr[0xa] & 0x20);
+            if (cursor_visible && cursor_offset < size && cursor_offset >= 0)
+                dpy_cursor(s->ds,
+                           TEXTMODE_X(cursor_offset),
+                           TEXTMODE_Y(cursor_offset));
+            else
+                dpy_cursor(s->ds, -1, -1);
+            s->cursor_offset = cursor_offset;
+            s->cursor_start = s->cr[0xa];
+            s->cursor_end = s->cr[0xb];
+        }
+
+        src = (uint32_t *) s->vram_ptr + s->start_addr;
+        dst = chardata;
+
+        if (full_update) {
+            for (i = 0; i < size; src ++, dst ++, i ++)
+                console_write_ch(dst, VMEM2CHTYPE(*src));
+
+            dpy_update(s->ds, 0, 0, width, height);
+        } else {
+            c_max = 0;
+
+            for (i = 0; i < size; src ++, dst ++, i ++) {
+                console_write_ch(&val, VMEM2CHTYPE(*src));
+                if (*dst != val) {
+                    *dst = val;
+                    c_max = i;
+                    break;
+                }
+            }
+            c_min = i;
+            for (; i < size; src ++, dst ++, i ++) {
+                console_write_ch(&val, VMEM2CHTYPE(*src));
+                if (*dst != val) {
+                    *dst = val;
+                    c_max = i;
+                }
+            }
+
+            if (c_min <= c_max) {
+                i = TEXTMODE_Y(c_min);
+                dpy_update(s->ds, 0, i, width, TEXTMODE_Y(c_max) - i + 1);
+            }
+        }
+
+        return;
+    case GMODE_GRAPH:
+        if (!full_update)
+            return;
+
+        s->get_resolution(s, &width, &height);
+        snprintf(msg_buffer, sizeof(msg_buffer), "%i x %i Graphic mode",
+                 width, height);
+        break;
+    case GMODE_BLANK:
+    default:
+        if (!full_update)
+            return;
+
+        snprintf(msg_buffer, sizeof(msg_buffer), "VGA Blank mode");
+        break;
+    }
+
+    /* Display a message */
+    s->last_width = 60;
+    s->last_height = height = 3;
+    dpy_cursor(s->ds, -1, -1);
+    qemu_console_resize(s->console, s->last_width, height);
+
+    for (dst = chardata, i = 0; i < s->last_width * height; i ++)
+        console_write_ch(dst ++, ' ');
+
+    size = strlen(msg_buffer);
+    width = (s->last_width - size) / 2;
+    dst = chardata + s->last_width + width;
+    for (i = 0; i < size; i ++)
+        console_write_ch(dst ++, 0x00200100 | msg_buffer[i]);
+
+    dpy_update(s->ds, 0, 0, s->last_width, height);
+}
+
 static CPUReadMemoryFunc *vga_mem_read[3] = {
     vga_mem_readb,
     vga_mem_readw,
@@ -2158,9 +2504,21 @@ void vga_common_init(VGAState *s, DisplayState *ds, uint8_t *vga_ram_base,
     s->get_offsets = vga_get_offsets;
     s->get_resolution = vga_get_resolution;
     graphic_console_init(s->ds, vga_update_display, vga_invalidate_display,
-                         vga_screen_dump, NULL, s);
+                         vga_screen_dump, vga_update_text, s);
 
     vga_bios_init(s);
+    switch (vga_retrace_method) {
+    case VGA_RETRACE_DUMB:
+        s->retrace = vga_dumb_retrace;
+        s->update_retrace_info = vga_dumb_update_retrace_info;
+        break;
+
+    case VGA_RETRACE_PRECISE:
+        s->retrace = vga_precise_retrace;
+        s->update_retrace_info = vga_precise_update_retrace_info;
+        memset(&s->retrace_info, 0, sizeof (s->retrace_info));
+        break;
+    }
 }
 
 /* used by both ISA and PCI */

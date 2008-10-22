@@ -8,21 +8,12 @@ extern char domain_name[64];
 extern int domid, domid_backend;
 
 #include <errno.h>
-
-#ifdef bool
-# define XEN_CONFIG_HOST_BOOL_WAS_DEFINED 1
-#else
-# define bool xen_bool
-#endif
+#include <stdbool.h>
 
 #include "xenctrl.h"
 #include "xs.h"
 #ifndef CONFIG_STUBDOM
 #include "blktaplib.h"
-#endif
-
-#ifndef XEN_CONFIG_HOST_BOOL_WAS_DEFINED
-# undef bool
 #endif
 
 #define BIOS_SIZE ((256 + 64) * 1024)
@@ -46,3 +37,6 @@ extern struct BlockDriver bdrv_vbd;
 struct CharDriverState;
 void xenstore_store_serial_port_info(int i, struct CharDriverState *chr,
 				     const char *devname);
+
+extern unsigned long *logdirty_bitmap;
+extern unsigned long logdirty_bitmap_size;

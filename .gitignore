@@ -14,10 +14,15 @@ qemu.pod
 qemu-img.1
 qemu-img.pod
 qemu-img
+qemu-nbd
+qemu-nbd.8
+qemu-nbd.pod
 .gdbinit
+*.a
 *.aux
 *.cp
 *.dvi
+*.exe
 *.fn
 *.ky
 *.log
@@ -26,8 +31,7 @@ qemu-img
 *.tp
 *.vr
 *.d
-
-*.[oa]
+*.o
 *~
 
 i386-dm/Makefile

@@ -203,65 +203,6 @@ static name2keysym_t name2keysym[]={
 { "ydiaeresis",           0x0ff},
 {"EuroSign", 0x20ac},  /* XK_EuroSign */
 
-/* latin 2 extensions */
-{ "Aogonek",              0x01a1},
-{ "breve",                0x01a2},
-{ "Lstroke",              0x01a3},
-{ "Lcaron",               0x01a5},
-{ "Sacute",               0x01a6},
-{ "Scaron",               0x01a9},
-{ "Scedilla",             0x01aa},
-{ "Tcaron",               0x01ab},
-{ "Zacute",               0x01ac},
-{ "Zcaron",               0x01ae},
-{ "Zabovedot",            0x01af},
-{ "aogonek",              0x01b1},
-{ "ogonek",               0x01b2},
-{ "lstroke",              0x01b3},
-{ "lcaron",               0x01b5},
-{ "sacute",               0x01b6},
-{ "caron",                0x01b7},
-{ "scaron",               0x01b9},
-{ "scedilla",             0x01ba},
-{ "tcaron",               0x01bb},
-{ "zacute",               0x01bc},
-{ "doubleacute",          0x01bd},
-{ "zcaron",               0x01be},
-{ "zabovedot",            0x01bf},
-{ "Racute",               0x01c0},
-{ "Abreve",               0x01c3},
-{ "Lacute",               0x01c5},
-{ "Cacute",               0x01c6},
-{ "Ccaron",               0x01c8},
-{ "Eogonek",              0x01ca},
-{ "Ecaron",               0x01cc},
-{ "Dcaron",               0x01cf},
-{ "Dstroke",              0x01d0},
-{ "Nacute",               0x01d1},
-{ "Ncaron",               0x01d2},
-{ "Odoubleacute",         0x01d5},
-{ "Rcaron",               0x01d8},
-{ "Uring",                0x01d9},
-{ "Udoubleacute",         0x01db},
-{ "Tcedilla",             0x01de},
-{ "racute",               0x01e0},
-{ "abreve",               0x01e3},
-{ "lacute",               0x01e5},
-{ "cacute",               0x01e6},
-{ "ccaron",               0x01e8},
-{ "eogonek",              0x01ea},
-{ "ecaron",               0x01ec},
-{ "dcaron",               0x01ef},
-{ "dstroke",              0x01f0},
-{ "nacute",               0x01f1},
-{ "ncaron",               0x01f2},
-{ "odoubleacute",         0x01f5},
-{ "udoubleacute",         0x01fb},
-{ "rcaron",               0x01f8},
-{ "uring",                0x01f9},
-{ "tcedilla",             0x01fe},
-{ "abovedot",             0x01ff},
-
     /* modifiers */
 {"Control_L", 0xffe3}, /* XK_Control_L */
 {"Control_R", 0xffe4}, /* XK_Control_R */
@@ -274,7 +215,6 @@ static name2keysym_t name2keysym[]={
 {"Shift_R", 0xffe2},   /* XK_Shift_R */
 {"Super_L", 0xffeb},   /* XK_Super_L */
 {"Super_R", 0xffec},   /* XK_Super_R */
-{"ISO_Level3_Shift", 0xfe03}, /* XK_ISO_Level3_Shift */
 
     /* special keys */
 {"BackSpace", 0xff08}, /* XK_BackSpace */
@@ -345,7 +285,6 @@ static name2keysym_t name2keysym[]={
 {"Num_Lock", 0xff7f},    /* XK_Num_Lock */
 {"Pause", 0xff13},       /* XK_Pause */
 {"Escape", 0xff1b},      /* XK_Escape */
-{"ISO_Left_Tab", 0xfe20},/* XK_ISO_Left_Tab */
 
     /* localized keys */
 {"BackApostrophe", 0xff21},
@@ -359,28 +298,5 @@ static name2keysym_t name2keysym[]={
 {"Katakana_Real", 0xff25},
 {"Eisu_toggle", 0xff30},
 
-    /* dead keys */
-{"dead_grave", 0xfe50},
-{"dead_acute", 0xfe51},
-{"dead_circumflex", 0xfe52},
-{"dead_tilde", 0xfe53},
-{"dead_macron", 0xfe54},
-{"dead_brev", 0xfe55},
-{"dead_abovedot", 0xfe56},
-{"dead_diaeresis", 0xfe57},
-{"dead_abovering", 0xfe58},
-{"dead_doubleacute", 0xfe59},
-{"dead_caron", 0xfe5a},
-{"dead_cedilla", 0xfe5b},
-{"dead_ogonek", 0xfe5c},
-{"dead_iota", 0xfe5d},
-{"dead_voiced_sound", 0xfe5e},
-{"dead_semivoiced_sound", 0xfe5f},
-{"dead_belowdot", 0xfe60},
-{"dead_hook", 0xfe61},
-{"dead_horn", 0xfe62},
-
-
 {0,0},
 };
-

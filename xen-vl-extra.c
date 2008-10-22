@@ -9,11 +9,6 @@
 
 #include "qemu-xen.h"
 
-/* forward declarations of things in vl.c */
-
-static int qemu_savevm_state(QEMUFile *f);
-static int qemu_loadvm_state(QEMUFile *f);
-
 /* We use simpler state save/load functions for Xen */
 
 void do_savevm(const char *name)

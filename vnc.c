@@ -54,17 +54,17 @@
 #include "keymaps.c"
 #include "d3des.h"
 
-#if CONFIG_VNC_TLS
+#ifdef CONFIG_VNC_TLS
 #include <gnutls/gnutls.h>
 #include <gnutls/x509.h>
 #endif /* CONFIG_VNC_TLS */
 
 // #define _VNC_DEBUG 1
 
-#if _VNC_DEBUG
+#ifdef _VNC_DEBUG
 #define VNC_DEBUG(fmt, ...) do { fprintf(stderr, fmt, ## __VA_ARGS__); } while (0)
 
-#if CONFIG_VNC_TLS && _VNC_DEBUG >= 2
+#if defined(CONFIG_VNC_TLS) && _VNC_DEBUG >= 2
 /* Very verbose, so only enabled for _VNC_DEBUG >= 2 */
 static void vnc_debug_gnutls_log(int level, const char* str) {
     VNC_DEBUG("%d %s", level, str);
@@ -114,7 +114,7 @@ enum {
     VNC_AUTH_VENCRYPT = 19
 };
 
-#if CONFIG_VNC_TLS
+#ifdef CONFIG_VNC_TLS
 enum {
     VNC_WIREMODE_CLEAR,
     VNC_WIREMODE_TLS,
@@ -130,12 +130,10 @@ enum {
     VNC_AUTH_VENCRYPT_X509PLAIN = 262,
 };
 
-#if CONFIG_VNC_TLS
 #define X509_CA_CERT_FILE "ca-cert.pem"
 #define X509_CA_CRL_FILE "ca-crl.pem"
 #define X509_SERVER_KEY_FILE "server-key.pem"
 #define X509_SERVER_CERT_FILE "server-cert.pem"
-#endif
 
 #endif /* CONFIG_VNC_TLS */
 
@@ -190,7 +188,7 @@ struct VncState
     char *display;
     char *password;
     int auth;
-#if CONFIG_VNC_TLS
+#ifdef CONFIG_VNC_TLS
     int subauth;
     int x509verify;
 
@@ -202,7 +200,7 @@ struct VncState
     char challenge[VNC_AUTH_CHALLENGE_SIZE];
     int switchbpp;
 
-#if CONFIG_VNC_TLS
+#ifdef CONFIG_VNC_TLS
     int wiremode;
     gnutls_session_t tls_session;
 #endif
@@ -352,6 +350,11 @@ static void vnc_dpy_update(DisplayState *ds, int x, int y, int w, int h)
 {
     VncState *vs = ds->opaque;
 
+    x = MIN(x, vs->width);
+    y = MIN(y, vs->height);
+    w = MIN(x, vs->width - x);
+    h = MIN(h, vs->height);
+
     set_bits_in_row(vs, vs->dirty_row, x, y, w, h);
 }
 
@@ -366,13 +369,6 @@ static void vnc_framebuffer_update(VncState *vs, int x, int y, int w, int h,
     vnc_write_s32(vs, encoding);
 }
 
-static int mult_overflows(int x, int y)
-{
-    if (x<=0 || y<=0 || x>=INT_MAX/y)
-        return 1;
-    else return 0;
-}
-
 static void vnc_dpy_resize_shared(DisplayState *ds, int w, int h, int depth, int linesize, void *pixels)
 {
     static int allocated;
@@ -381,17 +377,10 @@ static void vnc_dpy_resize_shared(DisplayState *ds, int w, int h, int depth, int
     int o;
 
     vnc_colourdepth(ds, depth);
-    if (mult_overflows(w, h) || mult_overflows(w*h, vs->depth) ||
-        mult_overflows(h, sizeof(vs->dirty_row[0]))) {
-        fprintf(stderr, "vnc: suspicious vnc_dpy_resize arguments"
-		" (w=%d h=%d depth=%d linesize=%d vs->depth=%d), exiting\n",
-		w, h, depth, linesize, vs->depth);
-        exit(1);
-    }
     if (!ds->shared_buf) {
         ds->linesize = w * vs->depth;
         if (allocated)
-            ds->data = realloc(ds->data,  h * ds->linesize);
+            ds->data = qemu_realloc(ds->data,  h * ds->linesize);
         else
             ds->data = malloc(h * ds->linesize);
         allocated = 1;
@@ -402,9 +391,9 @@ static void vnc_dpy_resize_shared(DisplayState *ds, int w, int h, int depth, int
             allocated = 0;
         }
     }
-    vs->old_data = realloc(vs->old_data, h * ds->linesize);
-    vs->dirty_row = realloc(vs->dirty_row, h * sizeof(vs->dirty_row[0]));
-    vs->update_row = realloc(vs->update_row, h * sizeof(vs->dirty_row[0]));
+    vs->old_data = qemu_realloc(vs->old_data, h * ds->linesize);
+    vs->dirty_row = qemu_realloc(vs->dirty_row, h * sizeof(vs->dirty_row[0]));
+    vs->update_row = qemu_realloc(vs->update_row, h * sizeof(vs->dirty_row[0]));
 
     if (ds->data == NULL || vs->old_data == NULL ||
 	vs->dirty_row == NULL || vs->update_row == NULL) {
@@ -414,7 +403,7 @@ static void vnc_dpy_resize_shared(DisplayState *ds, int w, int h, int depth, int
 
     if (ds->depth != vs->depth * 8) {
         ds->depth = vs->depth * 8;
-        set_color_table(ds);
+        console_color_init(ds);
     }
     size_changed = ds->width != w || ds->height != h;
     ds->width = w;
@@ -872,7 +861,7 @@ static void buffer_reserve(Buffer *buffer, size_t len)
 {
     if ((buffer->capacity - buffer->offset) < len) {
 	buffer->capacity += (len + 1024);
-	buffer->buffer = realloc(buffer->buffer, buffer->capacity);
+	buffer->buffer = qemu_realloc(buffer->buffer, buffer->capacity);
 	if (buffer->buffer == NULL) {
 	    fprintf(stderr, "vnc: out of memory\n");
 	    exit(1);
@@ -1008,7 +997,7 @@ static int vnc_client_io_error(VncState *vs, int ret, int last_errno)
 	buffer_reset(&vs->output);
         free_queue(vs);
         vs->update_requested = 0;
-#if CONFIG_VNC_TLS
+#ifdef CONFIG_VNC_TLS
 	if (vs->tls_session) {
 	    gnutls_deinit(vs->tls_session);
 	    vs->tls_session = NULL;
@@ -1030,7 +1019,7 @@ static void vnc_client_write(void *opaque)
     long ret;
     VncState *vs = opaque;
 
-#if CONFIG_VNC_TLS
+#ifdef CONFIG_VNC_TLS
     if (vs->tls_session) {
 	ret = gnutls_write(vs->tls_session, vs->output.buffer, vs->output.offset);
 	if (ret < 0) {
@@ -1068,7 +1057,7 @@ static void vnc_client_read(void *opaque)
 
     buffer_reserve(&vs->input, 4096);
 
-#if CONFIG_VNC_TLS
+#ifdef CONFIG_VNC_TLS
     if (vs->tls_session) {
 	ret = gnutls_read(vs->tls_session, buffer_end(&vs->input), 4096);
 	if (ret < 0) {
@@ -1177,7 +1166,7 @@ static uint32_t read_u32(uint8_t *data, size_t offset)
 	    (data[offset + 2] << 8) | data[offset + 3]);
 }
 
-#if CONFIG_VNC_TLS
+#ifdef CONFIG_VNC_TLS
 ssize_t vnc_tls_push(gnutls_transport_ptr_t transport,
 		     const void *data,
 		     size_t len) {
@@ -1955,7 +1944,7 @@ static int start_auth_vnc(VncState *vs)
 }
 
 
-#if CONFIG_VNC_TLS
+#ifdef CONFIG_VNC_TLS
 #define DH_BITS 1024
 static gnutls_dh_params_t dh_params;
 
@@ -1975,7 +1964,7 @@ static int vnc_tls_initialize(void)
     if (gnutls_dh_params_generate2 (dh_params, DH_BITS) < 0)
 	return 0;
 
-#if _VNC_DEBUG == 2
+#if defined(_VNC_DEBUG) && _VNC_DEBUG == 2
     gnutls_global_set_log_level(10);
     gnutls_global_set_log_function(vnc_debug_gnutls_log);
 #endif
@@ -2393,7 +2382,7 @@ static int protocol_client_auth(VncState *vs, uint8_t *data, size_t len)
            VNC_DEBUG("Start VNC auth\n");
            return start_auth_vnc(vs);
 
-#if CONFIG_VNC_TLS
+#ifdef CONFIG_VNC_TLS
        case VNC_AUTH_VENCRYPT:
            VNC_DEBUG("Accept VeNCrypt auth\n");;
            return start_auth_vencrypt(vs);
@@ -2543,7 +2532,7 @@ void vnc_display_init(DisplayState *ds)
     vnc_dpy_resize_shared(ds, ds->width, ds->height, 24, ds->linesize, NULL);
 }
 
-#if CONFIG_VNC_TLS
+#ifdef CONFIG_VNC_TLS
 static int vnc_set_x509_credential(VncState *vs,
 				   const char *certdir,
 				   const char *filename,
@@ -2621,7 +2610,7 @@ void vnc_display_close(DisplayState *ds)
 	buffer_reset(&vs->output);
         free_queue(vs);
         vs->update_requested = 0;
-#if CONFIG_VNC_TLS
+#ifdef CONFIG_VNC_TLS
 	if (vs->tls_session) {
 	    gnutls_deinit(vs->tls_session);
 	    vs->tls_session = NULL;
@@ -2630,7 +2619,7 @@ void vnc_display_close(DisplayState *ds)
 #endif /* CONFIG_VNC_TLS */
     }
     vs->auth = VNC_AUTH_INVALID;
-#if CONFIG_VNC_TLS
+#ifdef CONFIG_VNC_TLS
     vs->subauth = VNC_AUTH_INVALID;
     vs->x509verify = 0;
 #endif
@@ -2671,7 +2660,7 @@ int vnc_display_open(DisplayState *ds, const char *display, int find_unused)
     VncState *vs = ds ? (VncState *)ds->opaque : vnc_state;
     const char *options;
     int password = 0;
-#if CONFIG_VNC_TLS
+#ifdef CONFIG_VNC_TLS
     int tls = 0, x509 = 0;
 #endif
 
@@ -2692,7 +2681,7 @@ int vnc_display_open(DisplayState *ds, const char *display, int find_unused)
 	    password = 1; /* Require password auth */
         } else if (strncmp(options, "switchbpp", 9) == 0) {
             vs->switchbpp = 1;
-#if CONFIG_VNC_TLS
+#ifdef CONFIG_VNC_TLS
 	} else if (strncmp(options, "tls", 3) == 0) {
 	    tls = 1; /* Require TLS */
 	} else if (strncmp(options, "x509", 4) == 0) {
@@ -2730,7 +2719,7 @@ int vnc_display_open(DisplayState *ds, const char *display, int find_unused)
     }
 
     if (password) {
-#if CONFIG_VNC_TLS
+#ifdef CONFIG_VNC_TLS
 	if (tls) {
 	    vs->auth = VNC_AUTH_VENCRYPT;
 	    if (x509) {
@@ -2744,12 +2733,12 @@ int vnc_display_open(DisplayState *ds, const char *display, int find_unused)
 #endif
 	    VNC_DEBUG("Initializing VNC server with password auth\n");
 	    vs->auth = VNC_AUTH_VNC;
-#if CONFIG_VNC_TLS
+#ifdef CONFIG_VNC_TLS
 	    vs->subauth = VNC_AUTH_INVALID;
 	}
 #endif
     } else {
-#if CONFIG_VNC_TLS
+#ifdef CONFIG_VNC_TLS
 	if (tls) {
 	    vs->auth = VNC_AUTH_VENCRYPT;
 	    if (x509) {
@@ -2763,7 +2752,7 @@ int vnc_display_open(DisplayState *ds, const char *display, int find_unused)
 #endif
 	    VNC_DEBUG("Initializing VNC server with no auth\n");
 	    vs->auth = VNC_AUTH_NONE;
-#if CONFIG_VNC_TLS
+#ifdef CONFIG_VNC_TLS
 	    vs->subauth = VNC_AUTH_INVALID;
 	}
 #endif

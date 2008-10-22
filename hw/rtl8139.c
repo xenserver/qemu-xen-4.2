@@ -2018,10 +2018,10 @@ static int rtl8139_cplus_transmit_one(RTL8139State *s)
 
     if (s->cplus_txbuffer && s->cplus_txbuffer_offset + txsize >= s->cplus_txbuffer_len)
     {
-	free(s->cplus_txbuffer);
-	s->cplus_txbuffer = NULL;
+        free(s->cplus_txbuffer);
+        s->cplus_txbuffer = NULL;
 
-	DEBUG_PRINT(("RTL8139: +++ C+ mode transmission buffer space exceeded: %d\n", s->cplus_txbuffer_offset + txsize));
+        DEBUG_PRINT(("RTL8139: +++ C+ mode transmission buffer space exceeded: %d\n", s->cplus_txbuffer_offset + txsize));
     }
 
     if (!s->cplus_txbuffer)
@@ -3374,7 +3374,7 @@ static inline int64_t rtl8139_get_next_tctr_time(RTL8139State *s, int64_t curren
     return next_time;
 }
 
-#if RTL8139_ONBOARD_TIMER
+#ifdef RTL8139_ONBOARD_TIMER
 static void rtl8139_timer(void *opaque)
 {
     RTL8139State *s = opaque;
@@ -3480,7 +3480,7 @@ void pci_rtl8139_init(PCIBus *bus, NICInfo *nd, int devfn)
     instance = pci_bus_num(bus) << 8 | s->pci_dev->devfn;
     register_savevm("rtl8139", instance, 3, rtl8139_save, rtl8139_load, s);
 
-#if RTL8139_ONBOARD_TIMER
+#ifdef RTL8139_ONBOARD_TIMER
     s->timer = qemu_new_timer(vm_clock, rtl8139_timer, s);
 
     qemu_mod_timer(s->timer,

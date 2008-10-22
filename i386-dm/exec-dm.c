@@ -65,8 +65,9 @@ uint8_t code_gen_buffer[CODE_GEN_BUFFER_SIZE];
 uint8_t *code_gen_ptr;
 #endif /* !CONFIG_DM */
 
+int use_icount = 0;
+int64_t qemu_icount;
 ram_addr_t phys_ram_size;
-ram_addr_t ram_size;
 int phys_ram_fd;
 uint8_t *phys_ram_base;
 uint8_t *phys_ram_dirty;
@@ -126,6 +127,10 @@ static int io_mem_nb = 1;
 FILE *logfile;
 int loglevel;
 
+void cpu_exec_init_all(unsigned long tb_size)
+{
+}
+
 void cpu_exec_init(CPUState *env)
 {
     CPUState **penv;
@@ -184,7 +189,7 @@ void cpu_reset_interrupt(CPUState *env, int mask)
     env->interrupt_request &= ~mask;
 }
 
-CPULogItem cpu_log_items[] = {
+const CPULogItem cpu_log_items[] = {
     { CPU_LOG_TB_OUT_ASM, "out_asm", 
       "show generated host assembly code for each compiled TB" },
     { CPU_LOG_TB_IN_ASM, "in_asm",
@@ -222,7 +227,7 @@ static int cmp1(const char *s1, int n, const char *s2)
 /* takes a comma separated list of log masks. Return 0 if error. */
 int cpu_str_to_log_mask(const char *str)
 {
-    CPULogItem *item;
+    const CPULogItem *item;
     int mask;
     const char *p, *p1;
 

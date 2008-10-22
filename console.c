@@ -28,6 +28,7 @@
 //#define DEBUG_CONSOLE
 #define DEFAULT_BACKSCROLL 512
 #define MAX_CONSOLES 12
+#define DEFAULT_MONITOR_SIZE "800x600"
 
 #define QEMU_RGBA(r, g, b, a) (((a) << 24) | ((r) << 16) | ((g) << 8) | (b))
 #define QEMU_RGB(r, g, b) QEMU_RGBA(r, g, b, 0xff)
@@ -106,15 +107,22 @@ int qemu_fifo_read(QEMUFIFO *f, uint8_t *buf, int len1)
     return len1;
 }
 
+typedef enum {
+    GRAPHIC_CONSOLE,
+    TEXT_CONSOLE,
+    TEXT_CONSOLE_FIXED_SIZE
+} console_type_t;
+
 /* ??? This is mis-named.
    It is used for both text and graphical consoles.  */
 struct TextConsole {
-    int text_console; /* true if text console */
+    console_type_t console_type;
     DisplayState *ds;
     /* Graphic console state.  */
     vga_hw_update_ptr hw_update;
     vga_hw_invalidate_ptr hw_invalidate;
     vga_hw_screen_dump_ptr hw_screen_dump;
+    vga_hw_text_update_ptr hw_text_update;
     void *hw;
 
     int g_width, g_height;
@@ -129,6 +137,7 @@ struct TextConsole {
     TextAttributes t_attrib_default; /* default text attributes */
     TextAttributes t_attrib; /* currently active text attributes */
     TextCell *cells;
+    int text_x[2], text_y[2], cursor_invalidate;
 
     enum TTYState state;
     int esc_params[MAX_ESC_PARAMS];
@@ -159,10 +168,15 @@ void vga_hw_invalidate(void)
 
 void vga_hw_screen_dump(const char *filename)
 {
-    /* There is currently no was of specifying which screen we want to dump,
-       so always dump the dirst one.  */
+    TextConsole *previous_active_console;
+
+    previous_active_console = active_console;
+    active_console = consoles[0];
+    /* There is currently no way of specifying which screen we want to dump,
+       so always dump the first one.  */
     if (consoles[0]->hw_screen_dump)
         consoles[0]->hw_screen_dump(consoles[0]->hw, filename);
+    active_console = previous_active_console;
 }
 
 /* convert a RGBA color to a color index usable in graphic primitives */
@@ -582,7 +596,7 @@ static void console_scroll(int ydelta)
     int i, y1;
 
     s = active_console;
-    if (!s || !s->text_console)
+    if (!s || (s->console_type == GRAPHIC_CONSOLE))
         return;
 
     if (ydelta > 0) {
@@ -989,7 +1003,7 @@ void console_select(unsigned int index)
     s = consoles[index];
     if (s) {
         active_console = s;
-        if (s->text_console) {
+        if (s->console_type == TEXT_CONSOLE) {
             if (s->g_width != s->ds->width ||
                 s->g_height != s->ds->height) {
                 s->g_width = s->ds->width;
@@ -1061,7 +1075,7 @@ void kbd_put_keysym(int keysym)
     int c;
 
     s = active_console;
-    if (!s || !s->text_console)
+    if (!s || (s->console_type == GRAPHIC_CONSOLE))
         return;
 
     switch(keysym) {
@@ -1103,7 +1117,50 @@ void kbd_put_keysym(int keysym)
     }
 }
 
-static TextConsole *new_console(DisplayState *ds, int text)
+static void text_console_invalidate(void *opaque)
+{
+    TextConsole *s = (TextConsole *) opaque;
+
+    if (s->g_width != s->ds->width || s->g_height != s->ds->height) {
+        if (s->console_type == TEXT_CONSOLE_FIXED_SIZE)
+            dpy_resize(s->ds, s->g_width, s->g_height);
+        else {
+            s->g_width = s->ds->width;
+            s->g_height = s->ds->height;
+            text_console_resize(s);
+        }
+    }
+    console_refresh(s);
+}
+
+static void text_console_update(void *opaque, console_ch_t *chardata)
+{
+    TextConsole *s = (TextConsole *) opaque;
+    int i, j, src;
+
+    if (s->text_x[0] <= s->text_x[1]) {
+        src = (s->y_base + s->text_y[0]) * s->width;
+        chardata += s->text_y[0] * s->width;
+        for (i = s->text_y[0]; i <= s->text_y[1]; i ++)
+            for (j = 0; j < s->width; j ++, src ++)
+                console_write_ch(chardata ++, s->cells[src].ch |
+                                (s->cells[src].t_attrib.fgcol << 12) |
+                                (s->cells[src].t_attrib.bgcol << 8) |
+                                (s->cells[src].t_attrib.bold << 21));
+        dpy_update(s->ds, s->text_x[0], s->text_y[0],
+                   s->text_x[1] - s->text_x[0], i - s->text_y[0]);
+        s->text_x[0] = s->width;
+        s->text_y[0] = s->height;
+        s->text_x[1] = 0;
+        s->text_y[1] = 0;
+    }
+    if (s->cursor_invalidate) {
+        dpy_cursor(s->ds, s->x, s->y);
+        s->cursor_invalidate = 0;
+    }
+}
+
+static TextConsole *new_console(DisplayState *ds, console_type_t console_type)
 {
     TextConsole *s;
     int i;
@@ -1114,16 +1171,18 @@ static TextConsole *new_console(DisplayState *ds, int text)
     if (!s) {
         return NULL;
     }
-    if (!active_console || (active_console->text_console && !text))
+    if (!active_console || ((active_console->console_type != GRAPHIC_CONSOLE) &&
+        (console_type == GRAPHIC_CONSOLE))) {
         active_console = s;
+    }
     s->ds = ds;
-    s->text_console = text;
-    if (text) {
+    s->console_type = console_type;
+    if (console_type != GRAPHIC_CONSOLE) {
         consoles[nb_consoles++] = s;
     } else {
         /* HACK: Put graphical consoles before text consoles.  */
         for (i = nb_consoles; i > 0; i--) {
-            if (!consoles[i - 1]->text_console)
+            if (!consoles[i - 1]->console_type == GRAPHIC_CONSOLE)
                 break;
             consoles[i] = consoles[i - 1];
         }
@@ -1140,22 +1199,28 @@ TextConsole *graphic_console_init(DisplayState *ds, vga_hw_update_ptr update,
 {
     TextConsole *s;
 
-    s = new_console(ds, 0);
+    s = new_console(ds, GRAPHIC_CONSOLE);
     if (!s)
       return NULL;
     s->hw_update = update;
     s->hw_invalidate = invalidate;
     s->hw_screen_dump = screen_dump;
+    s->hw_text_update = text_update;
     s->hw = opaque;
     return s;
 }
 
 int is_graphic_console(void)
 {
-    return !active_console->text_console;
+    return active_console && active_console->console_type == GRAPHIC_CONSOLE;
 }
 
-void set_color_table(DisplayState *ds)
+int is_fixedsize_console(void)
+{
+    return active_console && active_console->console_type != TEXT_CONSOLE;
+}
+
+void console_color_init(DisplayState *ds)
 {
     int i, j;
     for(j = 0; j < 2; j++) {
@@ -1175,7 +1240,7 @@ CharDriverState *text_console_init(DisplayState *ds, const char *p)
     chr = qemu_mallocz(sizeof(CharDriverState));
     if (!chr)
         return NULL;
-    s = new_console(ds, 1);
+    s = new_console(ds, (p == 0) ? TEXT_CONSOLE : TEXT_CONSOLE_FIXED_SIZE);
     if (!s) {
         free(chr);
         return NULL;
@@ -1191,7 +1256,7 @@ CharDriverState *text_console_init(DisplayState *ds, const char *p)
 
     if (!color_inited) {
         color_inited = 1;
-        set_color_table(ds);
+        console_color_init(ds);
     }
     s->y_displayed = 0;
     s->y_base = 0;
@@ -1217,4 +1282,30 @@ CharDriverState *text_console_init(DisplayState *ds, const char *p)
     qemu_chr_reset(chr);
 
     return chr;
+}
+
+void qemu_console_resize(QEMUConsole *console, int width, int height)
+{
+    if (console->g_width != width || console->g_height != height
+        || !console->ds->data) {
+        console->g_width = width;
+        console->g_height = height;
+        if (active_console == console) {
+            dpy_resize(console->ds, width, height);
+        }
+    }
+}
+
+void qemu_console_copy(QEMUConsole *console, int src_x, int src_y,
+                int dst_x, int dst_y, int w, int h)
+{
+    if (active_console == console) {
+        if (console->ds->dpy_copy)
+            console->ds->dpy_copy(console->ds,
+                            src_x, src_y, dst_x, dst_y, w, h);
+        else {
+            /* TODO */
+            console->ds->dpy_update(console->ds, dst_x, dst_y, w, h);
+        }
+    }
 }

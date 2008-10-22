@@ -13,12 +13,14 @@ void register_machines(void)
     qemu_register_machine(&terrierpda_machine);
     qemu_register_machine(&palmte_machine);
     qemu_register_machine(&n800_machine);
+    qemu_register_machine(&n810_machine);
     qemu_register_machine(&lm3s811evb_machine);
     qemu_register_machine(&lm3s6965evb_machine);
     qemu_register_machine(&connex_machine);
     qemu_register_machine(&verdex_machine);
     qemu_register_machine(&mainstone2_machine);
     qemu_register_machine(&musicpal_machine);
+    qemu_register_machine(&tosapda_machine);
 }
 
 void cpu_save(QEMUFile *f, void *opaque)
@@ -118,7 +120,7 @@ int cpu_load(QEMUFile *f, void *opaque, int version_id)
     CPUARMState *env = (CPUARMState *)opaque;
     int i;
 
-    if (version_id != ARM_CPU_SAVE_VERSION)
+    if (version_id != CPU_SAVE_VERSION)
         return -EINVAL;
 
     for (i = 0; i < 16; i++) {

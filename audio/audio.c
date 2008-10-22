@@ -38,27 +38,7 @@
 #define SW_NAME(sw) (sw)->name ? (sw)->name : "unknown"
 
 static struct audio_driver *drvtab[] = {
-#ifdef CONFIG_OSS
-    &oss_audio_driver,
-#endif
-#ifdef CONFIG_ALSA
-    &alsa_audio_driver,
-#endif
-#ifdef CONFIG_COREAUDIO
-    &coreaudio_audio_driver,
-#endif
-#ifdef CONFIG_DSOUND
-    &dsound_audio_driver,
-#endif
-#ifdef CONFIG_FMOD
-    &fmod_audio_driver,
-#endif
-#ifdef CONFIG_SDL
-    &sdl_audio_driver,
-#endif
-#ifdef CONFIG_ESD
-    &esd_audio_driver,
-#endif
+    AUDIO_DRIVERS
     &no_audio_driver,
     &wav_audio_driver
 };
@@ -231,8 +211,8 @@ static char *audio_alloc_prefix (const char *s)
         size_t i;
         char *u = r + sizeof (qemu_prefix) - 1;
 
-        strcpy (r, qemu_prefix);
-        strcat (r, s);
+        pstrcpy (r, len + sizeof (qemu_prefix), qemu_prefix);
+        pstrcat (r, len + sizeof (qemu_prefix), s);
 
         for (i = 0; i < len; ++i) {
             u[i] = CTYPE(toupper, u[i]);
@@ -450,7 +430,7 @@ static void audio_process_options (const char *prefix,
 {
     char *optname;
     const char qemu_prefix[] = "QEMU_";
-    size_t preflen;
+    size_t preflen, optlen;
 
     if (audio_bug (AUDIO_FUNC, !prefix)) {
         dolog ("prefix = NULL\n");
@@ -478,21 +458,22 @@ static void audio_process_options (const char *prefix,
         /* len of opt->name + len of prefix + size of qemu_prefix
          * (includes trailing zero) + zero + underscore (on behalf of
          * sizeof) */
-        optname = qemu_malloc (len + preflen + sizeof (qemu_prefix) + 1);
+        optlen = len + preflen + sizeof (qemu_prefix) + 1;
+        optname = qemu_malloc (optlen);
         if (!optname) {
             dolog ("Could not allocate memory for option name `%s'\n",
                    opt->name);
             continue;
         }
 
-        strcpy (optname, qemu_prefix);
+        pstrcpy (optname, optlen, qemu_prefix);
 
         /* copy while upper-casing, including trailing zero */
         for (i = 0; i <= preflen; ++i) {
             optname[i + sizeof (qemu_prefix) - 1] = CTYPE(toupper, prefix[i]);
         }
-        strcat (optname, "_");
-        strcat (optname, opt->name);
+        pstrcat (optname, optlen, "_");
+        pstrcat (optname, optlen, opt->name);
 
         def = 1;
         switch (opt->tag) {
@@ -548,6 +529,12 @@ static void audio_print_settings (audsettings_t *as)
         break;
     case AUD_FMT_U16:
         AUD_log (NULL, "U16");
+        break;
+    case AUD_FMT_S32:
+        AUD_log (NULL, "S32");
+        break;
+    case AUD_FMT_U32:
+        AUD_log (NULL, "U32");
         break;
     default:
         AUD_log (NULL, "invalid(%d)", as->fmt);

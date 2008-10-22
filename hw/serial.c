@@ -2,6 +2,7 @@
  * QEMU 16550A UART emulation
  *
  * Copyright (c) 2003-2004 Fabrice Bellard
+ * Copyright (c) 2008 Citrix Systems, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -21,13 +22,6 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
-
-#include <sys/time.h>
-#include <time.h>
-#include <assert.h>
-#include <termios.h>
-#include <sys/ioctl.h>
-
 #include "hw.h"
 #include "qemu-char.h"
 #include "isa.h"
@@ -151,29 +145,20 @@ struct SerialState {
     struct QEMUTimer *modem_status_poll;
 };
 
-/* Rate limit serial requests so that e.g. grub on a serial console
-   doesn't kill dom0.  Simple token bucket.  If we get some actual
-   data from the user, instantly refil the bucket. */
-
-/* How long it takes to generate a token, in nanoseconds. */
-#define TOKEN_PERIOD 1000000
-/* Maximum and initial size of token bucket */
-#define TOKENS_MAX 100000
-
-static int tokens_avail;
-
 static void serial_receive1(void *opaque, const uint8_t *buf, int size);
 
-static void fifo_clear(SerialState *s, int fifo) {
-    SerialFIFO *f = ( fifo ) ? &s->recv_fifo : &s->xmit_fifo;
-    memset(f->data, 0, UART_FIFO_LENGTH);   
+static void fifo_clear(SerialState *s, int fifo)
+{
+    SerialFIFO *f = (fifo) ? &s->recv_fifo : &s->xmit_fifo;
+    memset(f->data, 0, UART_FIFO_LENGTH);
     f->count = 0;
     f->head = 0;
     f->tail = 0;
 }
 
-static int fifo_put(SerialState *s, int fifo, uint8_t chr) {
-    SerialFIFO *f = ( fifo ) ? &s->recv_fifo : &s->xmit_fifo;
+static int fifo_put(SerialState *s, int fifo, uint8_t chr)
+{
+    SerialFIFO *f = (fifo) ? &s->recv_fifo : &s->xmit_fifo;
 
     f->data[f->head++] = chr;
 
@@ -181,16 +166,15 @@ static int fifo_put(SerialState *s, int fifo, uint8_t chr) {
         f->head = 0;
     f->count++;
 
-    tokens_avail = TOKENS_MAX;
-
     return 1;
 }
 
-uint8_t fifo_get(SerialState *s, int fifo) {
-    SerialFIFO *f = ( fifo ) ? &s->recv_fifo : &s->xmit_fifo;
+static uint8_t fifo_get(SerialState *s, int fifo)
+{
+    SerialFIFO *f = (fifo) ? &s->recv_fifo : &s->xmit_fifo;
     uint8_t c;
-    
-    if( f->count == 0 )
+
+    if(f->count == 0)
         return 0;
 
     c = f->data[f->tail++];
@@ -198,41 +182,35 @@ uint8_t fifo_get(SerialState *s, int fifo) {
         f->tail = 0;
     f->count--;
 
-    tokens_avail = TOKENS_MAX;
-
-    return c; 
+    return c;
 }
-
-static void serial_receive_byte(SerialState *s, int ch);
 
 static void serial_update_irq(SerialState *s)
 {
     uint8_t tmp_iir = UART_IIR_NO_INT;
 
-    if (!s->ier) {
-        qemu_irq_lower(s->irq);
-	return;
-    }
-
-    if ( ( s->ier & UART_IER_RLSI ) && (s->lsr & UART_LSR_INT_ANY ) ) {
+    if ((s->ier & UART_IER_RLSI) && (s->lsr & UART_LSR_INT_ANY)) {
         tmp_iir = UART_IIR_RLSI;
-    } else if ( s->timeout_ipending ) {
+    } else if ((s->ier & UART_IER_RDI) && s->timeout_ipending) {
+        /* Note that(s->ier & UART_IER_RDI) can mask this interrupt,
+         * this is not in the specification but is observed on existing
+         * hardware.  */
         tmp_iir = UART_IIR_CTI;
-    } else if ( ( s->ier & UART_IER_RDI ) && (s->lsr & UART_LSR_DR ) ) {
-        if ( !(s->fcr & UART_FCR_FE) ) {
+    } else if ((s->ier & UART_IER_RDI) && (s->lsr & UART_LSR_DR)) {
+        if (!(s->fcr & UART_FCR_FE)) {
            tmp_iir = UART_IIR_RDI;
-        } else if ( s->recv_fifo.count >= s->recv_fifo.itl ) {
+        } else if (s->recv_fifo.count >= s->recv_fifo.itl) {
            tmp_iir = UART_IIR_RDI;
         }
-    } else if ( (s->ier & UART_IER_THRI) && s->thr_ipending ) {
+    } else if ((s->ier & UART_IER_THRI) && s->thr_ipending) {
         tmp_iir = UART_IIR_THRI;
-    } else if ( (s->ier & UART_IER_MSI) && (s->msr & UART_MSR_ANY_DELTA) ) {
+    } else if ((s->ier & UART_IER_MSI) && (s->msr & UART_MSR_ANY_DELTA)) {
         tmp_iir = UART_IIR_MSI;
     }
 
-    s->iir = tmp_iir | ( s->iir & 0xF0 );
+    s->iir = tmp_iir | (s->iir & 0xF0);
 
-    if ( tmp_iir != UART_IIR_NO_INT ) {
+    if (tmp_iir != UART_IIR_NO_INT) {
         qemu_irq_raise(s->irq);
     } else {
         qemu_irq_lower(s->irq);
@@ -269,7 +247,7 @@ static void serial_update_parameters(SerialState *s)
     ssp.parity = parity;
     ssp.data_bits = data_bits;
     ssp.stop_bits = stop_bits;
-    s->char_transmit_time =  ( ticks_per_sec / speed ) * frame_size;
+    s->char_transmit_time =  (ticks_per_sec / speed) * frame_size;
     qemu_chr_ioctl(s->chr, CHR_IOCTL_SERIAL_SET_PARAMS, &ssp);
 #if 0
     printf("speed=%d parity=%c data=%d stop=%d\n",
@@ -277,85 +255,30 @@ static void serial_update_parameters(SerialState *s)
 #endif
 }
 
-static void serial_get_token(void)
-{
-    static struct timespec last_refil_time;
-    static int started;
-
-    assert(tokens_avail >= 0);
-    if (!tokens_avail) {
-	struct timespec delta, now;
-	long generated;
-
-	if (!started) {
-	    clock_gettime(CLOCK_MONOTONIC, &last_refil_time);
-	    tokens_avail = TOKENS_MAX;
-	    started = 1;
-	    return;
-	}
-    retry:
-	clock_gettime(CLOCK_MONOTONIC, &now);
-	delta.tv_sec = now.tv_sec - last_refil_time.tv_sec;
-	delta.tv_nsec = now.tv_nsec - last_refil_time.tv_nsec;
-	if (delta.tv_nsec < 0) {
-	    delta.tv_nsec += 1000000000;
-	    delta.tv_sec--;
-	}
-	assert(delta.tv_nsec >= 0 && delta.tv_sec >= 0);
-	if (delta.tv_nsec < TOKEN_PERIOD) {
-	    struct timespec ts;
-	    /* Wait until at least one token is available. */
-	    ts.tv_sec = TOKEN_PERIOD / 1000000000;
-	    ts.tv_nsec = TOKEN_PERIOD % 1000000000;
-	    while (nanosleep(&ts, &ts) < 0 && errno == EINTR)
-		;
-	    goto retry;
-	}
-        if (delta.tv_sec >= 2) {
-            /* avoid arithmetic overflow if it has been ages */
-            delta.tv_sec = 2;
-            delta.tv_nsec = 0;
-        }
-	generated = (delta.tv_sec * 1000000000) / TOKEN_PERIOD;
-	generated +=
-	    ((delta.tv_sec * 1000000000) % TOKEN_PERIOD + delta.tv_nsec) / TOKEN_PERIOD;
-	assert(generated > 0);
-
-	last_refil_time.tv_nsec += (generated * TOKEN_PERIOD) % 1000000000;
-	last_refil_time.tv_sec  += last_refil_time.tv_nsec / 1000000000;
-	last_refil_time.tv_nsec %= 1000000000;
-        last_refil_time.tv_sec  += (generated * TOKEN_PERIOD) / 1000000000;
-	if (generated > TOKENS_MAX)
-	    generated = TOKENS_MAX;
-	tokens_avail = generated;
-    }
-    tokens_avail--;
-}
-
-static void serial_update_msl( SerialState *s )
+static void serial_update_msl(SerialState *s)
 {
     uint8_t omsr;
     int flags;
 
     qemu_del_timer(s->modem_status_poll);
 
-    if ( qemu_chr_ioctl(s->chr,CHR_IOCTL_SERIAL_GET_TIOCM, &flags) == -ENOTSUP ) {
+    if (qemu_chr_ioctl(s->chr,CHR_IOCTL_SERIAL_GET_TIOCM, &flags) == -ENOTSUP) {
         s->poll_msl = -1;
         return;
     }
-    
+
     omsr = s->msr;
 
-    s->msr = ( flags & TIOCM_CTS ) ? s->msr | UART_MSR_CTS : s->msr & ~UART_MSR_CTS;
-    s->msr = ( flags & TIOCM_DSR ) ? s->msr | UART_MSR_DSR : s->msr & ~UART_MSR_DSR;
-    s->msr = ( flags & TIOCM_CAR ) ? s->msr | UART_MSR_DCD : s->msr & ~UART_MSR_DCD;
-    s->msr = ( flags & TIOCM_RI ) ? s->msr | UART_MSR_RI : s->msr & ~UART_MSR_RI;
+    s->msr = (flags & CHR_TIOCM_CTS) ? s->msr | UART_MSR_CTS : s->msr & ~UART_MSR_CTS;
+    s->msr = (flags & CHR_TIOCM_DSR) ? s->msr | UART_MSR_DSR : s->msr & ~UART_MSR_DSR;
+    s->msr = (flags & CHR_TIOCM_CAR) ? s->msr | UART_MSR_DCD : s->msr & ~UART_MSR_DCD;
+    s->msr = (flags & CHR_TIOCM_RI) ? s->msr | UART_MSR_RI : s->msr & ~UART_MSR_RI;
 
-    if ( s->msr != omsr ) {
+    if (s->msr != omsr) {
          /* Set delta bits */
-         s->msr = s->msr | ( ( s->msr >> 4 ) ^ ( omsr >> 4 ) );
+         s->msr = s->msr | ((s->msr >> 4) ^ (omsr >> 4));
          /* UART_MSR_TERI only if change was from 1 -> 0 */
-         if ( ( s->msr & UART_MSR_TERI ) && !( omsr & UART_MSR_RI ) )
+         if ((s->msr & UART_MSR_TERI) && !(omsr & UART_MSR_RI))
              s->msr &= ~UART_MSR_TERI;
          serial_update_irq(s);
     }
@@ -363,18 +286,19 @@ static void serial_update_msl( SerialState *s )
     /* The real 16550A apparently has a 250ns response latency to line status changes.
        We'll be lazy and poll only every 10ms, and only poll it at all if MSI interrupts are turned on */
 
-    if ( s->poll_msl )
+    if (s->poll_msl)
         qemu_mod_timer(s->modem_status_poll, qemu_get_clock(vm_clock) + ticks_per_sec / 100);
 }
 
-static void serial_xmit(void *opaque) {
+static void serial_xmit(void *opaque)
+{
     SerialState *s = opaque;
     uint64_t new_xmit_ts = qemu_get_clock(vm_clock);
-    
-    if ( s->tsr_retry <= 0 ) {
+
+    if (s->tsr_retry <= 0) {
         if (s->fcr & UART_FCR_FE) {
             s->tsr = fifo_get(s,XMIT_FIFO);
-            if ( !s->xmit_fifo.count )
+            if (!s->xmit_fifo.count)
                 s->lsr |= UART_LSR_THRE;
         } else {
             s->tsr = s->thr;
@@ -382,16 +306,15 @@ static void serial_xmit(void *opaque) {
         }
     }
 
-    if ( (s->mcr & UART_MCR_LOOP
-	  /* in loopback mode, say that we just received a char */
-	  ? (serial_receive1(s, &s->tsr, 1), 1)
-	  : qemu_chr_write(s->chr, &s->tsr, 1))
-	 != 1 ) {
-        if ( ( s->tsr_retry > 0 ) && ( s->tsr_retry <= MAX_XMIT_RETRY ) ) {
+    if (s->mcr & UART_MCR_LOOP) {
+        /* in loopback mode, say that we just received a char */
+        serial_receive1(s, &s->tsr, 1);
+    } else if (qemu_chr_write(s->chr, &s->tsr, 1) != 1) {
+        if ((s->tsr_retry > 0) && (s->tsr_retry <= MAX_XMIT_RETRY)) {
             s->tsr_retry++;
-            qemu_mod_timer(s->transmit_timer,  new_xmit_ts + s->char_transmit_time );
+            qemu_mod_timer(s->transmit_timer,  new_xmit_ts + s->char_transmit_time);
             return;
-        } else if ( s->poll_msl < 0 ) {
+        } else if (s->poll_msl < 0) {
             /* If we exceed MAX_XMIT_RETRY and the backend is not a real serial port, then
             drop any further failed writes instantly, until we get one that goes through.
             This is to prevent guests that log to unconnected pipes or pty's from stalling. */
@@ -403,10 +326,10 @@ static void serial_xmit(void *opaque) {
     }
 
     s->last_xmit_ts = qemu_get_clock(vm_clock);
-    if ( !(s->lsr & UART_LSR_THRE) )
-        qemu_mod_timer(s->transmit_timer, s->last_xmit_ts + s->char_transmit_time );
+    if (!(s->lsr & UART_LSR_THRE))
+        qemu_mod_timer(s->transmit_timer, s->last_xmit_ts + s->char_transmit_time);
 
-    if ( s->lsr & UART_LSR_THRE ) {
+    if (s->lsr & UART_LSR_THRE) {
         s->lsr |= UART_LSR_TEMT;
         s->thr_ipending = 1;
         serial_update_irq(s);
@@ -417,8 +340,7 @@ static void serial_xmit(void *opaque) {
 static void serial_ioport_write(void *opaque, uint32_t addr, uint32_t val)
 {
     SerialState *s = opaque;
-    unsigned char ch;
-    
+
     addr &= 7;
 #ifdef DEBUG_SERIAL
     printf("serial: write addr=0x%02x val=0x%02x\n", addr, val);
@@ -453,8 +375,8 @@ static void serial_ioport_write(void *opaque, uint32_t addr, uint32_t val)
             s->ier = val & 0x0f;
             /* If the backend device is a real serial port, turn polling of the modem
                status lines on physical port on or off depending on UART_IER_MSI state */
-            if ( s->poll_msl >= 0 ) { 
-                if ( s->ier & UART_IER_MSI ) {
+            if (s->poll_msl >= 0) {
+                if (s->ier & UART_IER_MSI) {
                      s->poll_msl = 1;
                      serial_update_msl(s);
                 } else {
@@ -471,30 +393,30 @@ static void serial_ioport_write(void *opaque, uint32_t addr, uint32_t val)
     case 2:
         val = val & 0xFF;
 
-        if ( s->fcr == val)
+        if (s->fcr == val)
             break;
 
         /* Did the enable/disable flag change? If so, make sure FIFOs get flushed */
-        if ( (val ^ s->fcr) & UART_FCR_FE )
+        if ((val ^ s->fcr) & UART_FCR_FE)
             val |= UART_FCR_XFR | UART_FCR_RFR;
 
         /* FIFO clear */
 
-        if ( val & UART_FCR_RFR ) {
+        if (val & UART_FCR_RFR) {
             qemu_del_timer(s->fifo_timeout_timer);
             s->timeout_ipending=0;
             fifo_clear(s,RECV_FIFO);
         }
-            
-        if ( val & UART_FCR_XFR ) {
+
+        if (val & UART_FCR_XFR) {
             fifo_clear(s,XMIT_FIFO);
         }
-        
-        if ( val & UART_FCR_FE ) {
+
+        if (val & UART_FCR_FE) {
             s->iir |= UART_IIR_FE;
             /* Set RECV_FIFO trigger Level */
-            switch ( val & 0xC0 ) {
-            case UART_FCR_ITL_1: 
+            switch (val & 0xC0) {
+            case UART_FCR_ITL_1:
                 s->recv_fifo.itl = 1;
                 break;
             case UART_FCR_ITL_2:
@@ -528,30 +450,30 @@ static void serial_ioport_write(void *opaque, uint32_t addr, uint32_t val)
         }
         break;
     case 4:
-	{
+        {
             int flags;
-	    int old_mcr = s->mcr;
+            int old_mcr = s->mcr;
             s->mcr = val & 0x1f;
-            if ( val & UART_MCR_LOOP )
+            if (val & UART_MCR_LOOP)
                 break;
 
-            if ( s->poll_msl >= 0 && old_mcr != s->mcr ) {
+            if (s->poll_msl >= 0 && old_mcr != s->mcr) {
 
                 qemu_chr_ioctl(s->chr,CHR_IOCTL_SERIAL_GET_TIOCM, &flags);
 
-                flags &= ~( TIOCM_RTS | TIOCM_DTR );
+                flags &= ~(CHR_TIOCM_RTS | CHR_TIOCM_DTR);
 
-                if ( val & UART_MCR_RTS )
-                    flags |= TIOCM_RTS;
-                if ( val & UART_MCR_DTR )
-                    flags |= TIOCM_DTR;
+                if (val & UART_MCR_RTS)
+                    flags |= CHR_TIOCM_RTS;
+                if (val & UART_MCR_DTR)
+                    flags |= CHR_TIOCM_DTR;
 
                 qemu_chr_ioctl(s->chr,CHR_IOCTL_SERIAL_SET_TIOCM, &flags);
                 /* Update the modem status after a one-character-send wait-time, since there may be a response
                    from the device/computer at the other end of the serial line */
-                qemu_mod_timer(s->modem_status_poll, qemu_get_clock(vm_clock) + s->char_transmit_time );
+                qemu_mod_timer(s->modem_status_poll, qemu_get_clock(vm_clock) + s->char_transmit_time);
             }
-	}
+        }
         break;
     case 5:
         break;
@@ -577,16 +499,16 @@ static uint32_t serial_ioport_read(void *opaque, uint32_t addr)
         } else {
             if(s->fcr & UART_FCR_FE) {
                 ret = fifo_get(s,RECV_FIFO);
-                if ( s->recv_fifo.count == 0 )
+                if (s->recv_fifo.count == 0)
                     s->lsr &= ~(UART_LSR_DR | UART_LSR_BI);
                 else
-                    qemu_mod_timer(s->fifo_timeout_timer, qemu_get_clock (vm_clock) + s->char_transmit_time * 4 );
+                    qemu_mod_timer(s->fifo_timeout_timer, qemu_get_clock (vm_clock) + s->char_transmit_time * 4);
                 s->timeout_ipending = 0;
-           } else {
-               ret = s->rbr;
-               s->lsr &= ~(UART_LSR_DR | UART_LSR_BI);
-           }
-           serial_update_irq(s);
+            } else {
+                ret = s->rbr;
+                s->lsr &= ~(UART_LSR_DR | UART_LSR_BI);
+            }
+            serial_update_irq(s);
             if (!(s->mcr & UART_MCR_LOOP)) {
                 /* in loopback mode, don't receive any data */
                 qemu_chr_accept_input(s->chr);
@@ -612,16 +534,14 @@ static uint32_t serial_ioport_read(void *opaque, uint32_t addr)
         ret = s->mcr;
         break;
     case 5:
-	serial_get_token();
         ret = s->lsr;
         /* Clear break interrupt */
-        if ( s->lsr & UART_LSR_BI ) {
+        if (s->lsr & UART_LSR_BI) {
             s->lsr &= ~UART_LSR_BI;
             serial_update_irq(s);
         }
         break;
     case 6:
-	serial_get_token();
         if (s->mcr & UART_MCR_LOOP) {
             /* in loopback, the modem output pins are connected to the
                inputs */
@@ -629,11 +549,11 @@ static uint32_t serial_ioport_read(void *opaque, uint32_t addr)
             ret |= (s->mcr & 0x02) << 3;
             ret |= (s->mcr & 0x01) << 5;
         } else {
-            if ( s->poll_msl >= 0 )
+            if (s->poll_msl >= 0)
                 serial_update_msl(s);
             ret = s->msr;
             /* Clear delta bits & msr int after read, if they were set */
-            if ( s->msr & UART_MSR_ANY_DELTA ) {
+            if (s->msr & UART_MSR_ANY_DELTA) {
                 s->msr &= 0xF0;
                 serial_update_irq(s);
             }
@@ -656,11 +576,11 @@ static int serial_can_receive(SerialState *s)
         /* Advertise (fifo.itl - fifo.count) bytes when count < ITL, and 1 if above. If UART_FIFO_LENGTH - fifo.count is
         advertised the effect will be to almost always fill the fifo completely before the guest has a chance to respond,
         effectively overriding the ITL that the guest has set. */
-             return ( s->recv_fifo.count <= s->recv_fifo.itl ) ? s->recv_fifo.itl - s->recv_fifo.count : 1;
+             return (s->recv_fifo.count <= s->recv_fifo.itl) ? s->recv_fifo.itl - s->recv_fifo.count : 1;
         else
              return 0;
     } else {
-        return !(s->lsr & UART_LSR_DR);
+    return !(s->lsr & UART_LSR_DR);
     }
 }
 
@@ -689,7 +609,6 @@ static int serial_can_receive1(void *opaque)
 static void serial_receive1(void *opaque, const uint8_t *buf, int size)
 {
     SerialState *s = opaque;
-    tokens_avail = TOKENS_MAX;
     if(s->fcr & UART_FCR_FE) {
         int i;
         for (i = 0; i < size; i++) {
@@ -708,7 +627,9 @@ static void serial_receive1(void *opaque, const uint8_t *buf, int size)
 static void serial_event(void *opaque, int event)
 {
     SerialState *s = opaque;
-    tokens_avail = TOKENS_MAX;
+#ifdef DEBUG_SERIAL
+    printf("serial: event %x\n", event);
+#endif
     if (event == CHR_EVENT_BREAK)
         serial_receive_break(s);
 }
@@ -734,7 +655,7 @@ static int serial_load(QEMUFile *f, void *opaque, int version_id)
     SerialState *s = opaque;
     uint8_t fcr = 0;
 
-    if(version_id > 2)
+    if(version_id > 3)
         return -EINVAL;
 
     if (version_id >= 2)
@@ -773,7 +694,7 @@ static void serial_reset(void *opaque)
     s->mcr = UART_MCR_OUT2;
     s->scr = 0;
     s->tsr_retry = 0;
-    s->char_transmit_time = ( ticks_per_sec / 9600 ) * 9;
+    s->char_transmit_time = (ticks_per_sec / 9600) * 9;
     s->poll_msl = 0;
 
     fifo_clear(s,RECV_FIFO);
@@ -793,10 +714,10 @@ static void serial_init_core(SerialState *s, qemu_irq irq, int baudbase,
     s->baudbase = baudbase;
     s->chr = chr;
 
-    s->modem_status_poll = qemu_new_timer(vm_clock, ( QEMUTimerCB *) serial_update_msl, s); 
- 
-    s->fifo_timeout_timer = qemu_new_timer(vm_clock, ( QEMUTimerCB *) fifo_timeout_int, s);
-    s->transmit_timer = qemu_new_timer(vm_clock, ( QEMUTimerCB *) serial_xmit, s);
+    s->modem_status_poll = qemu_new_timer(vm_clock, (QEMUTimerCB *) serial_update_msl, s);
+
+    s->fifo_timeout_timer = qemu_new_timer(vm_clock, (QEMUTimerCB *) fifo_timeout_int, s);
+    s->transmit_timer = qemu_new_timer(vm_clock, (QEMUTimerCB *) serial_xmit, s);
 
     qemu_register_reset(serial_reset, s);
     serial_reset(s);

@@ -18,13 +18,16 @@
 #define NO_UNIX_SOCKETS 1
 #endif
 
+int inet_aton(const char *cp, struct in_addr *ia);
+
 #else
 
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
-
 #ifndef NO_UNIX_SOCKETS
+#include <arpa/inet.h>
+#include <netdb.h>
 #include <sys/un.h>
 #endif
 

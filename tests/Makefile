@@ -1,18 +1,20 @@
 QEMU_ROOT ?= ..
 -include ../config-host.mak
+VPATH=$(SRC_PATH)/tests
 
 CFLAGS=-Wall -O2 -g -fno-strict-aliasing
 #CFLAGS+=-msse2
 LDFLAGS=
 
 ifeq ($(ARCH),i386)
-TESTS=linux-test testthread sha1-i386 test-i386 runcom
+TESTS=linux-test testthread sha1-i386 test-i386
 endif
 ifeq ($(ARCH),x86_64)
 TESTS=test-x86_64
 endif
 TESTS+=sha1# test_path
 #TESTS+=test_path
+#TESTS+=runcom
 
 QEMU=../i386-linux-user/qemu-i386
 
@@ -33,11 +35,11 @@ test_path: test_path.c
 test-i386: test-i386.c test-i386-code16.S test-i386-vm86.S \
            test-i386.h test-i386-shift.h test-i386-muldiv.h
 	$(CC) -m32 $(CFLAGS) $(LDFLAGS) -static -o $@ \
-              test-i386.c test-i386-code16.S test-i386-vm86.S -lm
+              $(<D)/test-i386.c $(<D)/test-i386-code16.S $(<D)/test-i386-vm86.S -lm
 
 test-x86_64: test-i386.c \
            test-i386.h test-i386-shift.h test-i386-muldiv.h
-	$(CC) -m64 $(CFLAGS) $(LDFLAGS) -static -o $@ test-i386.c -lm
+	$(CC) -m64 $(CFLAGS) $(LDFLAGS) -static -o $@ $(<D)/test-i386.c -lm
 
 ifeq ($(ARCH),i386)
 test: test-i386
@@ -47,10 +49,6 @@ test:
 endif
 	$(QEMU) test-i386 > test-i386.out
 	@if diff -u test-i386.ref test-i386.out ; then echo "Auto Test OK"; fi
-ifeq ($(ARCH),i386)
-	$(QEMU) -no-code-copy test-i386 > test-i386.out
-	@if diff -u test-i386.ref test-i386.out ; then echo "Auto Test OK (no code copy)"; fi
-endif
 
 .PHONY: test-mmap
 test-mmap: test-mmap.c

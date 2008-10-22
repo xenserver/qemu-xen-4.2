@@ -70,11 +70,6 @@ typedef struct CPUMIPSFPUContext CPUMIPSFPUContext;
 struct CPUMIPSFPUContext {
     /* Floating point registers */
     fpr_t fpr[32];
-#ifndef USE_HOST_FLOAT_REGS
-    fpr_t ft0;
-    fpr_t ft1;
-    fpr_t ft2;
-#endif
     float_status fp_status;
     /* fpu implementation/revision register (fir) */
     uint32_t fcr0;
@@ -89,9 +84,9 @@ struct CPUMIPSFPUContext {
 #define FCR0_REV 0
     /* fcsr */
     uint32_t fcr31;
-#define SET_FP_COND(num,env)     do { ((env)->fcr31) |= ((num) ? (1 << ((num) + 24)) : (1 << 23)); } while(0)
-#define CLEAR_FP_COND(num,env)   do { ((env)->fcr31) &= ~((num) ? (1 << ((num) + 24)) : (1 << 23)); } while(0)
-#define GET_FP_COND(env)         ((((env)->fcr31 >> 24) & 0xfe) | (((env)->fcr31 >> 23) & 0x1))
+#define SET_FP_COND(num,env)     do { ((env).fcr31) |= ((num) ? (1 << ((num) + 24)) : (1 << 23)); } while(0)
+#define CLEAR_FP_COND(num,env)   do { ((env).fcr31) &= ~((num) ? (1 << ((num) + 24)) : (1 << 23)); } while(0)
+#define GET_FP_COND(env)         ((((env).fcr31 >> 24) & 0xfe) | (((env).fcr31 >> 23) & 0x1))
 #define GET_FP_CAUSE(reg)        (((reg) >> 12) & 0x3f)
 #define GET_FP_ENABLE(reg)       (((reg) >>  7) & 0x1f)
 #define GET_FP_FLAGS(reg)        (((reg) >>  2) & 0x1f)
@@ -137,32 +132,55 @@ typedef struct mips_def_t mips_def_t;
 
 #define MIPS_SHADOW_SET_MAX 16
 #define MIPS_TC_MAX 5
+#define MIPS_FPU_MAX 1
 #define MIPS_DSP_ACC 4
+
+typedef struct TCState TCState;
+struct TCState {
+    target_ulong gpr[32];
+    target_ulong PC;
+    target_ulong HI[MIPS_DSP_ACC];
+    target_ulong LO[MIPS_DSP_ACC];
+    target_ulong ACX[MIPS_DSP_ACC];
+    target_ulong DSPControl;
+    int32_t CP0_TCStatus;
+#define CP0TCSt_TCU3	31
+#define CP0TCSt_TCU2	30
+#define CP0TCSt_TCU1	29
+#define CP0TCSt_TCU0	28
+#define CP0TCSt_TMX	27
+#define CP0TCSt_RNST	23
+#define CP0TCSt_TDS	21
+#define CP0TCSt_DT	20
+#define CP0TCSt_DA	15
+#define CP0TCSt_A	13
+#define CP0TCSt_TKSU	11
+#define CP0TCSt_IXMT	10
+#define CP0TCSt_TASID	0
+    int32_t CP0_TCBind;
+#define CP0TCBd_CurTC	21
+#define CP0TCBd_TBE	17
+#define CP0TCBd_CurVPE	0
+    target_ulong CP0_TCHalt;
+    target_ulong CP0_TCContext;
+    target_ulong CP0_TCSchedule;
+    target_ulong CP0_TCScheFBack;
+    int32_t CP0_Debug_tcstatus;
+};
 
 typedef struct CPUMIPSState CPUMIPSState;
 struct CPUMIPSState {
-    /* General integer registers */
-    target_ulong gpr[MIPS_SHADOW_SET_MAX][32];
-    /* Special registers */
-    target_ulong PC[MIPS_TC_MAX];
-#if TARGET_LONG_BITS > HOST_LONG_BITS
-    target_ulong t0;
-    target_ulong t1;
-#endif
-    target_ulong HI[MIPS_TC_MAX][MIPS_DSP_ACC];
-    target_ulong LO[MIPS_TC_MAX][MIPS_DSP_ACC];
-    target_ulong ACX[MIPS_TC_MAX][MIPS_DSP_ACC];
-    target_ulong DSPControl[MIPS_TC_MAX];
+    TCState active_tc;
+    CPUMIPSFPUContext active_fpu;
 
     CPUMIPSMVPContext *mvp;
     CPUMIPSTLBContext *tlb;
-    CPUMIPSFPUContext *fpu;
     uint32_t current_tc;
-    target_ulong *current_tc_gprs;
+    uint32_t current_fpu;
 
     uint32_t SEGBITS;
-    target_ulong SEGMask;
     uint32_t PABITS;
+    target_ulong SEGMask;
     target_ulong PAMask;
 
     int32_t CP0_Index;
@@ -208,28 +226,6 @@ struct CPUMIPSState {
 #define CP0VPEOpt_DWX1	1
 #define CP0VPEOpt_DWX0	0
     target_ulong CP0_EntryLo0;
-    int32_t CP0_TCStatus[MIPS_TC_MAX];
-#define CP0TCSt_TCU3	31
-#define CP0TCSt_TCU2	30
-#define CP0TCSt_TCU1	29
-#define CP0TCSt_TCU0	28
-#define CP0TCSt_TMX	27
-#define CP0TCSt_RNST	23
-#define CP0TCSt_TDS	21
-#define CP0TCSt_DT	20
-#define CP0TCSt_DA	15
-#define CP0TCSt_A	13
-#define CP0TCSt_TKSU	11
-#define CP0TCSt_IXMT	10
-#define CP0TCSt_TASID	0
-    int32_t CP0_TCBind[MIPS_TC_MAX];
-#define CP0TCBd_CurTC	21
-#define CP0TCBd_TBE	17
-#define CP0TCBd_CurVPE	0
-    target_ulong CP0_TCHalt[MIPS_TC_MAX];
-    target_ulong CP0_TCContext[MIPS_TC_MAX];
-    target_ulong CP0_TCSchedule[MIPS_TC_MAX];
-    target_ulong CP0_TCScheFBack[MIPS_TC_MAX];
     target_ulong CP0_EntryLo1;
     target_ulong CP0_Context;
     int32_t CP0_PageMask;
@@ -400,7 +396,6 @@ struct CPUMIPSState {
 #define CP0DB_DDBL 2
 #define CP0DB_DBp  1
 #define CP0DB_DSS  0
-    int32_t CP0_Debug_tcstatus[MIPS_TC_MAX];
     target_ulong CP0_DEPC;
     int32_t CP0_Performance0;
     int32_t CP0_TagLo;
@@ -409,12 +404,11 @@ struct CPUMIPSState {
     int32_t CP0_DataHi;
     target_ulong CP0_ErrorEPC;
     int32_t CP0_DESAVE;
+    /* We waste some space so we can handle shadow registers like TCs. */
+    TCState tcs[MIPS_SHADOW_SET_MAX];
+    CPUMIPSFPUContext fpus[MIPS_FPU_MAX];
     /* Qemu */
-    int interrupt_request;
-    jmp_buf jmp_env;
-    int exception_index;
     int error_code;
-    int user_mode_only; /* user mode only simulation */
     uint32_t hflags;    /* CPU State */
     /* TMASK defines different execution modes */
 #define MIPS_HFLAG_TMASK  0x01FF
@@ -448,25 +442,18 @@ struct CPUMIPSState {
     target_ulong btarget;        /* Jump / branch target               */
     int bcond;                   /* Branch condition (if needed)       */
 
-    int halted; /* TRUE if the CPU is in suspend state */
-
     int SYNCI_Step; /* Address step size for SYNCI */
     int CCRes; /* Cycle count resolution/divisor */
     uint32_t CP0_Status_rw_bitmask; /* Read/write bits in CP0_Status */
     uint32_t CP0_TCStatus_rw_bitmask; /* Read/write bits in CP0_TCStatus */
     int insn_flags; /* Supported instruction set */
 
-#ifdef CONFIG_USER_ONLY
-    target_ulong tls_value;
-#endif
+    target_ulong tls_value; /* For usermode emulation */
 
     CPU_COMMON
 
     const mips_def_t *cpu_model;
-#ifndef CONFIG_USER_ONLY
     void *irq[8];
-#endif
-
     struct QEMUTimer *timer; /* Internal timer */
 };
 
@@ -483,7 +470,7 @@ void r4k_do_tlbr (void);
 void mips_cpu_list (FILE *f, int (*cpu_fprintf)(FILE *f, const char *fmt, ...));
 
 void do_unassigned_access(target_phys_addr_t addr, int is_write, int is_exec,
-                          int unused);
+                          int unused, int size);
 
 #define CPUState CPUMIPSState
 #define cpu_init cpu_mips_init
@@ -491,6 +478,8 @@ void do_unassigned_access(target_phys_addr_t addr, int is_write, int is_exec,
 #define cpu_gen_code cpu_mips_gen_code
 #define cpu_signal_handler cpu_mips_signal_handler
 #define cpu_list mips_cpu_list
+
+#define CPU_SAVE_VERSION 3
 
 /* MMU modes definitions. We carefully match the indices with our
    hflags layout. */
@@ -501,6 +490,14 @@ void do_unassigned_access(target_phys_addr_t addr, int is_write, int is_exec,
 static inline int cpu_mmu_index (CPUState *env)
 {
     return env->hflags & MIPS_HFLAG_KSU;
+}
+
+static inline void cpu_clone_regs(CPUState *env, target_ulong newsp)
+{
+    if (newsp)
+        env->active_tc.gpr[29] = newsp;
+    env->active_tc.gpr[7] = 0;
+    env->active_tc.gpr[2] = 0;
 }
 
 #include "cpu-all.h"
@@ -564,5 +561,11 @@ int cpu_mips_exec(CPUMIPSState *s);
 CPUMIPSState *cpu_mips_init(const char *cpu_model);
 uint32_t cpu_mips_get_clock (void);
 int cpu_mips_signal_handler(int host_signum, void *pinfo, void *puc);
+
+#define CPU_PC_FROM_TB(env, tb) do { \
+    env->active_tc.PC = tb->pc; \
+    env->hflags &= ~MIPS_HFLAG_BMASK; \
+    env->hflags |= tb->flags & MIPS_HFLAG_BMASK; \
+    } while (0)
 
 #endif /* !defined (__MIPS_CPU_H__) */

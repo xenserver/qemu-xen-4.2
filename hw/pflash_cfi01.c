@@ -111,8 +111,8 @@ static uint32_t pflash_read (pflash_t *pfl, target_ulong offset, int width)
     else if (pfl->width == 4)
         boff = boff >> 2;
 
-    DPRINTF("%s: reading offset " TARGET_FMT_lx " under cmd %02x\n",
-            __func__, boff, pfl->cmd);
+    DPRINTF("%s: reading offset " TARGET_FMT_lx " under cmd %02x width %d\n",
+            __func__, offset, pfl->cmd, width);
 
     switch (pfl->cmd) {
     case 0x00:
@@ -202,16 +202,10 @@ static void pflash_write (pflash_t *pfl, target_ulong offset, uint32_t value,
     uint8_t *p;
     uint8_t cmd;
 
-    /* WARNING: when the memory area is in ROMD mode, the offset is a
-       ram offset, not a physical address */
     cmd = value;
+    offset -= pfl->base;
 
-    if (pfl->wcycle == 0)
-        offset -= (target_ulong)(long)pfl->storage;
-    else
-        offset -= pfl->base;
-
-    DPRINTF("%s: offset " TARGET_FMT_lx " %08x %d wcycle 0x%x\n",
+    DPRINTF("%s: writing offset " TARGET_FMT_lx " value %08x width %d wcycle 0x%x\n",
             __func__, offset, value, width, pfl->wcycle);
 
     /* Set the device in I/O access mode */
@@ -273,7 +267,7 @@ static void pflash_write (pflash_t *pfl, target_ulong offset, uint32_t value,
         case 0x20: /* Block erase */
         case 0x28:
             if (cmd == 0xd0) { /* confirm */
-                pfl->wcycle = 1;
+                pfl->wcycle = 0;
                 pfl->status |= 0x80;
             } else if (cmd == 0xff) { /* read array mode */
                 goto reset_flash;
@@ -387,7 +381,7 @@ static void pflash_write (pflash_t *pfl, target_ulong offset, uint32_t value,
 
  error_flash:
     printf("%s: Unimplemented flash cmd sequence "
-           "(offset " TARGET_FMT_lx ", wcycle 0x%x cmd 0x%x value 0x%x\n",
+           "(offset " TARGET_FMT_lx ", wcycle 0x%x cmd 0x%x value 0x%x)\n",
            __func__, offset, pfl->wcycle, pfl->cmd, value);
 
  reset_flash:

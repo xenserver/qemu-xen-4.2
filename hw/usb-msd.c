@@ -513,10 +513,39 @@ static void usb_msd_handle_destroy(USBDevice *dev)
     qemu_free(s);
 }
 
-USBDevice *usb_msd_init(const char *filename, BlockDriver *drv)
+USBDevice *usb_msd_init(const char *filename)
 {
     MSDState *s;
     BlockDriverState *bdrv;
+    BlockDriver *drv = NULL;
+    const char *p1;
+    char fmt[32];
+
+    p1 = strchr(filename, ':');
+    if (p1++) {
+        const char *p2;
+
+        if (strstart(filename, "format=", &p2)) {
+            int len = MIN(p1 - p2, sizeof(fmt));
+            pstrcpy(fmt, len, p2);
+
+            drv = bdrv_find_format(fmt);
+            if (!drv) {
+                printf("invalid format %s\n", fmt);
+                return NULL;
+            }
+        } else if (*filename != ':') {
+            printf("unrecognized USB mass-storage option %s\n", filename);
+            return NULL;
+        }
+
+        filename = p1;
+    }
+
+    if (!*filename) {
+        printf("block device specification needed\n");
+        return NULL;
+    }
 
     s = qemu_mallocz(sizeof(MSDState));
     if (!s)

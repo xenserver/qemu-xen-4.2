@@ -146,7 +146,6 @@ void mips_jazz_init (ram_addr_t ram_size, int vga_ram_size,
         fprintf(stderr, "Unable to find CPU definition\n");
         exit(1);
     }
-    register_savevm("cpu", 0, 3, cpu_save, cpu_load, env);
     qemu_register_reset(main_cpu_reset, env);
 
     /* allocate RAM */
@@ -274,15 +273,19 @@ void mips_pica61_init (ram_addr_t ram_size, int vga_ram_size,
 }
 
 QEMUMachine mips_magnum_machine = {
-    "magnum",
-    "MIPS Magnum",
-    mips_magnum_init,
-    MAGNUM_BIOS_SIZE + VGA_RAM_SIZE,
+    .name = "magnum",
+    .desc = "MIPS Magnum",
+    .init = mips_magnum_init,
+    .ram_require = MAGNUM_BIOS_SIZE + VGA_RAM_SIZE,
+    .nodisk_ok = 1,
+    .max_cpus = 1,
 };
 
 QEMUMachine mips_pica61_machine = {
-    "pica61",
-    "Acer Pica 61",
-    mips_pica61_init,
-    MAGNUM_BIOS_SIZE + VGA_RAM_SIZE,
+    .name = "pica61",
+    .desc = "Acer Pica 61",
+    .init = mips_pica61_init,
+    .ram_require = MAGNUM_BIOS_SIZE + VGA_RAM_SIZE,
+    .nodisk_ok = 1,
+    .max_cpus = 1,
 };

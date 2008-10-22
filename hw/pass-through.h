@@ -23,7 +23,7 @@
 #include "pci/header.h"
 #include "pci/pci.h"
 #include "exec-all.h"
-#include "audio/sys-queue.h"
+#include "sys-queue.h"
 
 /* Log acesss */
 #define PT_LOGGING_ENABLED

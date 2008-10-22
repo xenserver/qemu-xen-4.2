@@ -35,7 +35,7 @@
 #endif
 
 struct ppc_def_t {
-    const unsigned char *name;
+    const char *name;
     uint32_t pvr;
     uint32_t svr;
     uint64_t insns_flags;
@@ -111,23 +111,23 @@ static void spr_write_xer (void *opaque, int sprn)
 /* LR */
 static void spr_read_lr (void *opaque, int sprn)
 {
-    gen_op_load_lr();
+    tcg_gen_mov_tl(cpu_T[0], cpu_lr);
 }
 
 static void spr_write_lr (void *opaque, int sprn)
 {
-    gen_op_store_lr();
+    tcg_gen_mov_tl(cpu_lr, cpu_T[0]);
 }
 
 /* CTR */
 static void spr_read_ctr (void *opaque, int sprn)
 {
-    gen_op_load_ctr();
+    tcg_gen_mov_tl(cpu_T[0], cpu_ctr);
 }
 
 static void spr_write_ctr (void *opaque, int sprn)
 {
-    gen_op_store_ctr();
+    tcg_gen_mov_tl(cpu_ctr, cpu_T[0]);
 }
 
 /* User read access to SPR */
@@ -434,13 +434,13 @@ do {                                                                          \
      _spr_register(env, num, name, uea_read, uea_write, initial_value);       \
 } while (0)
 static inline void _spr_register (CPUPPCState *env, int num,
-                                  const unsigned char *name,
+                                  const char *name,
                                   void (*uea_read)(void *opaque, int sprn),
                                   void (*uea_write)(void *opaque, int sprn),
                                   target_ulong initial_value)
 #else
 static inline void spr_register (CPUPPCState *env, int num,
-                                 const unsigned char *name,
+                                 const char *name,
                                  void (*uea_read)(void *opaque, int sprn),
                                  void (*uea_write)(void *opaque, int sprn),
                                  void (*oea_read)(void *opaque, int sprn),
@@ -1246,7 +1246,7 @@ static void gen_spr_usprgh (CPUPPCState *env)
 /* PowerPC BookE SPR */
 static void gen_spr_BookE (CPUPPCState *env, uint64_t ivor_mask)
 {
-    const unsigned char *ivor_names[64] = {
+    const char *ivor_names[64] = {
         "IVOR0",  "IVOR1",  "IVOR2",  "IVOR3",
         "IVOR4",  "IVOR5",  "IVOR6",  "IVOR7",
         "IVOR8",  "IVOR9",  "IVOR10", "IVOR11",
@@ -1408,7 +1408,7 @@ static void gen_spr_BookE (CPUPPCState *env, uint64_t ivor_mask)
 static void gen_spr_BookE_FSL (CPUPPCState *env, uint32_t mas_mask)
 {
 #if !defined(CONFIG_USER_ONLY)
-    const unsigned char *mas_names[8] = {
+    const char *mas_names[8] = {
         "MAS0", "MAS1", "MAS2", "MAS3", "MAS4", "MAS5", "MAS6", "MAS7",
     };
     int mas_sprn[8] = {
@@ -8942,8 +8942,6 @@ static void dump_ppc_sprs (CPUPPCState *env)
 #include <stdlib.h>
 #include <string.h>
 
-int fflush (FILE *stream);
-
 /* Opcode types */
 enum {
     PPC_DIRECT   = 0, /* Opcode routine        */
@@ -9160,7 +9158,7 @@ static int create_ppc_opcodes (CPUPPCState *env, const ppc_def_t *def)
 static void dump_ppc_insns (CPUPPCState *env)
 {
     opc_handler_t **table, *handler;
-    const unsigned char *p, *q;
+    const char *p, *q;
     uint8_t opc1, opc2, opc3;
 
     printf("Instructions set:\n");
@@ -9243,7 +9241,7 @@ int cpu_ppc_register_internal (CPUPPCState *env, const ppc_def_t *def)
     init_ppc_proc(env, def);
 #if defined(PPC_DUMP_CPU)
     {
-        const unsigned char *mmu_model, *excp_model, *bus_model;
+        const char *mmu_model, *excp_model, *bus_model;
         switch (env->mmu_model) {
         case POWERPC_MMU_32B:
             mmu_model = "PowerPC 32";
@@ -9446,10 +9444,10 @@ static const ppc_def_t *ppc_find_by_pvr (uint32_t pvr)
 
 #include <ctype.h>
 
-const ppc_def_t *cpu_ppc_find_by_name (const unsigned char *name)
+const ppc_def_t *cpu_ppc_find_by_name (const char *name)
 {
     const ppc_def_t *ret;
-    const unsigned char *p;
+    const char *p;
     int i, max, len;
 
     /* Check if the given name is a PVR */

@@ -89,8 +89,8 @@ void cpu_save(QEMUFile *f, void *opaque)
     cpu_put_seg(f, &env->idt);
 
     qemu_put_be32s(f, &env->sysenter_cs);
-    qemu_put_be32s(f, &env->sysenter_esp);
-    qemu_put_be32s(f, &env->sysenter_eip);
+    qemu_put_betls(f, &env->sysenter_esp);
+    qemu_put_betls(f, &env->sysenter_eip);
 
     qemu_put_betls(f, &env->cr[0]);
     qemu_put_betls(f, &env->cr[2]);
@@ -102,7 +102,7 @@ void cpu_save(QEMUFile *f, void *opaque)
 
     /* MMU */
     a20_mask = (int32_t) env->a20_mask;
-    qemu_put_be32s(f, &a20_mask);
+    qemu_put_sbe32s(f, &a20_mask);
 
     /* XMM */
     qemu_put_be32s(f, &env->mxcsr);
@@ -120,6 +120,20 @@ void cpu_save(QEMUFile *f, void *opaque)
     qemu_put_be64s(f, &env->kernelgsbase);
 #endif
     qemu_put_be32s(f, &env->smbase);
+
+    qemu_put_be64s(f, &env->pat);
+    qemu_put_be32s(f, &env->hflags2);
+    
+    qemu_put_be64s(f, &env->vm_hsave);
+    qemu_put_be64s(f, &env->vm_vmcb);
+    qemu_put_be64s(f, &env->tsc_offset);
+    qemu_put_be64s(f, &env->intercept);
+    qemu_put_be16s(f, &env->intercept_cr_read);
+    qemu_put_be16s(f, &env->intercept_cr_write);
+    qemu_put_be16s(f, &env->intercept_dr_read);
+    qemu_put_be16s(f, &env->intercept_dr_write);
+    qemu_put_be32s(f, &env->intercept_exceptions);
+    qemu_put_8s(f, &env->v_tpr);
 }
 
 #ifdef USE_X86LDOUBLE
@@ -154,7 +168,8 @@ int cpu_load(QEMUFile *f, void *opaque, int version_id)
     uint16_t fpus, fpuc, fptag, fpregs_format;
     int32_t a20_mask;
 
-    if (version_id != 3 && version_id != 4)
+    if (version_id != 3 && version_id != 4 && version_id != 5
+        && version_id != 6 && version_id != 7)
         return -EINVAL;
     for(i = 0; i < CPU_NB_REGS; i++)
         qemu_get_betls(f, &env->regs[i]);
@@ -229,8 +244,13 @@ int cpu_load(QEMUFile *f, void *opaque, int version_id)
     cpu_get_seg(f, &env->idt);
 
     qemu_get_be32s(f, &env->sysenter_cs);
-    qemu_get_be32s(f, &env->sysenter_esp);
-    qemu_get_be32s(f, &env->sysenter_eip);
+    if (version_id >= 7) {
+        qemu_get_betls(f, &env->sysenter_esp);
+        qemu_get_betls(f, &env->sysenter_eip);
+    } else {
+        qemu_get_be32s(f, &env->sysenter_esp);
+        qemu_get_be32s(f, &env->sysenter_eip);
+    }
 
     qemu_get_betls(f, &env->cr[0]);
     qemu_get_betls(f, &env->cr[2]);
@@ -241,7 +261,7 @@ int cpu_load(QEMUFile *f, void *opaque, int version_id)
         qemu_get_betls(f, &env->dr[i]);
 
     /* MMU */
-    qemu_get_be32s(f, &a20_mask);
+    qemu_get_sbe32s(f, &a20_mask);
     env->a20_mask = a20_mask;
 
     qemu_get_be32s(f, &env->mxcsr);
@@ -258,10 +278,28 @@ int cpu_load(QEMUFile *f, void *opaque, int version_id)
     qemu_get_be64s(f, &env->fmask);
     qemu_get_be64s(f, &env->kernelgsbase);
 #endif
-    if (version_id >= 4)
+    if (version_id >= 4) {
         qemu_get_be32s(f, &env->smbase);
+    }
+    if (version_id >= 5) {
+        qemu_get_be64s(f, &env->pat);
+        qemu_get_be32s(f, &env->hflags2);
+        if (version_id < 6)
+            qemu_get_be32s(f, &env->halted);
 
-    /* XXX: compute hflags from scratch, except for CPL and IIF */
+        qemu_get_be64s(f, &env->vm_hsave);
+        qemu_get_be64s(f, &env->vm_vmcb);
+        qemu_get_be64s(f, &env->tsc_offset);
+        qemu_get_be64s(f, &env->intercept);
+        qemu_get_be16s(f, &env->intercept_cr_read);
+        qemu_get_be16s(f, &env->intercept_cr_write);
+        qemu_get_be16s(f, &env->intercept_dr_read);
+        qemu_get_be16s(f, &env->intercept_dr_write);
+        qemu_get_be32s(f, &env->intercept_exceptions);
+        qemu_get_8s(f, &env->v_tpr);
+    }
+    /* XXX: ensure compatiblity for halted bit ? */
+    /* XXX: compute redundant hflags bits */
     env->hflags = hflags;
     tlb_flush(env, 1);
     return 0;

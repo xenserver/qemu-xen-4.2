@@ -590,10 +590,6 @@ int xenstore_fd(void)
     return -1;
 }
 
-unsigned long *logdirty_bitmap = NULL;
-unsigned long logdirty_bitmap_size;
-extern int vga_ram_size, bios_size;
-
 void xenstore_process_logdirty_event(void)
 {
 #ifdef CONFIG_STUBDOM

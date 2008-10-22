@@ -76,8 +76,6 @@ typedef struct SegmentCache {
 typedef struct CPUX86State {
     uint32_t a20_mask;
 
-    int interrupt_request;
-
     CPU_COMMON
 } CPUX86State;
 

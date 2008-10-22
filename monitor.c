@@ -35,19 +35,12 @@
 #include "audio/audio.h"
 #include "disas.h"
 #include <dirent.h>
-
-#undef TARGET_I386
-
-#ifdef CONFIG_PROFILER
-#include "qemu-timer.h" /* for ticks_per_sec */
-#endif
+#include "qemu-timer.h"
 
 //#define DEBUG
 //#define DEBUG_COMPLETION
 
-#ifndef offsetof
-#define offsetof(type, field) ((size_t) &((type *)0)->field)
-#endif
+#undef TARGET_I386
 
 /*
  * Supported types:
@@ -66,7 +59,7 @@
 typedef struct term_cmd_t {
     const char *name;
     const char *args_type;
-    void (*handler)();
+    void *handler;
     const char *params;
     const char *help;
 } term_cmd_t;
@@ -75,8 +68,8 @@ typedef struct term_cmd_t {
 static CharDriverState *monitor_hd[MAX_MON];
 static int hide_banner;
 
-static term_cmd_t term_cmds[];
-static term_cmd_t info_cmds[];
+static const term_cmd_t term_cmds[];
+static const term_cmd_t info_cmds[];
 
 static uint8_t term_outbuf[1024];
 static int term_outbuf_index;
@@ -184,9 +177,9 @@ static int compare_cmd(const char *name, const char *list)
     return 0;
 }
 
-static void help_cmd1(term_cmd_t *cmds, const char *prefix, const char *name)
+static void help_cmd1(const term_cmd_t *cmds, const char *prefix, const char *name)
 {
-    term_cmd_t *cmd;
+    const term_cmd_t *cmd;
 
     for(cmd = cmds; cmd->name != NULL; cmd++) {
         if (!name || !strcmp(name, cmd->name))
@@ -201,7 +194,7 @@ static void help_cmd(const char *name)
     } else {
         help_cmd1(term_cmds, "", name);
         if (name && !strcmp(name, "log")) {
-            CPULogItem *item;
+            const CPULogItem *item;
             term_printf("Log items (comma separated):\n");
             term_printf("%-10s %s\n", "none", "remove all logs");
             for(item = cpu_log_items; item->mask != 0; item++) {
@@ -230,7 +223,8 @@ static void do_commit(const char *device)
 
 static void do_info(const char *item)
 {
-    term_cmd_t *cmd;
+    const term_cmd_t *cmd;
+    void (*handler)(void);
 
     if (!item)
         goto help;
@@ -242,7 +236,8 @@ static void do_info(const char *item)
     help_cmd("info");
     return;
  found:
-    cmd->handler();
+    handler = cmd->handler;
+    handler();
 }
 
 static void do_info_version(void)
@@ -254,6 +249,15 @@ static void do_info_name(void)
 {
     if (qemu_name)
         term_printf("%s\n", qemu_name);
+}
+
+static void do_info_uuid(void)
+{
+    term_printf(UUID_FMT "\n", qemu_uuid[0], qemu_uuid[1], qemu_uuid[2],
+            qemu_uuid[3], qemu_uuid[4], qemu_uuid[5], qemu_uuid[6],
+            qemu_uuid[7], qemu_uuid[8], qemu_uuid[9], qemu_uuid[10],
+            qemu_uuid[11], qemu_uuid[12], qemu_uuid[13], qemu_uuid[14],
+            qemu_uuid[15]);
 }
 
 static void do_info_block(void)
@@ -316,21 +320,15 @@ static void do_info_cpus(void)
                     env->cpu_index);
 #if defined(TARGET_I386)
         term_printf(" pc=0x" TARGET_FMT_lx, env->eip + env->segs[R_CS].base);
-        if (env->hflags & HF_HALTED_MASK)
-            term_printf(" (halted)");
 #elif defined(TARGET_PPC)
         term_printf(" nip=0x" TARGET_FMT_lx, env->nip);
-        if (env->halted)
-            term_printf(" (halted)");
 #elif defined(TARGET_SPARC)
         term_printf(" pc=0x" TARGET_FMT_lx " npc=0x" TARGET_FMT_lx, env->pc, env->npc);
-        if (env->halted)
-            term_printf(" (halted)");
 #elif defined(TARGET_MIPS)
-        term_printf(" PC=0x" TARGET_FMT_lx, env->PC[env->current_tc]);
+        term_printf(" PC=0x" TARGET_FMT_lx, env->active_tc.PC);
+#endif
         if (env->halted)
             term_printf(" (halted)");
-#endif
         term_printf("\n");
     }
 }
@@ -407,18 +405,26 @@ static void do_eject(int force, const char *filename)
     eject_device(bs, force);
 }
 
-static void do_change_block(const char *device, const char *filename)
+static void do_change_block(const char *device, const char *filename, const char *fmt)
 {
     BlockDriverState *bs;
+    BlockDriver *drv = NULL;
 
     bs = bdrv_find(device);
     if (!bs) {
         term_printf("device not found\n");
         return;
     }
+    if (fmt) {
+        drv = bdrv_find_format(fmt);
+        if (!drv) {
+            term_printf("invalid format %s\n", fmt);
+            return;
+        }
+    }
     if (eject_device(bs, 0) < 0)
         return;
-    bdrv_open2(bs, filename, 0, &bdrv_raw);
+    bdrv_open2(bs, filename, 0, drv);
     qemu_key_check(bs, filename);
 }
 
@@ -437,12 +443,12 @@ static void do_change_vnc(const char *target)
     }
 }
 
-static void do_change(const char *device, const char *target)
+static void do_change(const char *device, const char *target, const char *fmt)
 {
     if (strcmp(device, "vnc") == 0) {
 	do_change_vnc(target);
     } else {
-	do_change_block(device, target);
+	do_change_block(device, target, fmt);
     }
 }
 
@@ -599,7 +605,10 @@ static void memory_dump(int count, int format, int wsize,
             env = mon_get_cpu();
             if (!env)
                 break;
-            cpu_memory_rw_debug(env, addr, buf, l, 0);
+            if (cpu_memory_rw_debug(env, addr, buf, l, 0) < 0) {
+                term_printf(" Cannot access memory\n");
+                break;
+            }
         }
         i = 0;
         while (i < l) {
@@ -799,6 +808,8 @@ static const KeyDef key_defs[] = {
 
     { 0x38, "alt" },
     { 0xb8, "alt_r" },
+    { 0x64, "altgr" },
+    { 0xe4, "altgr_r" },
     { 0x1d, "ctrl" },
     { 0x9d, "ctrl_r" },
 
@@ -851,6 +862,9 @@ static const KeyDef key_defs[] = {
     { 0x30, "b" },
     { 0x31, "n" },
     { 0x32, "m" },
+    { 0x33, "comma" },
+    { 0x34, "dot" },
+    { 0x35, "slash" },
 
     { 0x37, "asterisk" },
 
@@ -875,6 +889,7 @@ static const KeyDef key_defs[] = {
     { 0x4e, "kp_add" },
     { 0x9c, "kp_enter" },
     { 0x53, "kp_decimal" },
+    { 0x54, "sysrq" },
 
     { 0x52, "kp_0" },
     { 0x4f, "kp_1" },
@@ -906,6 +921,23 @@ static const KeyDef key_defs[] = {
 
     { 0xd2, "insert" },
     { 0xd3, "delete" },
+#if defined(TARGET_SPARC) && !defined(TARGET_SPARC64)
+    { 0xf0, "stop" },
+    { 0xf1, "again" },
+    { 0xf2, "props" },
+    { 0xf3, "undo" },
+    { 0xf4, "front" },
+    { 0xf5, "copy" },
+    { 0xf6, "open" },
+    { 0xf7, "paste" },
+    { 0xf8, "find" },
+    { 0xf9, "cut" },
+    { 0xfa, "lf" },
+    { 0xfb, "help" },
+    { 0xfc, "meta_l" },
+    { 0xfd, "meta_r" },
+    { 0xfe, "compose" },
+#endif
     { 0, NULL },
 };
 
@@ -927,48 +959,73 @@ static int get_keycode(const char *key)
     return -1;
 }
 
-static void do_send_key(const char *string)
-{
-    char keybuf[16], *q;
-    uint8_t keycodes[16];
-    const char *p;
-    int nb_keycodes, keycode, i;
+#define MAX_KEYCODES 16
+static uint8_t keycodes[MAX_KEYCODES];
+static int nb_pending_keycodes;
+static QEMUTimer *key_timer;
 
-    nb_keycodes = 0;
-    p = string;
-    while (*p != '\0') {
-        q = keybuf;
-        while (*p != '\0' && *p != '-') {
-            if ((q - keybuf) < sizeof(keybuf) - 1) {
-                *q++ = *p;
-            }
-            p++;
-        }
-        *q = '\0';
-        keycode = get_keycode(keybuf);
-        if (keycode < 0) {
-            term_printf("unknown key: '%s'\n", keybuf);
-            return;
-        }
-        keycodes[nb_keycodes++] = keycode;
-        if (*p == '\0')
-            break;
-        p++;
+static void release_keys(void *opaque)
+{
+    int keycode;
+
+    while (nb_pending_keycodes > 0) {
+        nb_pending_keycodes--;
+        keycode = keycodes[nb_pending_keycodes];
+        if (keycode & 0x80)
+            kbd_put_keycode(0xe0);
+        kbd_put_keycode(keycode | 0x80);
     }
+}
+
+static void do_sendkey(const char *string, int has_hold_time, int hold_time)
+{
+    char keyname_buf[16];
+    char *separator;
+    int keyname_len, keycode, i;
+
+    if (nb_pending_keycodes > 0) {
+        qemu_del_timer(key_timer);
+        release_keys(NULL);
+    }
+    if (!has_hold_time)
+        hold_time = 100;
+    i = 0;
+    while (1) {
+        separator = strchr(string, '-');
+        keyname_len = separator ? separator - string : strlen(string);
+        if (keyname_len > 0) {
+            pstrcpy(keyname_buf, sizeof(keyname_buf), string);
+            if (keyname_len > sizeof(keyname_buf) - 1) {
+                term_printf("invalid key: '%s...'\n", keyname_buf);
+                return;
+            }
+            if (i == MAX_KEYCODES) {
+                term_printf("too many keys\n");
+                return;
+            }
+            keyname_buf[keyname_len] = 0;
+            keycode = get_keycode(keyname_buf);
+            if (keycode < 0) {
+                term_printf("unknown key: '%s'\n", keyname_buf);
+                return;
+            }
+            keycodes[i++] = keycode;
+        }
+        if (!separator)
+            break;
+        string = separator + 1;
+    }
+    nb_pending_keycodes = i;
     /* key down events */
-    for(i = 0; i < nb_keycodes; i++) {
+    for (i = 0; i < nb_pending_keycodes; i++) {
         keycode = keycodes[i];
         if (keycode & 0x80)
             kbd_put_keycode(0xe0);
         kbd_put_keycode(keycode & 0x7f);
     }
-    /* key up events */
-    for(i = nb_keycodes - 1; i >= 0; i--) {
-        keycode = keycodes[i];
-        if (keycode & 0x80)
-            kbd_put_keycode(0xe0);
-        kbd_put_keycode(keycode | 0x80);
-    }
+    /* delayed key up events */
+    qemu_mod_timer(key_timer, qemu_get_clock(vm_clock) +
+                    muldiv64(ticks_per_sec, hold_time, 1000));
 }
 
 static int mouse_button_state;
@@ -1021,12 +1078,22 @@ static void do_ioport_read(int count, int format, int size, int addr, int has_in
                 suffix, addr, size * 2, val);
 }
 
+/* boot_set handler */
+static QEMUBootSetHandler *qemu_boot_set_handler = NULL;
+static void *boot_opaque;
+
+void qemu_register_boot_set(QEMUBootSetHandler *func, void *opaque)
+{
+    qemu_boot_set_handler = func;
+    boot_opaque = opaque;
+}
+
 static void do_boot_set(const char *bootdevice)
 {
     int res;
 
     if (qemu_boot_set_handler)  {
-        res = qemu_boot_set_handler(bootdevice);
+        res = qemu_boot_set_handler(boot_opaque, bootdevice);
         if (res == 0)
             term_printf("boot device list now set to %s\n", bootdevice);
         else
@@ -1272,9 +1339,6 @@ static void do_stop_capture (int n)
 }
 
 #ifdef HAS_AUDIO
-int wav_start_capture (CaptureState *s, const char *path, int freq,
-                       int bits, int nchannels);
-
 static void do_wav_capture (const char *path,
                             int has_freq, int freq,
                             int has_bits, int bits,
@@ -1313,7 +1377,7 @@ static void do_inject_nmi(int cpu_index)
 }
 #endif
 
-static term_cmd_t term_cmds[] = {
+static const term_cmd_t term_cmds[] = {
     { "help|?", "s?", do_help,
       "[cmd]", "show the help" },
     { "commit", "s", do_commit,
@@ -1324,11 +1388,11 @@ static term_cmd_t term_cmds[] = {
       "", "quit the emulator" },
     { "eject", "-fB", do_eject,
       "[-f] device", "eject a removable medium (use -f to force it)" },
-    { "change", "BF", do_change,
-      "device filename", "change a removable medium" },
+    { "change", "BFs?", do_change,
+      "device filename [format]", "change a removable medium, optional format" },
     { "screendump", "F", do_screen_dump,
       "filename", "save screen into PPM image 'filename'" },
-    { "logfile", "s", do_logfile,
+    { "logfile", "F", do_logfile,
       "filename", "output logs to 'filename'" },
     { "log", "s", do_log,
       "item1[,...]", "activate logging of the specified items to '/tmp/qemu.log'" },
@@ -1355,8 +1419,8 @@ static term_cmd_t term_cmds[] = {
     { "i", "/ii.", do_ioport_read,
       "/fmt addr", "I/O port read" },
 
-    { "sendkey", "s", do_send_key,
-      "keys", "send keys to the VM (e.g. 'sendkey ctrl-alt-f1')" },
+    { "sendkey", "si?", do_sendkey,
+      "keys [hold_ms]", "send keys to the VM (e.g. 'sendkey ctrl-alt-f1', default hold time=100 ms)" },
     { "system_reset", "", do_system_reset,
       "", "reset the system" },
     { "system_powerdown", "", do_system_powerdown,
@@ -1401,7 +1465,7 @@ static term_cmd_t term_cmds[] = {
     { NULL, NULL, },
 };
 
-static term_cmd_t info_cmds[] = {
+static const term_cmd_t info_cmds[] = {
     { "version", "", do_info_version,
       "", "show the version of qemu" },
     { "network", "", do_info_network,
@@ -1450,6 +1514,8 @@ static term_cmd_t info_cmds[] = {
       "", "show the vnc server status"},
     { "name", "", do_info_name,
       "", "show the current VM name" },
+    { "uuid", "", do_info_uuid,
+      "", "show the current VM UUID" },
 #if defined(TARGET_PPC)
     { "cpustats", "", do_info_cpu_stats,
       "", "show CPU statistics", },
@@ -1472,12 +1538,12 @@ static jmp_buf expr_env;
 typedef struct MonitorDef {
     const char *name;
     int offset;
-    target_long (*get_value)(struct MonitorDef *md, int val);
+    target_long (*get_value)(const struct MonitorDef *md, int val);
     int type;
 } MonitorDef;
 
 #if defined(TARGET_I386)
-static target_long monitor_get_pc (struct MonitorDef *md, int val)
+static target_long monitor_get_pc (const struct MonitorDef *md, int val)
 {
     CPUState *env = mon_get_cpu();
     if (!env)
@@ -1487,7 +1553,7 @@ static target_long monitor_get_pc (struct MonitorDef *md, int val)
 #endif
 
 #if defined(TARGET_PPC)
-static target_long monitor_get_ccr (struct MonitorDef *md, int val)
+static target_long monitor_get_ccr (const struct MonitorDef *md, int val)
 {
     CPUState *env = mon_get_cpu();
     unsigned int u;
@@ -1503,7 +1569,7 @@ static target_long monitor_get_ccr (struct MonitorDef *md, int val)
     return u;
 }
 
-static target_long monitor_get_msr (struct MonitorDef *md, int val)
+static target_long monitor_get_msr (const struct MonitorDef *md, int val)
 {
     CPUState *env = mon_get_cpu();
     if (!env)
@@ -1511,7 +1577,7 @@ static target_long monitor_get_msr (struct MonitorDef *md, int val)
     return env->msr;
 }
 
-static target_long monitor_get_xer (struct MonitorDef *md, int val)
+static target_long monitor_get_xer (const struct MonitorDef *md, int val)
 {
     CPUState *env = mon_get_cpu();
     if (!env)
@@ -1519,7 +1585,7 @@ static target_long monitor_get_xer (struct MonitorDef *md, int val)
     return ppc_load_xer(env);
 }
 
-static target_long monitor_get_decr (struct MonitorDef *md, int val)
+static target_long monitor_get_decr (const struct MonitorDef *md, int val)
 {
     CPUState *env = mon_get_cpu();
     if (!env)
@@ -1527,7 +1593,7 @@ static target_long monitor_get_decr (struct MonitorDef *md, int val)
     return cpu_ppc_load_decr(env);
 }
 
-static target_long monitor_get_tbu (struct MonitorDef *md, int val)
+static target_long monitor_get_tbu (const struct MonitorDef *md, int val)
 {
     CPUState *env = mon_get_cpu();
     if (!env)
@@ -1535,7 +1601,7 @@ static target_long monitor_get_tbu (struct MonitorDef *md, int val)
     return cpu_ppc_load_tbu(env);
 }
 
-static target_long monitor_get_tbl (struct MonitorDef *md, int val)
+static target_long monitor_get_tbl (const struct MonitorDef *md, int val)
 {
     CPUState *env = mon_get_cpu();
     if (!env)
@@ -1546,7 +1612,7 @@ static target_long monitor_get_tbl (struct MonitorDef *md, int val)
 
 #if defined(TARGET_SPARC)
 #ifndef TARGET_SPARC64
-static target_long monitor_get_psr (struct MonitorDef *md, int val)
+static target_long monitor_get_psr (const struct MonitorDef *md, int val)
 {
     CPUState *env = mon_get_cpu();
     if (!env)
@@ -1555,7 +1621,7 @@ static target_long monitor_get_psr (struct MonitorDef *md, int val)
 }
 #endif
 
-static target_long monitor_get_reg(struct MonitorDef *md, int val)
+static target_long monitor_get_reg(const struct MonitorDef *md, int val)
 {
     CPUState *env = mon_get_cpu();
     if (!env)
@@ -1564,7 +1630,7 @@ static target_long monitor_get_reg(struct MonitorDef *md, int val)
 }
 #endif
 
-static MonitorDef monitor_defs[] = {
+static const MonitorDef monitor_defs[] = {
 #ifdef TARGET_I386
 
 #define SEG(name, seg) \
@@ -1815,7 +1881,7 @@ static void expr_error(const char *fmt)
 /* return 0 if OK, -1 if not found, -2 if no CPU defined */
 static int get_monitor_def(target_long *pval, const char *name)
 {
-    MonitorDef *md;
+    const MonitorDef *md;
     void *ptr;
 
     for(md = monitor_defs; md->name != NULL; md++) {
@@ -2109,11 +2175,22 @@ static void monitor_handle_command(const char *cmdline)
     const char *p, *pstart, *typestr;
     char *q;
     int c, nb_args, len, i, has_arg;
-    term_cmd_t *cmd;
+    const term_cmd_t *cmd;
     char cmdname[256];
     char buf[1024];
     void *str_allocated[MAX_ARGS];
     void *args[MAX_ARGS];
+    void (*handler_0)(void);
+    void (*handler_1)(void *arg0);
+    void (*handler_2)(void *arg0, void *arg1);
+    void (*handler_3)(void *arg0, void *arg1, void *arg2);
+    void (*handler_4)(void *arg0, void *arg1, void *arg2, void *arg3);
+    void (*handler_5)(void *arg0, void *arg1, void *arg2, void *arg3,
+                      void *arg4);
+    void (*handler_6)(void *arg0, void *arg1, void *arg2, void *arg3,
+                      void *arg4, void *arg5);
+    void (*handler_7)(void *arg0, void *arg1, void *arg2, void *arg3,
+                      void *arg4, void *arg5, void *arg6);
 
 #ifdef DEBUG
     term_printf("command='%s'\n", cmdline);
@@ -2189,7 +2266,7 @@ static void monitor_handle_command(const char *cmdline)
                     goto fail;
                 }
                 str = qemu_malloc(strlen(buf) + 1);
-                strcpy(str, buf);
+                pstrcpy(str, sizeof(buf), buf);
                 str_allocated[nb_args] = str;
             add_str:
                 if (nb_args >= MAX_ARGS) {
@@ -2261,8 +2338,8 @@ static void monitor_handle_command(const char *cmdline)
                         /* for 'i', not specifying a size gives -1 as size */
                         if (size < 0)
                             size = default_fmt_size;
+                        default_fmt_size = size;
                     }
-                    default_fmt_size = size;
                     default_fmt_format = format;
                 } else {
                     count = 1;
@@ -2376,28 +2453,36 @@ static void monitor_handle_command(const char *cmdline)
 
     switch(nb_args) {
     case 0:
-        cmd->handler();
+        handler_0 = cmd->handler;
+        handler_0();
         break;
     case 1:
-        cmd->handler(args[0]);
+        handler_1 = cmd->handler;
+        handler_1(args[0]);
         break;
     case 2:
-        cmd->handler(args[0], args[1]);
+        handler_2 = cmd->handler;
+        handler_2(args[0], args[1]);
         break;
     case 3:
-        cmd->handler(args[0], args[1], args[2]);
+        handler_3 = cmd->handler;
+        handler_3(args[0], args[1], args[2]);
         break;
     case 4:
-        cmd->handler(args[0], args[1], args[2], args[3]);
+        handler_4 = cmd->handler;
+        handler_4(args[0], args[1], args[2], args[3]);
         break;
     case 5:
-        cmd->handler(args[0], args[1], args[2], args[3], args[4]);
+        handler_5 = cmd->handler;
+        handler_5(args[0], args[1], args[2], args[3], args[4]);
         break;
     case 6:
-        cmd->handler(args[0], args[1], args[2], args[3], args[4], args[5]);
+        handler_6 = cmd->handler;
+        handler_6(args[0], args[1], args[2], args[3], args[4], args[5]);
         break;
     case 7:
-        cmd->handler(args[0], args[1], args[2], args[3], args[4], args[5], args[6]);
+        handler_7 = cmd->handler;
+        handler_7(args[0], args[1], args[2], args[3], args[4], args[5], args[6]);
         break;
     default:
         term_printf("unsupported number of arguments: %d\n", nb_args);
@@ -2448,7 +2533,7 @@ static void file_completion(const char *input)
     if (!p) {
         input_path_len = 0;
         pstrcpy(file_prefix, sizeof(file_prefix), input);
-        strcpy(path, ".");
+        pstrcpy(path, sizeof(path), ".");
     } else {
         input_path_len = p - input + 1;
         memcpy(path, input, input_path_len);
@@ -2470,13 +2555,15 @@ static void file_completion(const char *input)
             break;
         if (strstart(d->d_name, file_prefix, NULL)) {
             memcpy(file, input, input_path_len);
-            strcpy(file + input_path_len, d->d_name);
+            if (input_path_len < sizeof(file))
+                pstrcpy(file + input_path_len, sizeof(file) - input_path_len,
+                        d->d_name);
             /* stat the file to find out if it's a directory.
              * In that case add a slash to speed up typing long paths
              */
             stat(file, &sb);
             if(S_ISDIR(sb.st_mode))
-                strcat(file, "/");
+                pstrcat(file, sizeof(file), "/");
             add_completion(file);
         }
     }
@@ -2525,7 +2612,7 @@ void readline_find_completion(const char *cmdline)
     char *args[MAX_ARGS];
     int nb_args, i, len;
     const char *ptype, *str;
-    term_cmd_t *cmd;
+    const term_cmd_t *cmd;
     const KeyDef *key;
 
     parse_cmdline(cmdline, &nb_args, args);
@@ -2615,12 +2702,27 @@ static void term_read(void *opaque, const uint8_t *buf, int size)
         readline_handle_byte(buf[i]);
 }
 
-static void monitor_start_input(void);
+static int monitor_suspended;
 
 static void monitor_handle_command1(void *opaque, const char *cmdline)
 {
     monitor_handle_command(cmdline);
-    monitor_start_input();
+    if (!monitor_suspended)
+        monitor_start_input();
+    else
+        monitor_suspended = 2;
+}
+
+void monitor_suspend(void)
+{
+    monitor_suspended = 1;
+}
+
+void monitor_resume(void)
+{
+    if (monitor_suspended == 2)
+        monitor_start_input();
+    monitor_suspended = 0;
 }
 
 static void monitor_start_input(void)
@@ -2646,6 +2748,9 @@ void monitor_init(CharDriverState *hd, int show_banner)
     int i;
 
     if (is_first_init) {
+        key_timer = qemu_new_timer(vm_clock, release_keys, NULL);
+        if (!key_timer)
+            return;
         for (i = 0; i < MAX_MON; i++) {
             monitor_hd[i] = NULL;
         }
@@ -2681,17 +2786,30 @@ void monitor_readline(const char *prompt, int is_password,
                       char *buf, int buf_size)
 {
     int i;
+    int old_focus[MAX_MON];
 
     if (is_password) {
-        for (i = 0; i < MAX_MON; i++)
-            if (monitor_hd[i] && monitor_hd[i]->focus == 0)
+        for (i = 0; i < MAX_MON; i++) {
+            old_focus[i] = 0;
+            if (monitor_hd[i]) {
+                old_focus[i] = monitor_hd[i]->focus;
+                monitor_hd[i]->focus = 0;
                 qemu_chr_send_event(monitor_hd[i], CHR_EVENT_FOCUS);
+            }
+        }
     }
+
     readline_start(prompt, is_password, monitor_readline_cb, NULL);
     monitor_readline_buf = buf;
     monitor_readline_buf_size = buf_size;
     monitor_readline_started = 1;
     while (monitor_readline_started) {
         main_loop_wait(10);
+    }
+    /* restore original focus */
+    if (is_password) {
+        for (i = 0; i < MAX_MON; i++)
+            if (old_focus[i])
+                monitor_hd[i]->focus = old_focus[i];
     }
 }

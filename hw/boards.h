@@ -17,6 +17,9 @@ typedef struct QEMUMachine {
     QEMUMachineInitFunc *init;
 #define RAMSIZE_FIXED	(1 << 0)
     ram_addr_t ram_require;
+    int nodisk_ok;
+    int use_scsi;
+    int max_cpus;
     struct QEMUMachine *next;
 } QEMUMachine;
 
@@ -69,6 +72,8 @@ extern QEMUMachine ss1000_machine, ss2000_machine;
 
 /* sun4u.c */
 extern QEMUMachine sun4u_machine;
+extern QEMUMachine sun4v_machine;
+extern QEMUMachine niagara_machine;
 
 /* integratorcp.c */
 extern QEMUMachine integratorcp_machine;
@@ -115,5 +120,8 @@ extern QEMUMachine mainstone2_machine;
 
 /* musicpal.c */
 extern QEMUMachine musicpal_machine;
+
+/* tosa.c */
+extern QEMUMachine tosapda_machine;
 
 #endif

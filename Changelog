@@ -1,6 +1,9 @@
   - MIPS Magnum R4000 machine (Hervé Poussineau)
   - Braille support (Samuel Thibault)
   - Freecom MusicPal system emulation (Jan Kiszka)
+  - OMAP242x and Nokia N800, N810 machines (Andrzej Zaborowski)
+  - EsounD audio driver (Frederick Reeve)
+  - Gravis Ultrasound GF1 sound card (Tibor "TS" Schütz)
 
 version 0.9.1:
 

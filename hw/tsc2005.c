@@ -197,10 +197,14 @@ static void tsc2005_write(struct tsc2005_state_s *s, int reg, uint16_t data)
 
     case 0xc:	/* CFR0 */
         s->host_mode = data >> 15;
-        s->enabled = !(data & 0x4000);
-        if (s->busy && !s->enabled)
-            qemu_del_timer(s->timer);
-        s->busy &= s->enabled;
+        if (s->enabled != !(data & 0x4000)) {
+            s->enabled = !(data & 0x4000);
+            fprintf(stderr, "%s: touchscreen sense %sabled\n",
+                            __FUNCTION__, s->enabled ? "en" : "dis");
+            if (s->busy && !s->enabled)
+                qemu_del_timer(s->timer);
+            s->busy &= s->enabled;
+        }
         s->nextprecision = (data >> 13) & 1;
         s->timing[0] = data & 0x1fff;
         if ((s->timing[0] >> 11) == 3)
@@ -516,8 +520,6 @@ static int tsc2005_load(QEMUFile *f, void *opaque, int version_id)
     return 0;
 }
 
-static int tsc2005_iid = 0;
-
 void *tsc2005_init(qemu_irq pintdav)
 {
     struct tsc2005_state_s *s;
@@ -547,8 +549,7 @@ void *tsc2005_init(qemu_irq pintdav)
                     "QEMU TSC2005-driven Touchscreen");
 
     qemu_register_reset((void *) tsc2005_reset, s);
-    register_savevm("tsc2005", tsc2005_iid ++, 0,
-                    tsc2005_save, tsc2005_load, s);
+    register_savevm("tsc2005", -1, 0, tsc2005_save, tsc2005_load, s);
 
     return s;
 }

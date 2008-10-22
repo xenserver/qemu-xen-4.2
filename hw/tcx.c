@@ -36,6 +36,7 @@
 typedef struct TCXState {
     target_phys_addr_t addr;
     DisplayState *ds;
+    QEMUConsole *console;
     uint8_t *vram;
     uint32_t *vram24, *cplane;
     ram_addr_t vram_offset, vram24_offset, cplane_offset;
@@ -123,19 +124,34 @@ static void tcx_draw_line8(TCXState *s1, uint8_t *d,
     }
 }
 
+/*
+  XXX Could be much more optimal:
+  * detect if line/page/whole screen is in 24 bit mode
+  * if destination is also BGR, use memcpy
+  */
 static inline void tcx24_draw_line32(TCXState *s1, uint8_t *d,
                                      const uint8_t *s, int width,
                                      const uint32_t *cplane,
                                      const uint32_t *s24)
 {
-    int x;
-    uint8_t val;
+    int x, bgr, r, g, b;
+    uint8_t val, *p8;
     uint32_t *p = (uint32_t *)d;
     uint32_t dval;
 
+    bgr = s1->ds->bgr;
     for(x = 0; x < width; x++, s++, s24++) {
-        if ((bswap32(*cplane++) & 0xff000000) == 0x03000000) { // 24-bit direct
-            dval = bswap32(*s24) & 0x00ffffff;
+        if ((be32_to_cpu(*cplane++) & 0xff000000) == 0x03000000) {
+            // 24-bit direct, BGR order
+            p8 = (uint8_t *)s24;
+            p8++;
+            b = *p8++;
+            g = *p8++;
+            r = *p8++;
+            if (bgr)
+                dval = rgb_to_pixel32bgr(r, g, b);
+            else
+                dval = rgb_to_pixel32(r, g, b);
         } else {
             val = *s;
             dval = s1->palette[val];
@@ -356,9 +372,9 @@ static void tcx_save(QEMUFile *f, void *opaque)
 {
     TCXState *s = opaque;
 
-    qemu_put_be16s(f, (uint16_t *)&s->height);
-    qemu_put_be16s(f, (uint16_t *)&s->width);
-    qemu_put_be16s(f, (uint16_t *)&s->depth);
+    qemu_put_be16s(f, &s->height);
+    qemu_put_be16s(f, &s->width);
+    qemu_put_be16s(f, &s->depth);
     qemu_put_buffer(f, s->r, 256);
     qemu_put_buffer(f, s->g, 256);
     qemu_put_buffer(f, s->b, 256);
@@ -375,13 +391,13 @@ static int tcx_load(QEMUFile *f, void *opaque, int version_id)
         return -EINVAL;
 
     if (version_id == 3) {
-        qemu_get_be32s(f, (uint32_t *)&dummy);
-        qemu_get_be32s(f, (uint32_t *)&dummy);
-        qemu_get_be32s(f, (uint32_t *)&dummy);
+        qemu_get_be32s(f, &dummy);
+        qemu_get_be32s(f, &dummy);
+        qemu_get_be32s(f, &dummy);
     }
-    qemu_get_be16s(f, (uint16_t *)&s->height);
-    qemu_get_be16s(f, (uint16_t *)&s->width);
-    qemu_get_be16s(f, (uint16_t *)&s->depth);
+    qemu_get_be16s(f, &s->height);
+    qemu_get_be16s(f, &s->width);
+    qemu_get_be16s(f, &s->depth);
     qemu_get_buffer(f, s->r, 256);
     qemu_get_buffer(f, s->g, 256);
     qemu_get_buffer(f, s->b, 256);
@@ -537,14 +553,15 @@ void tcx_init(DisplayState *ds, target_phys_addr_t addr, uint8_t *vram_base,
         s->cplane = (uint32_t *)vram_base;
         s->cplane_offset = vram_offset;
         cpu_register_physical_memory(addr + 0x0a000000ULL, size, vram_offset);
-        graphic_console_init(s->ds, tcx24_update_display,
-                             tcx24_invalidate_display,
-                             tcx24_screen_dump, NULL, s);
+        s->console = graphic_console_init(s->ds, tcx24_update_display,
+                                          tcx24_invalidate_display,
+                                          tcx24_screen_dump, NULL, s);
     } else {
         cpu_register_physical_memory(addr + 0x00300000ULL, TCX_THC_NREGS_8,
                                      dummy_memory);
-        graphic_console_init(s->ds, tcx_update_display, tcx_invalidate_display,
-                             tcx_screen_dump, NULL, s);
+        s->console = graphic_console_init(s->ds, tcx_update_display,
+                                          tcx_invalidate_display,
+                                          tcx_screen_dump, NULL, s);
     }
     // NetBSD writes here even with 8-bit display
     cpu_register_physical_memory(addr + 0x00301000ULL, TCX_THC_NREGS_24,
@@ -553,7 +570,7 @@ void tcx_init(DisplayState *ds, target_phys_addr_t addr, uint8_t *vram_base,
     register_savevm("tcx", addr, 4, tcx_save, tcx_load, s);
     qemu_register_reset(tcx_reset, s);
     tcx_reset(s);
-    dpy_resize(s->ds, width, height);
+    qemu_console_resize(s->console, width, height);
 }
 
 static void tcx_screen_dump(void *opaque, const char *filename)

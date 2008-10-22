@@ -98,6 +98,7 @@ time_t mktimegm(struct tm *tm);
    * Obviously don't use this for floating point things like isnan! */
 
 void *qemu_malloc(size_t size);
+void *qemu_realloc(void *ptr, size_t size);
 void *qemu_mallocz(size_t size);
 void qemu_free(void *ptr);
 char *qemu_strdup(const char *str);
@@ -126,10 +127,12 @@ typedef int (*DMA_transfer_handler) (void *opaque, int nchan, int pos, int size)
 /* A load of opaque types so that device init declarations don't have to
    pull in all the real definitions.  */
 typedef struct NICInfo NICInfo;
+typedef struct HCIInfo HCIInfo;
 typedef struct AudioState AudioState;
 typedef struct BlockDriverState BlockDriverState;
 typedef struct DisplayState DisplayState;
 typedef struct TextConsole TextConsole;
+typedef TextConsole QEMUConsole;
 typedef struct CharDriverState CharDriverState;
 typedef struct VLANState VLANState;
 typedef struct QEMUFile QEMUFile;
@@ -142,5 +145,12 @@ typedef struct PCIDevice PCIDevice;
 typedef struct SerialState SerialState;
 typedef struct IRQState *qemu_irq;
 struct pcmcia_card_s;
+
+/* CPU save/load.  */
+void cpu_save(QEMUFile *f, void *opaque);
+int cpu_load(QEMUFile *f, void *opaque, int version_id);
+
+/* Force QEMU to stop what it's doing and service IO */
+void qemu_service_io(void);
 
 #endif

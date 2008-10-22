@@ -182,7 +182,7 @@ static void versatile_init(ram_addr_t ram_size, int vga_ram_size,
         fprintf(stderr, "Unable to find CPU definition\n");
         exit(1);
     }
-    /* ??? RAM shoud repeat to fill physical memory space.  */
+    /* ??? RAM should repeat to fill physical memory space.  */
     /* SDRAM at address zero.  */
     cpu_register_physical_memory(0, ram_size, IO_MEM_RAM);
 
@@ -316,13 +316,17 @@ static void vab_init(ram_addr_t ram_size, int vga_ram_size,
 }
 
 QEMUMachine versatilepb_machine = {
-    "versatilepb",
-    "ARM Versatile/PB (ARM926EJ-S)",
-    vpb_init,
+    .name = "versatilepb",
+    .desc = "ARM Versatile/PB (ARM926EJ-S)",
+    .init = vpb_init,
+    .use_scsi = 1,
+    .max_cpus = 1,
 };
 
 QEMUMachine versatileab_machine = {
-    "versatileab",
-    "ARM Versatile/AB (ARM926EJ-S)",
-    vab_init,
+    .name = "versatileab",
+    .desc = "ARM Versatile/AB (ARM926EJ-S)",
+    .init = vab_init,
+    .use_scsi = 1,
+    .max_cpus = 1,
 };

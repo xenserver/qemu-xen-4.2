@@ -64,7 +64,7 @@ static void realview_init(ram_addr_t ram_size, int vga_ram_size,
         }
     }
 
-    /* ??? RAM shoud repeat to fill physical memory space.  */
+    /* ??? RAM should repeat to fill physical memory space.  */
     /* SDRAM at address zero.  */
     cpu_register_physical_memory(0, ram_size, IO_MEM_RAM);
 
@@ -197,8 +197,10 @@ static void realview_init(ram_addr_t ram_size, int vga_ram_size,
 }
 
 QEMUMachine realview_machine = {
-    "realview",
-    "ARM RealView Emulation Baseboard (ARM926EJ-S)",
-    realview_init,
-    0x1000
+    .name = "realview",
+    .desc = "ARM RealView Emulation Baseboard (ARM926EJ-S)",
+    .init = realview_init,
+    .ram_require = 0x1000,
+    .use_scsi = 1,
+    .max_cpus = 1,
 };

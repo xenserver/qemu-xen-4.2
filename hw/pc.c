@@ -35,6 +35,7 @@
 #include "exec-all.h"
 
 #include "xen_platform.h"
+#include "fw_cfg.h"
 
 /* output Bochs bios info messages */
 //#define DEBUG_BIOS
@@ -44,6 +45,10 @@
 #define VGABIOS_CIRRUS_FILENAME "vgabios-cirrus.bin"
 
 #define PC_MAX_BIOS_SIZE (4 * 1024 * 1024)
+
+/* Leave a chunk of memory at the top of RAM for the BIOS ACPI tables.  */
+#define ACPI_DATA_SIZE       0x10000
+#define BIOS_CFG_IOPORT 0x510
 
 #define MAX_IDE_BUS 2
 
@@ -82,7 +87,7 @@ uint64_t cpu_get_tsc(CPUX86State *env)
     /* Note: when using kqemu, it is more logical to return the host TSC
        because kqemu does not trap the RDTSC instruction for
        performance reasons */
-#if USE_KQEMU
+#ifdef USE_KQEMU
     if (env->kqemu_enabled) {
         return cpu_get_real_ticks();
     } else
@@ -126,13 +131,17 @@ static void pic_irq_request(void *opaque, int irq, int level)
 {
     CPUState *env = first_cpu;
 
-    if (!level)
-        return;
-
-    while (env) {
-        if (apic_accept_pic_intr(env))
-            apic_local_deliver(env, APIC_LINT0);
-        env = env->next_cpu;
+    if (env->apic_state) {
+        while (env) {
+            if (apic_accept_pic_intr(env))
+                apic_deliver_pic_intr(env, level);
+            env = env->next_cpu;
+        }
+    } else {
+        if (level)
+            cpu_interrupt(env, CPU_INTERRUPT_HARD);
+        else
+            cpu_reset_interrupt(env, CPU_INTERRUPT_HARD);
     }
 }
 #else
@@ -203,10 +212,10 @@ static int boot_device2nibble(char boot_device)
 
 /* copy/pasted from cmos_init, should be made a general function
  and used there as well */
-int pc_boot_set(const char *boot_device)
+static int pc_boot_set(void *opaque, const char *boot_device)
 {
 #define PC_MAX_BOOT_DEVICES 3
-    RTCState *s = rtc_state;
+    RTCState *s = (RTCState *)opaque;
     int nbds, bds[3] = { 0, };
     int i;
 
@@ -423,6 +432,8 @@ static void bochs_bios_write(void *opaque, uint32_t addr, uint32_t val)
 
 static void bochs_bios_init(void)
 {
+    void *fw_cfg;
+
     register_ioport_write(0x400, 1, 2, bochs_bios_write, NULL);
     register_ioport_write(0x401, 1, 2, bochs_bios_write, NULL);
     register_ioport_write(0x402, 1, 1, bochs_bios_write, NULL);
@@ -433,6 +444,10 @@ static void bochs_bios_init(void)
     register_ioport_write(0x502, 1, 2, bochs_bios_write, NULL);
     register_ioport_write(0x500, 1, 1, bochs_bios_write, NULL);
     register_ioport_write(0x503, 1, 1, bochs_bios_write, NULL);
+
+    fw_cfg = fw_cfg_init(BIOS_CFG_IOPORT, BIOS_CFG_IOPORT + 1, 0, 0);
+    fw_cfg_add_i32(fw_cfg, FW_CFG_ID, 1);
+    fw_cfg_add_i64(fw_cfg, FW_CFG_RAM_SIZE, (uint64_t)ram_size);
 }
 
 /* Generate an initial boot sector which sets state and jump to
@@ -446,7 +461,7 @@ static void generate_bootsect(uint32_t gpr[8], uint16_t segs[6], uint16_t ip)
     hda = drive_get_index(IF_IDE, 0, 0);
     if (hda == -1) {
 	fprintf(stderr, "A disk image must be given for 'hda' when booting "
-		"a Linux kernel\n");
+		"a Linux kernel\n(if you really don't want it, use /dev/zero)\n");
 	exit(1);
     }
 
@@ -579,12 +594,12 @@ static void load_linux(const char *kernel_filename,
 
 #if 1
     fprintf(stderr,
-	    "qemu: real_addr     = %#zx\n"
-	    "qemu: cmdline_addr  = %#zx\n"
-	    "qemu: prot_addr     = %#zx\n",
-	    (size_t)real_addr,
-	    (size_t)cmdline_addr,
-	    (size_t)prot_addr);
+	    "qemu: real_addr     = 0x" TARGET_FMT_plx "\n"
+	    "qemu: cmdline_addr  = 0x" TARGET_FMT_plx "\n"
+	    "qemu: prot_addr     = 0x" TARGET_FMT_plx "\n",
+	    real_addr,
+	    cmdline_addr,
+	    prot_addr);
 #endif
 
     /* Special pages are placed at end of low RAM: pick an arbitrary one and
@@ -634,10 +649,10 @@ static void load_linux(const char *kernel_filename,
 	}
 
 	initrd_size = get_file_size(fi);
-	initrd_addr = ((initrd_max-initrd_size) & ~4095);
+	initrd_addr = (initrd_max-initrd_size) & ~4095;
 
-	fprintf(stderr, "qemu: loading initrd (%#x bytes) at %#zx\n",
-		initrd_size, (size_t)initrd_addr);
+        fprintf(stderr, "qemu: loading initrd (%#x bytes) at 0x" TARGET_FMT_plx
+                "\n", initrd_size, initrd_addr);
 
 	if (!fread_targphys_ok(initrd_addr, initrd_size, fi)) {
 	    fprintf(stderr, "qemu: read error on initial ram disk '%s'\n",
@@ -776,8 +791,6 @@ static void pc_init1(ram_addr_t ram_size, int vga_ram_size,
         below_4g_mem_size = ram_size;
     }
 
-    qemu_register_boot_set(pc_boot_set);
-
     linux_boot = (kernel_filename != NULL);
 
     /* init CPUs */
@@ -797,13 +810,12 @@ static void pc_init1(ram_addr_t ram_size, int vga_ram_size,
         }
 #ifndef CONFIG_DM
         if (i != 0)
-            env->hflags |= HF_HALTED_MASK;
+            env->halted = 1;
         if (smp_cpus > 1) {
             /* XXX: enable it in all cases */
             env->cpuid_features |= CPUID_APIC;
         }
 #endif /* !CONFIG_DM */
-        register_savevm("cpu", i, 4, cpu_save, cpu_load, env);
         qemu_register_reset(main_cpu_reset, env);
         if (pci_enabled) {
             apic_init(env);
@@ -814,14 +826,27 @@ static void pc_init1(ram_addr_t ram_size, int vga_ram_size,
 
 #ifndef CONFIG_DM
     /* allocate RAM */
-    ram_addr = qemu_ram_alloc(ram_size);
-    cpu_register_physical_memory(0, below_4g_mem_size, ram_addr);
+    ram_addr = qemu_ram_alloc(0xa0000);
+    cpu_register_physical_memory(0, 0xa0000, ram_addr);
+
+    /* Allocate, even though we won't register, so we don't break the
+     * phys_ram_base + PA assumption. This range includes vga (0xa0000 - 0xc0000),
+     * and some bios areas, which will be registered later
+     */
+    ram_addr = qemu_ram_alloc(0x100000 - 0xa0000);
+    ram_addr = qemu_ram_alloc(below_4g_mem_size - 0x100000);
+    cpu_register_physical_memory(0x100000,
+                 below_4g_mem_size - 0x100000,
+                 ram_addr);
 
     /* above 4giga memory allocation */
     if (above_4g_mem_size > 0) {
-        cpu_register_physical_memory(0x100000000ULL, above_4g_mem_size,
-                                     ram_addr + below_4g_mem_size);
+        ram_addr = qemu_ram_alloc(above_4g_mem_size);
+        cpu_register_physical_memory(0x100000000ULL,
+                                     above_4g_mem_size,
+                                     ram_addr);
     }
+
 
     /* allocate VGA RAM */
     vga_ram_addr = qemu_ram_alloc(vga_ram_size);
@@ -972,6 +997,8 @@ static void pc_init1(ram_addr_t ram_size, int vga_ram_size,
 #endif
 
     rtc_state = rtc_init(0x70, i8259[8]);
+
+    qemu_register_boot_set(pc_boot_set, rtc_state);
 
     register_ioport_read(0x92, 1, 1, ioport92_read, NULL);
     register_ioport_write(0x92, 1, 1, ioport92_write, NULL);
@@ -1156,17 +1183,19 @@ void cmos_set_s3_resume(void)
 }
 
 QEMUMachine pc_machine = {
-    "pc",
-    "Standard PC",
-    pc_init_pci,
-    VGA_RAM_SIZE + PC_MAX_BIOS_SIZE,
+    .name = "pc",
+    .desc = "Standard PC",
+    .init = pc_init_pci,
+    .ram_require = VGA_RAM_SIZE + PC_MAX_BIOS_SIZE,
+    .max_cpus = 255,
 };
 
 QEMUMachine isapc_machine = {
-    "isapc",
-    "ISA-only PC",
-    pc_init_isa,
-    VGA_RAM_SIZE + PC_MAX_BIOS_SIZE,
+    .name = "isapc",
+    .desc = "ISA-only PC",
+    .init = pc_init_isa,
+    .ram_require = VGA_RAM_SIZE + PC_MAX_BIOS_SIZE,
+    .max_cpus = 1,
 };
 
 

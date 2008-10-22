@@ -53,7 +53,7 @@ struct omap_dss_s {
         uint32_t control;
         uint32_t config;
         uint32_t capable;
-        uint32_t timing[3];
+        uint32_t timing[4];
         int line;
         uint32_t bg[2];
         uint32_t trans[2];
@@ -148,6 +148,7 @@ void omap_dss_reset(struct omap_dss_s *s)
     s->dispc.timing[0] = 0;
     s->dispc.timing[1] = 0;
     s->dispc.timing[2] = 0;
+    s->dispc.timing[3] = 0;
     s->dispc.line = 0;
     s->dispc.bg[0] = 0;
     s->dispc.bg[1] = 0;
@@ -1059,13 +1060,13 @@ struct omap_dss_s *omap_dss_init(struct omap_target_agent_s *ta,
     s->state = ds;
     omap_dss_reset(s);
 
-    iomemtype[0] = cpu_register_io_memory(0, omap_diss1_readfn,
+    iomemtype[0] = l4_register_io_memory(0, omap_diss1_readfn,
                     omap_diss1_writefn, s);
-    iomemtype[1] = cpu_register_io_memory(0, omap_disc1_readfn,
+    iomemtype[1] = l4_register_io_memory(0, omap_disc1_readfn,
                     omap_disc1_writefn, s);
-    iomemtype[2] = cpu_register_io_memory(0, omap_rfbi1_readfn,
+    iomemtype[2] = l4_register_io_memory(0, omap_rfbi1_readfn,
                     omap_rfbi1_writefn, s);
-    iomemtype[3] = cpu_register_io_memory(0, omap_venc1_readfn,
+    iomemtype[3] = l4_register_io_memory(0, omap_venc1_readfn,
                     omap_venc1_writefn, s);
     iomemtype[4] = cpu_register_io_memory(0, omap_im3_readfn,
                     omap_im3_writefn, s);
