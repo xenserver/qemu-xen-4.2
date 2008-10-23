@@ -694,7 +694,8 @@ static int token_value(char *token)
 
 static int next_bdf(char **str, int *seg, int *bus, int *dev, int *func)
 {
-    char *token, *delim = ":.-";
+    char *token;
+    const char *delim = ":.-";
 
     if ( !(*str) ||
           ( !strchr(*str, ':') && !strchr(*str, '.')) )
@@ -767,7 +768,8 @@ found:
 int insert_to_pci_slot(char *bdf_slt)
 {
     int seg, bus, dev, func, slot;
-    char *bdf_str, *slt_str, *delim="@";
+    char *bdf_str, *slt_str;
+    const char *delim="@";
 
     bdf_str = strsep(&bdf_slt, delim);
     slt_str = bdf_slt;
