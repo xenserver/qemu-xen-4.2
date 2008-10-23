@@ -24,7 +24,11 @@
 #include "sysemu.h"
 #include "net.h"
 
-#ifndef _WIN32
+#ifdef _WIN32
+#define NO_BLUETOOTH_PASSTHROUGH
+#endif
+
+#ifndef NO_BLUETOOTH_PASSTHROUGH
 # include <errno.h>
 # include <sys/ioctl.h>
 # include <sys/uio.h>
