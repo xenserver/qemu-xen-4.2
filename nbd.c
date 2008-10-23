@@ -32,6 +32,8 @@
 
 #include "qemu_socket.h"
 
+#ifndef CONFIG_STUBDOM
+
 //#define DEBUG_NBD
 
 #ifdef DEBUG_NBD
@@ -659,3 +661,5 @@ int nbd_trip(BlockDriverState *bs, int csock, off_t size, uint64_t dev_offset,
 
 	return 0;
 }
+
+#endif

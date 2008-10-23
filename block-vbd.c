@@ -23,7 +23,7 @@
  * THE SOFTWARE.
  */
 #include "qemu-common.h"
-#include "audio/sys-queue.h"
+#include "sys-queue.h"
 #include "block_int.h"
 #include <assert.h>
 #include <xenbus.h>
@@ -106,20 +106,12 @@ void qemu_aio_init(void)
 {
 }
 
-void qemu_aio_poll(void)
-{
-}
-
 /* Wait for all IO requests to complete.  */
 void qemu_aio_flush(void)
 {
     BDRVVbdState *s;
     for (s = vbds.lh_first; s; s = s->list.le_next)
 	blkfront_sync(s->dev);
-}
-
-void qemu_aio_wait_start(void)
-{
 }
 
 void qemu_aio_wait(void)
@@ -137,10 +129,6 @@ void qemu_aio_wait(void)
 	schedule();
     }
     remove_waiter(w);
-}
-
-void qemu_aio_wait_end(void)
-{
 }
 
 static void vbd_aio_callback(struct blkfront_aiocb *aiocbp, int ret) {
@@ -208,12 +196,10 @@ static int vbd_aligned_io(BlockDriverState *bs,
     VbdAIOCB *acb;
     int result[2];
     result[0] = 0;
-    qemu_aio_wait_start();
     acb = vbd_aio_setup(bs, sector_num, (uint8_t*) buf, nb_sectors, vbd_cb, &result);
     blkfront_aio(&acb->aiocb, write);
     while (!result[0])
 	qemu_aio_wait();
-    qemu_aio_wait_end();
     return result[1];
 }
 

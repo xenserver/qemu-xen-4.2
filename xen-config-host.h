@@ -1,7 +1,8 @@
 #ifdef __MINIOS__
 #define CONFIG_STUBDOM
-#define NO_AIO 1
+#undef CONFIG_AIO
 #define NO_UNIX_SOCKETS 1
+#define NO_BLUETOOTH_PASSTHROUGH 1
 #endif
 
 extern char domain_name[64];

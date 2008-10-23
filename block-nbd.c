@@ -29,6 +29,8 @@
 #include "qemu-common.h"
 #include "nbd.h"
 
+#ifndef CONFIG_STUBDOM
+
 #include <sys/types.h>
 #include <unistd.h>
 
@@ -187,3 +189,5 @@ BlockDriver bdrv_nbd = {
     .bdrv_getlength = nbd_getlength,
     .protocol_name = "nbd",
 };
+
+#endif

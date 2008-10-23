@@ -16,6 +16,8 @@
 #include "sys-queue.h"
 #include "qemu_socket.h"
 
+#ifndef CONFIG_STUBDOM
+
 typedef struct AioHandler AioHandler;
 
 /* The list of registered AIO handlers */
@@ -193,3 +195,5 @@ void qemu_aio_wait(void)
         }
     } while (ret == 0);
 }
+
+#endif
