@@ -32,6 +32,8 @@
 #include "isa.h" //register_ioport_read declaration
 #include "battery_mgmt.h"
 
+#ifndef CONFIG_NO_BATTERY_MGMT
+
 #include <sys/io.h>
 
 //#define BATTERY_MGMT_DEBUG
@@ -295,3 +297,8 @@ void battery_mgmt_init(PCIDevice *device)
 #endif    
 }
 
+#else
+
+void battery_mgmt_init(PCIDevice *device) { }
+
+#endif
