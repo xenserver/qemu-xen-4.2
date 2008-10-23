@@ -1115,7 +1115,7 @@ static char *xenstore_vm_key_path(int domid, char *key) {
     return buf;
 }
 
-char *xenstore_vm_read(int domid, char *key, unsigned int *len)
+char *xenstore_vm_read(int domid, const char *key, unsigned int *len)
 {
     char *path = NULL, *value = NULL;
 
@@ -1132,7 +1132,7 @@ char *xenstore_vm_read(int domid, char *key, unsigned int *len)
     return value;
 }
 
-int xenstore_vm_write(int domid, char *key, char *value)
+int xenstore_vm_write(int domid, const char *key, const char *value)
 {
     char *path = NULL;
     int rc = -1;
