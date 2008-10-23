@@ -1190,7 +1190,7 @@ int xenstore_extended_power_mgmt_write(char * key, char * value)
     char *path = NULL;
     
     if (pasprintf(&path, "/pm/%s", key) == -1)
-        return NULL;
+        return -1;
 
     ret = xs_write(xsh, XBT_NULL, path, value, strlen(value));
     free(path);
@@ -1203,7 +1203,7 @@ int xenstore_extended_power_mgmt_event_trigger(char *key, char * value)
     char *path = NULL;
     
     if (pasprintf(&path, "events/%s", key) == -1)
-        return NULL;
+        return -1;
 
     ret = xenstore_extended_power_mgmt_write(path, value);
     free(path);
@@ -1230,7 +1230,7 @@ char *xenstore_read_battery_data(int battery_status)
  * Xen power management daemon watches for changes to this
  * entry and triggers a refresh.   
  */
-int xenstore_refresh_battery_status()
+int xenstore_refresh_battery_status(void)
 {
     return xenstore_extended_power_mgmt_event_trigger("refreshbatterystatus", "1");
 }
