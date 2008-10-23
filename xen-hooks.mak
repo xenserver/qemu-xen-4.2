@@ -33,6 +33,7 @@ OBJS += xen_machine_fv.o
 OBJS += exec-dm.o
 OBJS += pci_emulation.o
 OBJS += helper2.o
+OBJS += battery_mgmt.o
 
 ifdef CONFIG_STUBDOM
 CPPFLAGS += $(TARGET_CPPFLAGS)
