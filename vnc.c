@@ -352,8 +352,8 @@ static void vnc_dpy_update(DisplayState *ds, int x, int y, int w, int h)
 
     x = MIN(x, vs->width);
     y = MIN(y, vs->height);
-    w = MIN(x, vs->width - x);
-    h = MIN(h, vs->height);
+    w = MIN(w, vs->width - x);
+    h = MIN(h, vs->height - y);
 
     set_bits_in_row(vs, vs->dirty_row, x, y, w, h);
 }
@@ -1485,12 +1485,75 @@ static void framebuffer_update_request(VncState *vs, int incremental,
 				       int x_position, int y_position,
 				       int w, int h)
 {
-    if (!incremental)
+    int last_visible_xmin = vs->visible_x;
+    int last_visible_ymin = vs->visible_y;
+    int last_visible_xmax = vs->visible_w + vs->visible_x;
+    int last_visible_ymax = vs->visible_h + vs->visible_y;
+
+    if (!incremental) {
 	framebuffer_set_updated(vs, x_position, y_position, w, h);
-    vs->visible_x = x_position;
-    vs->visible_y = y_position;
-    vs->visible_w = w;
-    vs->visible_h = h;
+
+        /* The spec is unclear about the semantics of several update
+         * requests with various different regions.  Some clients (eg
+         * tightvnc 1.3.9-4 as in etch) send a number of small
+         * nonincremental requests for areas they have lost, followed
+         * by a large incremental one.
+         *
+         * Our code will throw away the `modified' bits for areas
+         * outside our idea of the client's visible area, and redraw
+         * them if that idea grows again.  So any client which sends
+         * many sequential requests in this way will end up with
+         * some pointless retransmissions.
+         *
+         * So what we do here is a bit of a workaround: we avoid
+         * shrinking the visible window on a nonincremental update.
+         * We assume that a client's incremental update specifies a
+         * new visible area (possibly shrinking) but a nonincremental
+         * one may only grow it.  Hopefully the client which has
+         * really had its visible area reduced will shortly send us an
+         * incremental update request.
+         */
+        vs->visible_x = MIN(last_visible_xmin, x_position);
+        vs->visible_y = MIN(last_visible_ymin, y_position);
+        vs->visible_w = MAX(last_visible_xmax, x_position + w) - vs->visible_x;
+        vs->visible_h = MAX(last_visible_ymax, y_position + h) - vs->visible_y;
+    } else {
+        vs->visible_x = x_position;
+        vs->visible_y = y_position;
+        vs->visible_w = w;
+        vs->visible_h = h;
+    }
+
+    /* Now if the visible area has increased, we may have thrown
+     * away earlier updates to the just-added area, or perhaps
+     * client has mistakenly requested an incremental update.
+     */
+    if (vs->visible_y < last_visible_ymin) /* top edge moved up */
+        framebuffer_set_updated(vs,
+                                vs->visible_x,
+                                vs->visible_y,
+                                vs->visible_w,
+                                last_visible_ymin - vs->visible_y);
+    if (vs->visible_x < last_visible_xmin) /* left edge moved left */
+        framebuffer_set_updated(vs,
+                                vs->visible_x,
+                                vs->visible_y,
+                                last_visible_xmin - vs->visible_x,
+                                vs->visible_h);
+    int new_visible_ymax= vs->visible_y + vs->visible_h;
+    if (new_visible_ymax > last_visible_ymax) /* bottom edge moved down */
+        framebuffer_set_updated(vs,
+                                vs->visible_x,
+                                last_visible_ymax,
+                                vs->visible_w,
+                                new_visible_ymax - last_visible_ymax);
+    int new_visible_xmax= vs->visible_x + vs->visible_w;
+    if (new_visible_xmax > last_visible_xmax) /* right edge moved right */
+        framebuffer_set_updated(vs,
+                                last_visible_xmax,
+                                vs->visible_y,
+                                new_visible_xmax - last_visible_xmax,
+                                vs->visible_h);
 
     vs->update_requested++;
     qemu_mod_timer(vs->timer, qemu_get_clock(rt_clock));
