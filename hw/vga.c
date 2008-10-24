@@ -26,15 +26,13 @@
 #include "pc.h"
 #include "pci.h"
 #include "vga_int.h"
-//<<<<<<< HEAD/hw/vga.c
+
 #include <sys/mman.h>
 #include "sysemu.h"
 #include "qemu-xen.h"
 #include "exec-all.h"
-//=======
-//#include "pixel_ops.h"
+
 #include "qemu-timer.h"
-//>>>>>>> 3df1a17b0ab8a8be4e3c9d6b2fa0812c652520f1/hw/vga.c
 
 //#define DEBUG_VGA
 //#define DEBUG_VGA_MEM
