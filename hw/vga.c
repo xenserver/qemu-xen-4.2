@@ -2402,6 +2402,7 @@ void xen_vga_vram_map(uint64_t vram_addr, int copy)
     xen_pfn_t *pfn_list;
     int i;
     void *vram;
+    DisplayState *ds;
 
     fprintf(logfile, "mapping video RAM from %llx\n",
 	    (unsigned long long)vram_addr);
@@ -2443,6 +2444,10 @@ void xen_vga_vram_map(uint64_t vram_addr, int copy)
 #ifdef CONFIG_STUBDOM
     xenfb_pv_display_start(vram);
 #endif
+    /* If some display is already working, we need to update it now */
+    ds= xen_vga_state->ds;
+    if (ds) 
+        dpy_update(ds, 0,0, ds->width,ds->height);
 }
 
 /* Called at boot time when the BIOS has allocated video RAM */
