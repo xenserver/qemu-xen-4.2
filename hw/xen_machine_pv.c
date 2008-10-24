@@ -78,6 +78,7 @@ QEMUMachine xenpv_machine = {
     "Xen Para-virtualized PC",
     xen_init_pv,
     (VGA_RAM_SIZE + BIOS_SIZE) | RAMSIZE_FIXED,
+    .max_cpus = 1,
 };
 
 /*
