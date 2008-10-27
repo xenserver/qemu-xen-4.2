@@ -7376,7 +7376,7 @@ void do_info_snapshots(void)
 /* ram save/restore */
 
 #ifdef CONFIG_DM
-static int ram_save_live(QEMUFile *f, int stage, void *opaque) { return 0; }
+static int ram_save_live(QEMUFile *f, int stage, void *opaque) { return 1; }
 static int ram_load(QEMUFile *f, void *opaque, int version_id) { return 0; }
 #else /* !CONFIG_DM */
 
