@@ -687,6 +687,9 @@ static int uhci_complete_td(UHCIState *s, UHCI_TD *td, UHCIAsync *async, uint32_
 
     ret = async->packet.len;
 
+    if (td->ctrl & TD_CTRL_IOC)
+        *int_mask |= 0x01;
+
     if (td->ctrl & TD_CTRL_IOS)
         td->ctrl &= ~TD_CTRL_ACTIVE;
 
@@ -717,36 +720,31 @@ static int uhci_complete_td(UHCIState *s, UHCI_TD *td, UHCIAsync *async, uint32_
             *int_mask |= 0x02;
             /* short packet: do not update QH */
             dprintf("uhci: short packet. td 0x%x token 0x%x\n", async->td, async->token);
-            ret = 1;
-	    goto out_update_ioc;
+            return 1;
         }
     }
 
     /* success */
-    ret = 0;
-    goto out_update_ioc;
+    return 0;
 
 out:
     switch(ret) {
     case USB_RET_STALL:
         td->ctrl |= TD_CTRL_STALL;
         td->ctrl &= ~TD_CTRL_ACTIVE;
-        ret = 1;
-        goto out_update_ioc;
+        return 1;
 
     case USB_RET_BABBLE:
         td->ctrl |= TD_CTRL_BABBLE | TD_CTRL_STALL;
         td->ctrl &= ~TD_CTRL_ACTIVE;
         /* frame interrupted */
-        ret = -1;
-        goto out_update_ioc;
+        return -1;
 
     case USB_RET_NAK:
         td->ctrl |= TD_CTRL_NAK;
         if (pid == USB_TOKEN_SETUP)
             break;
-	ret = 1;
-        goto out_update_ioc;
+	return 1;
 
     case USB_RET_NODEV:
     default:
@@ -767,12 +765,7 @@ out:
     }
     td->ctrl = (td->ctrl & ~(3 << TD_CTRL_ERROR_SHIFT)) |
         (err << TD_CTRL_ERROR_SHIFT);
-    ret = 1;
-
- out_update_ioc:
-    if ((td->ctrl & TD_CTRL_IOC) && !(td->ctrl &= ~TD_CTRL_ACTIVE))
-        *int_mask |= 0x01;
-    return ret;
+    return 1;
 }
 
 static int uhci_handle_td(UHCIState *s, uint32_t addr, UHCI_TD *td, uint32_t *int_mask)
