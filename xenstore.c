@@ -1120,6 +1120,8 @@ char *xenstore_vm_read(int domid, const char *key, unsigned int *len)
     char *path = NULL, *value = NULL;
 
     path = xenstore_vm_key_path(domid, key);
+    if (!path)
+        return NULL;
 
     value = xs_read(xsh, XBT_NULL, path, len);
     if (value == NULL) {
