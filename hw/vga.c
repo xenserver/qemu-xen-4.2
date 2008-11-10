@@ -2493,7 +2493,7 @@ void vga_common_init(VGAState *s, DisplayState *ds, uint8_t *vga_ram_base,
 
     vga_reset(s);
 
-    s->vram_ptr = qemu_malloc(vga_ram_size);
+    s->vram_ptr = qemu_mallocz(vga_ram_size);
     s->vram_mfns = NULL;
     xen_vga_state = s;
 
@@ -2652,7 +2652,7 @@ static void vga_save_dpy_update(DisplayState *s,
 static void vga_save_dpy_resize(DisplayState *s, int w, int h)
 {
     s->linesize = w * 4;
-    s->data = qemu_malloc(h * s->linesize);
+    s->data = qemu_mallocz(h * s->linesize);
     vga_save_w = w;
     vga_save_h = h;
 }
