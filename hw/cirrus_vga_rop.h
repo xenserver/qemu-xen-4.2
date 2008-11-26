@@ -94,19 +94,25 @@ glue(cirrus_bitblt_rop_bkwd_, ROP_NAME)(CirrusVGAState *s,
 
 static void
 glue(glue(cirrus_bitblt_rop_fwd_transp_, ROP_NAME),_8)(CirrusVGAState *s,
-						       uint8_t *dst,const uint8_t *src,
+						       uint8_t *dst_,const uint8_t *src_,
 						       int dstpitch,int srcpitch,
 						       int bltwidth,int bltheight)
 {
     int x,y;
     uint8_t p;
+    uint32_t dst, src;
+    uint8_t *dst_base, *src_base;
+    get_base(dst_, s, dst_base);
+    get_base(src_, s, src_base);
+    dst = dst_ - dst_base;
+    src = src_ - src_base;
     dstpitch -= bltwidth;
     srcpitch -= bltwidth;
     for (y = 0; y < bltheight; y++) {
         for (x = 0; x < bltwidth; x++) {
-	    p = *dst;
-            ROP_OP(p, *src);
-	    if (p != s->gr[0x34]) *dst = p;
+	    p = *(dst_base + m(dst));
+            ROP_OP(p, *(src_base + m(src)));
+	    if (p != s->gr[0x34]) *(dst_base + m(dst)) = p;
             dst++;
             src++;
         }
@@ -117,19 +123,25 @@ glue(glue(cirrus_bitblt_rop_fwd_transp_, ROP_NAME),_8)(CirrusVGAState *s,
 
 static void
 glue(glue(cirrus_bitblt_rop_bkwd_transp_, ROP_NAME),_8)(CirrusVGAState *s,
-							uint8_t *dst,const uint8_t *src,
+							uint8_t *dst_,const uint8_t *src_,
 							int dstpitch,int srcpitch,
 							int bltwidth,int bltheight)
 {
     int x,y;
     uint8_t p;
+    uint32_t dst, src;
+    uint8_t *dst_base, *src_base;
+    get_base(dst_, s, dst_base);
+    get_base(src_, s, src_base);
+    dst = dst_ - dst_base;
+    src = src_ - src_base;
     dstpitch += bltwidth;
     srcpitch += bltwidth;
     for (y = 0; y < bltheight; y++) {
         for (x = 0; x < bltwidth; x++) {
-	    p = *dst;
-            ROP_OP(p, *src);
-	    if (p != s->gr[0x34]) *dst = p;
+	    p = *(dst_base + m(dst));
+            ROP_OP(p, *(src_base + m(src)));
+	    if (p != s->gr[0x34]) *(dst_base + m(dst)) = p;
             dst--;
             src--;
         }
@@ -140,23 +152,29 @@ glue(glue(cirrus_bitblt_rop_bkwd_transp_, ROP_NAME),_8)(CirrusVGAState *s,
 
 static void
 glue(glue(cirrus_bitblt_rop_fwd_transp_, ROP_NAME),_16)(CirrusVGAState *s,
-							uint8_t *dst,const uint8_t *src,
+							uint8_t *dst_,const uint8_t *src_,
 							int dstpitch,int srcpitch,
 							int bltwidth,int bltheight)
 {
     int x,y;
     uint8_t p1, p2;
+    uint32_t dst, src;
+    uint8_t *dst_base, *src_base;
+    get_base(dst_, s, dst_base);
+    get_base(src_, s, src_base);
+    dst = dst_ - dst_base;
+    src = src_ - src_base;
     dstpitch -= bltwidth;
     srcpitch -= bltwidth;
     for (y = 0; y < bltheight; y++) {
         for (x = 0; x < bltwidth; x+=2) {
-	    p1 = *dst;
-	    p2 = *(dst+1);
-            ROP_OP(p1, *src);
-            ROP_OP(p2, *(src+1));
+	    p1 = *(dst_base + m(dst));
+	    p2 = *(dst_base + m(dst+1));
+            ROP_OP(p1, *(src_base + m(src)));
+            ROP_OP(p2, *(src_base + m(src+1)));
 	    if ((p1 != s->gr[0x34]) || (p2 != s->gr[0x35])) {
-		*dst = p1;
-		*(dst+1) = p2;
+		*(dst_base + m(dst)) = p1;
+		*(dst_base + m(dst+1)) = p2;
 	    }
             dst+=2;
             src+=2;
@@ -168,23 +186,29 @@ glue(glue(cirrus_bitblt_rop_fwd_transp_, ROP_NAME),_16)(CirrusVGAState *s,
 
 static void
 glue(glue(cirrus_bitblt_rop_bkwd_transp_, ROP_NAME),_16)(CirrusVGAState *s,
-							 uint8_t *dst,const uint8_t *src,
+							 uint8_t *dst_,const uint8_t *src_,
 							 int dstpitch,int srcpitch,
 							 int bltwidth,int bltheight)
 {
     int x,y;
     uint8_t p1, p2;
+    uint32_t dst, src;
+    uint8_t *dst_base, *src_base;
+    get_base(dst_, s, dst_base);
+    get_base(src_, s, src_base);
+    dst = dst_ - dst_base;
+    src = src_ - src_base;
     dstpitch += bltwidth;
     srcpitch += bltwidth;
     for (y = 0; y < bltheight; y++) {
         for (x = 0; x < bltwidth; x+=2) {
-	    p1 = *(dst-1);
-	    p2 = *dst;
-            ROP_OP(p1, *(src-1));
-            ROP_OP(p2, *src);
+	    p1 = *(dst_base + m(dst-1));
+	    p2 = *(dst_base + m(dst));
+            ROP_OP(p1, *(src_base + m(src-1)));
+            ROP_OP(p2, *(src_base + m(src)));
 	    if ((p1 != s->gr[0x34]) || (p2 != s->gr[0x35])) {
-		*(dst-1) = p1;
-		*dst = p2;
+		*(dst_base + m(dst-1)) = p1;
+		*(dst_base + m(dst)) = p2;
 	    }
             dst-=2;
             src-=2;
