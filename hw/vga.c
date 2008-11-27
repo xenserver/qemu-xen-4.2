@@ -1736,7 +1736,7 @@ static void vga_draw_graphic(VGAState *s, int full_update)
                 /* ENODATA just means we have changed mode and will succeed
                  * next time */
                 if (errno != ENODATA)
-                    fprintf(stderr, "track_dirty_vram(%lx, %lx) failed (%d, %d)\n", s->lfb_addr + y, npages, err, errno);
+                    fprintf(stderr, "track_dirty_vram(%lx, %lx) failed (%d, %d)\n", (unsigned long)s->lfb_addr + y, npages, err, errno);
             }
         }
 
