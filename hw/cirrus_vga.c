@@ -3159,12 +3159,12 @@ static void cirrus_vga_save(QEMUFile *f, void *opaque)
 
     vga_acc = (!!s->map_addr);
     qemu_put_8s(f, &vga_acc);
+    /* XXX old versions saved rubbish here, keeping for compatibility */
+    qemu_put_be32(f, 0xffffffff);
     qemu_put_be32(f, s->lfb_addr);
     /* XXX old versions saved rubbish here, keeping for compatibility */
     qemu_put_be32(f, 0xffffffff);
     qemu_put_be32(f, s->lfb_end);
-    /* XXX old versions saved rubbish here, keeping for compatibility */
-    qemu_put_be32(f, 0xffffffff);
     qemu_put_be64s(f, &s->stolen_vram_addr);
     if (!s->stolen_vram_addr && !vga_acc)
         /* Old guest: VRAM is not mapped, we have to save it ourselves */
@@ -3221,12 +3221,12 @@ static int cirrus_vga_load(QEMUFile *f, void *opaque, int version_id)
     qemu_get_be32s(f, &s->hw_cursor_y);
 
     qemu_get_8s(f, &vga_acc);
+    /* XXX throwing away 32 bits */
+    qemu_get_be32(f);
     qemu_get_be32s(f, &s->lfb_addr);
     /* XXX throwing away 32 bits */
     qemu_get_be32(f);
     qemu_get_be32s(f, &s->lfb_end);
-    /* XXX throwing away 32 bits */
-    qemu_get_be32(f);
     if (version_id >= 3) {
         qemu_get_be64s(f, &s->stolen_vram_addr);
         if (!s->stolen_vram_addr && !vga_acc) {
