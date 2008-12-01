@@ -1119,8 +1119,6 @@ static void ide_read_dma_cb(void *opaque, int ret)
 
     if (!s->bs) return; /* ouch! (see ide_flush_cb) */
 
-    if (!s->bs) return; /* yikes */
-
     n = s->io_buffer_size >> 9;
     sector_num = ide_get_sector(s);
     if (n > 0) {
@@ -1247,8 +1245,6 @@ static void ide_write_dma_cb(void *opaque, int ret)
 
     if (!s->bs) return; /* ouch! (see ide_flush_cb) */
 
-    if (!s->bs) return; /* yikes */
-
     n = s->io_buffer_size >> 9;
     sector_num = ide_get_sector(s);
     if (n > 0) {
@@ -1308,7 +1304,7 @@ static void ide_flush_cb(void *opaque, int ret)
 {
     IDEState *s = opaque;
 
-    if (!s->bs) return; /* ouch! (see ide_flush_cb) */
+    if (!s->bs) return; /* ouch! (see below) */
 
     if (ret) {
         /* We are completely doomed.  The IDE spec does not permit us
@@ -1555,8 +1551,6 @@ static void ide_atapi_cmd_read_dma_cb(void *opaque, int ret)
     int data_offset, n;
 
     if (!s->bs) return; /* ouch! (see ide_flush_cb) */
-
-    if (!s->bs) return; /* yikes */
 
     if (ret < 0) {
         ide_atapi_io_error(s, ret);
@@ -2223,8 +2217,6 @@ static void cdrom_change_cb(void *opaque)
     uint64_t nb_sectors;
 
     if (!s->bs) return; /* ouch! (see ide_flush_cb) */
-
-    if (!s->bs) return; /* yikes */
 
     /* XXX: send interrupt too */
     bdrv_get_geometry(s->bs, &nb_sectors);
