@@ -8372,6 +8372,8 @@ static void help(int exitcode)
            "-no-kqemu       disable KQEMU kernel module usage\n"
 #endif
 #ifdef TARGET_I386
+           "-std-vga        simulate a standard VGA card with VESA Bochs Extensions\n"
+           "                (default is CL-GD5446 PCI VGA)\n"
            "-no-acpi        disable ACPI\n"
 #endif
 #ifdef CONFIG_CURSES
@@ -8465,6 +8467,7 @@ enum {
     QEMU_OPTION_localtime,
     QEMU_OPTION_g,
     QEMU_OPTION_vga,
+    QEMU_OPTION_std_vga,
     QEMU_OPTION_echr,
     QEMU_OPTION_monitor,
     QEMU_OPTION_domainname,
@@ -8576,6 +8579,7 @@ static const QEMUOption qemu_options[] = {
     { "g", 1, QEMU_OPTION_g },
 #endif
     { "localtime", 0, QEMU_OPTION_localtime },
+    { "std-vga", 0, QEMU_OPTION_std_vga },
     { "vga", HAS_ARG, QEMU_OPTION_vga },
     { "echr", HAS_ARG, QEMU_OPTION_echr },
     { "monitor", HAS_ARG, QEMU_OPTION_monitor },
@@ -9350,6 +9354,10 @@ int main(int argc, char **argv)
 		break;
             case QEMU_OPTION_localtime:
                 rtc_utc = 0;
+                break;
+            case QEMU_OPTION_std_vga:
+                cirrus_vga_enabled = 0;
+                vmsvga_enabled = 0;
                 break;
             case QEMU_OPTION_vga:
                 select_vgahw (optarg);
