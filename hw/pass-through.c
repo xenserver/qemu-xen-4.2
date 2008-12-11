@@ -1405,6 +1405,15 @@ static int pt_register_regions(struct pt_dev *assigned_device)
     /* Register expansion ROM address */
     if ( pci_dev->rom_base_addr && pci_dev->rom_size )
     {
+
+        /* Re-set BAR reported by OS, otherwise ROM can't be read. */
+        bar_data = pci_read_long(pci_dev, PCI_ROM_ADDRESS);
+        if ( (bar_data & PCI_ROM_ADDRESS_MASK) == 0 )
+        {
+            bar_data |= (pci_dev->rom_base_addr & PCI_ROM_ADDRESS_MASK);
+            pci_write_long(pci_dev, PCI_ROM_ADDRESS, bar_data);
+        }
+
         assigned_device->bases[PCI_ROM_SLOT].e_physbase =
             pci_dev->rom_base_addr;
         assigned_device->bases[PCI_ROM_SLOT].access.maddr =
