@@ -570,6 +570,7 @@ static void aio_signal_handler(int signum)
 static int posix_aio_init(void)
 {
     struct sigaction act;
+    sigset_t enable;
     PosixAioState *s;
     int fds[2];
   
@@ -580,6 +581,12 @@ static int posix_aio_init(void)
     if (s == NULL)
         return -ENOMEM;
 
+    /* under some circumstances on Centos 4.3 (at least)
+     * SIGUSR2 is mistakenly blocked, which breaks badly */
+    sigemptyset(&enable);
+    sigaddset(&enable,SIGUSR1);
+    sigprocmask(SIG_UNBLOCK,&enable,0);
+    
     sigfillset(&act.sa_mask);
     act.sa_flags = 0; /* do not restart syscalls to interrupt select() */
     act.sa_handler = aio_signal_handler;
