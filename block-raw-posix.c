@@ -584,7 +584,7 @@ static int posix_aio_init(void)
     /* under some circumstances on Centos 4.3 (at least)
      * SIGUSR2 is mistakenly blocked, which breaks badly */
     sigemptyset(&enable);
-    sigaddset(&enable,SIGUSR1);
+    sigaddset(&enable,SIGUSR2);
     sigprocmask(SIG_UNBLOCK,&enable,0);
     
     sigfillset(&act.sa_mask);
