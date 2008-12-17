@@ -592,10 +592,6 @@ int xenstore_fd(void)
 
 void xenstore_process_logdirty_event(void)
 {
-#ifdef CONFIG_STUBDOM
-    /* XXX we just can't use shm. */
-    return;
-#else
     char *act;
     static char *active_path = NULL;
     static char *next_active_path = NULL;
@@ -623,6 +619,10 @@ void xenstore_process_logdirty_event(void)
             /* No key yet: wait for the next watch */
             return;
 
+#ifdef CONFIG_STUBDOM
+        /* We pass the writes to hypervisor */
+        seg = (void*)1;
+#else
         strncpy(key_terminated, key_ascii, 16);
         free(key_ascii);
         key = (key_t) strtoull(key_terminated, NULL, 16);
@@ -662,6 +662,7 @@ void xenstore_process_logdirty_event(void)
             seg = NULL;
             return;
         }
+#endif
 
         /* Remember the paths for the next-active and active entries */
         if (pasprintf(&active_path, 
@@ -698,7 +699,6 @@ void xenstore_process_logdirty_event(void)
     /* Ack that we've switched */
     xs_write(xsh, XBT_NULL, active_path, act, len);
     free(act);
-#endif
 }
 
 
