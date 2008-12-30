@@ -8885,7 +8885,11 @@ static void termsig_setup(void)
     struct sigaction act;
 
     memset(&act, 0, sizeof(act));
+#ifndef CONFIG_DM
     act.sa_handler = termsig_handler;
+#else
+    act.sa_handler = SIG_DFL;
+#endif
     sigaction(SIGINT,  &act, NULL);
     sigaction(SIGHUP,  &act, NULL);
     sigaction(SIGTERM, &act, NULL);
