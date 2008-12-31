@@ -787,9 +787,17 @@ xenstore_pv_driver_build_blacklisted(uint16_t product_nr,
     const char *product;
 
     switch (product_nr) {
-    case 1:
-        product = "xensource-windows";
-        break;
+    /*
+     * In qemu-xen-unstable, this is the master registry of product
+     * numbers.  If you need a new product number allocating, please
+     * post to xen-devel@lists.xensource.com.  You should NOT use
+     * an existing product number without allocating one.
+     *
+     * If you maintain a seaparate versioning and distribution path
+     * for PV drivers you should have a separate product number so
+     * that your drivers can be separated from others'.
+     */
+    case 1:  product = "xensource-windows";  break;
     default:
         /* Don't know what product this is -> we can't blacklist
          * it. */
