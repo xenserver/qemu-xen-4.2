@@ -1,0 +1,861 @@
+Message-ID: <20081215171059.GA2574@weybridge.uk.xensource.com>
+From: Steven Smith <steven.smith@eu.citrix.com>
+To: Keir Fraser <keir.fraser@eu.citrix.com>
+Cc: James Harper <james.harper@bendigoit.com.au>,
+	Ian Jackson <Ian.Jackson@eu.citrix.com>,
+	xen-devel@lists.xensource.com
+Subject: Re: [Xen-devel] disable qemu PCI devices in HVM domains
+Date: Mon, 15 Dec 2008 17:10:59 +0000
+
+> >> I like the principle of disabling the drivers via an instruction to
+> >> qemu rather than by attempting to wrestle with the Windows driver
+> >> machinery to try to hide the devices.  But couldn't we simulate a PCI
+> >> unplug or a medium change or something instead ?  Then you could do it
+> >> later in the boot after your own drivers have properly bound.
+> >> 
+> > 
+> > Is the 'pci unplug' as simple as making a call somewhere like
+> > pci_unplug(id of ide adapter)? I'm concerned that Windows may not like
+> > this.
+> My own opinion is that the ioports are fine, but they should be offsets from
+> the xen-platform-pci device's ioport bar. Also we ought to document the
+> ports in xen-platform-pci's source file, as it's going to start getting
+> messy in there.
+> 
+> I'm not sure if the approach taken by the Citrix drivers could be at all
+> useful. Cc'ing Steven Smith in case he has any comments to make.
+I can't see any reason why the approach we take in our closed-source
+drivers wouldn't work here as well.  I've attached the appropriate
+patches from our product qemu patchqueue, tidied up and stripped of
+the most obviously XenServer-specific bits, and made to apply to
+current ioemu-remote.
+
+
+The protocol covers three basic things:
+
+-- Disconnecting emulated devices.
+-- Getting log messages out of the drivers and into dom0.
+-- Allowing dom0 to block the loading of specific drivers.  This is
+   intended as a backwards-compatibility thing: if we discover a bug
+   in some old version of the drivers, then rather than working around
+   it in Xen, we have the option of just making those drivers fall
+   back to emulated mode.
+
+The current protocol works like this (from the point of view of
+drivers):
+
+1) When the drivers first come up, they check whether the unplug logic
+   is available by reading a two-byte magic number from IO port 0x10.
+   These should be 0x49d2.  If the magic number doesn't match, the
+   drivers don't do anything.
+
+2) The drivers read a one-byte protocol version from IO port 0x12.  If
+   this is 0, skip to 6.
+
+3) The drivers write a two-byte product number to IO port 0x12.  At
+   the moment, the only drivers using this protocol are our
+   closed-source ones, which use product number 1.
+
+4) The drivers write a four-byte build number to IO port 0x10.
+
+5) The drivers check the magic number by reading two bytes from 0x10
+   again.  If it's changed from 0x49d2, the drivers are blacklisted
+   and should not load.
+
+6) The drivers write a two-byte bitmask of devices to unplug to IO
+   port 0x10.  The defined fields are:
+
+   1 -- All IDE disks (not including CD drives)
+   2 -- All emulated NICs
+   4 -- All IDE disks except for the primary master (not including CD
+	drives)
+
+   The relevant emulated devices then disappear from the relevant
+   buses.  For most guest operating systems, you want to do this
+   before device enumeration happens.
+
+...) Once the drivers have checked the magic number (and the
+     blacklist, if appropriate), they can send log messages to qemu
+     which will be logged to wherever qemu's logs go
+     (/var/log/xen/qemu-dm.log on normal Xen, dom0 syslog on
+     XenServer).  These messages are written to IO port 0x12 a byte at
+     a time, and are terminated by newlines.  There's a fairly
+     aggressive rate limiter on these messages, so they shouldn't be
+     used for anything even vaguely high-volume, but they're rather
+     useful for debugging and support.
+
+This isn't exactly a pretty protocol, but it does solve the problem.
+
+
+The blacklist is, from qemu's point of view, handled mostly through
+xenstore.  A driver version is considered to be blacklisted if
+/mh/driver-blacklist/{product_name}/{build_number} exists and is
+readable, where {build_number} is the build number from step 4 as a
+decimal number.  {product_name} is a string corresponding to the
+product number in step 3; at present, the only product number is 1,
+which has a product_name of xensource-windows.
+
+
+A previous version of the protocol put the IO ports on the PCI
+platform device.  Unfortunately, that makes it difficult to get at
+them before PCI bus enumeration happens, which complicates removal of
+the emulated NICs.  It is possible to work around these but (at least
+on Windows) it's complicated and messy, and generally best avoided.
+
+Steven.
+support-hvm-pv-drivers-ioemu-support
+hvm-log-to-dom0
+rate_limit_guest_syslog
+pv-driver-version
+Index: ioemu-remote/hw/ide.c
+===================================================================
+--- ioemu-remote.orig/hw/ide.c	2008-12-15 16:02:19.000000000 +0000
++++ ioemu-remote/hw/ide.c	2008-12-15 16:02:35.000000000 +0000
+@@ -484,6 +484,7 @@
+     int type; /* see IDE_TYPE_xxx */
+ } PCIIDEState;
+ 
++static PCIIDEState *principal_ide_controller;
+ 
+ #if defined(__ia64__)
+ #include <xen/hvm/ioreq.h>
+@@ -2778,6 +2779,47 @@
+     s->media_changed = 0;
+ }
+ 
++/* Unplug all of the IDE hard disks, starting at index @start in the
++   table. */
++static void _ide_unplug_harddisks(int start)
++{
++    IDEState *s;
++    int i, j;
++
++    if (!principal_ide_controller) {
++        fprintf(stderr, "No principal controller?\n");
++        return;
++    }
++    for (i = start; i < 4; i++) {
++        s = principal_ide_controller->ide_if + i;
++        if (!s->bs)
++            continue; /* drive not present */
++        if (s->is_cdrom)
++            continue; /* cdrom */
++        /* Is a hard disk, unplug it. */
++        for (j = 0; j < nb_drives; j++)
++            if (drives_table[j].bdrv == s->bs)
++                drives_table[j].bdrv = NULL;
++        bdrv_close(s->bs);
++        s->bs = NULL;
++        ide_reset(s);
++    }
++}
++
++/* Unplug all hard disks except for the primary master (which will
++   almost always be the boot device). */
++void ide_unplug_aux_harddisks(void)
++{
++    _ide_unplug_harddisks(1);
++}
++
++/* Unplug all hard disks, including the boot device. */
++void ide_unplug_harddisks(void)
++{
++    _ide_unplug_harddisks(0);
++}
++
++
+ struct partition {
+ 	uint8_t boot_ind;		/* 0x80 - active */
+ 	uint8_t head;		/* starting head */
+@@ -3290,6 +3332,9 @@
+                                            sizeof(PCIIDEState),
+                                            -1,
+                                            NULL, NULL);
++    if (principal_ide_controller)
++	abort();
++    principal_ide_controller = d;
+     d->type = IDE_TYPE_CMD646;
+     pci_conf = d->dev.config;
+     pci_conf[0x00] = 0x95; // CMD646
+@@ -3419,6 +3464,9 @@
+                                            sizeof(PCIIDEState),
+                                            devfn,
+                                            NULL, NULL);
++    if (principal_ide_controller)
++	abort();
++    principal_ide_controller = d;
+     d->type = IDE_TYPE_PIIX3;
+ 
+     pci_conf = d->dev.config;
+Index: ioemu-remote/hw/pci.c
+===================================================================
+--- ioemu-remote.orig/hw/pci.c	2008-12-15 16:02:19.000000000 +0000
++++ ioemu-remote/hw/pci.c	2008-12-15 16:02:22.000000000 +0000
+@@ -26,6 +26,9 @@
+ #include "console.h"
+ #include "net.h"
+ 
++#include "exec-all.h"
++#include "qemu-xen.h"
++
+ //#define DEBUG_PCI
+ 
+ struct PCIBus {
+@@ -648,6 +651,46 @@
+     }
+ }
+ 
++void pci_unplug_netifs(void)
++{
++    PCIBus *bus;
++    PCIDevice *dev;
++    PCIIORegion *region;
++    int x;
++    int i;
++
++    /* We only support one PCI bus */
++    for (bus = first_bus; bus; bus = NULL) {
++       for (x = 0; x < 256; x++) {
++           dev = bus->devices[x];
++           if (dev &&
++               dev->config[0xa] == 0 &&
++               dev->config[0xb] == 2) {
++               /* Found a netif.  Remove it from the bus.  Note that
++                  we don't free it here, since there could still be
++                  references to it floating around.  There are only
++                  ever one or two structures leaked, and it's not
++                  worth finding them all. */
++               bus->devices[x] = NULL;
++               for (i = 0; i < PCI_NUM_REGIONS; i++) {
++                   region = &dev->io_regions[i];
++                   if (region->addr == (uint32_t)-1 ||
++                       region->size == 0)
++                       continue;
++                   fprintf(logfile, "region type %d at [%x,%x).\n",
++                           region->type, region->addr,
++                           region->addr+region->size);
++                   if (region->type == PCI_ADDRESS_SPACE_IO) {
++                       isa_unassign_ioport(region->addr, region->size);
++                   } else if (region->type == PCI_ADDRESS_SPACE_MEM) {
++                       unregister_iomem(region->addr);
++                   }
++               }
++           }
++       }
++    }
++}
++
+ typedef struct {
+     PCIDevice dev;
+     PCIBus *bus;
+Index: ioemu-remote/qemu-xen.h
+===================================================================
+--- ioemu-remote.orig/qemu-xen.h	2008-12-15 16:02:19.000000000 +0000
++++ ioemu-remote/qemu-xen.h	2008-12-15 16:02:22.000000000 +0000
+@@ -26,8 +26,11 @@
+ void xen_vga_vram_map(uint64_t vram_addr, int copy);
+ #endif
+ 
+-
++void ide_unplug_harddisks(void);
++void net_tap_shutdown_all(void);
++void pci_unplug_netifs(void);
+ void destroy_hvm_domain(void);
++void unregister_iomem(target_phys_addr_t start);
+ 
+ #ifdef __ia64__
+ static inline void xc_domain_shutdown_hook(int xc_handle, uint32_t domid)
+Index: ioemu-remote/vl.c
+===================================================================
+--- ioemu-remote.orig/vl.c	2008-12-15 16:02:19.000000000 +0000
++++ ioemu-remote/vl.c	2008-12-15 16:02:22.000000000 +0000
+@@ -262,6 +262,20 @@
+ 
+ #include "xen-vl-extra.c"
+ 
++typedef struct IOHandlerRecord {
++    int fd;
++    IOCanRWHandler *fd_read_poll;
++    IOHandler *fd_read;
++    IOHandler *fd_write;
++    int deleted;
++    void *opaque;
++    /* temporary data */
++    struct pollfd *ufd;
++    struct IOHandlerRecord *next;
++} IOHandlerRecord;
++
++static IOHandlerRecord *first_io_handler;
++
+ /***********************************************************/
+ /* x86 ISA bus support */
+ 
+@@ -4055,6 +4069,7 @@
+ typedef struct TAPState {
+     VLANClientState *vc;
+     int fd;
++    struct TAPState *next;
+     char down_script[1024];
+     char script_arg[1024];
+ } TAPState;
+@@ -4092,6 +4107,34 @@
+     }
+ }
+ 
++static TAPState *head_net_tap;
++
++void net_tap_shutdown_all(void)
++{
++    struct IOHandlerRecord **pioh, *ioh;
++
++    while (head_net_tap) {
++       pioh = &first_io_handler;
++       for (;;) {
++           ioh = *pioh;
++           if (ioh == NULL)
++               break;
++           if (ioh->fd == head_net_tap->fd) {
++               *pioh = ioh->next;
++               qemu_free(ioh);
++               break;
++           }
++           pioh = &ioh->next;
++       }
++       if (!ioh)
++           fprintf(stderr,
++                   "warning: can't find iohandler for %d to close it properly.\n",
++                   head_net_tap->fd);
++       close(head_net_tap->fd);
++       head_net_tap = head_net_tap->next;
++    }
++}
++
+ /* fd support */
+ 
+ static TAPState *net_tap_fd_init(VLANState *vlan, int fd)
+@@ -4103,6 +4146,8 @@
+         return NULL;
+     s->fd = fd;
+     s->vc = qemu_new_vlan_client(vlan, tap_receive, NULL, s);
++    s->next = head_net_tap;
++    head_net_tap = s;
+     qemu_set_fd_handler(s->fd, tap_send, NULL, s);
+     snprintf(s->vc->info_str, sizeof(s->vc->info_str), "tap: fd=%d", fd);
+     return s;
+@@ -5666,20 +5711,6 @@
+ 
+ #define MAX_IO_HANDLERS 64
+ 
+-typedef struct IOHandlerRecord {
+-    int fd;
+-    IOCanRWHandler *fd_read_poll;
+-    IOHandler *fd_read;
+-    IOHandler *fd_write;
+-    int deleted;
+-    void *opaque;
+-    /* temporary data */
+-    struct pollfd *ufd;
+-    struct IOHandlerRecord *next;
+-} IOHandlerRecord;
+-
+-static IOHandlerRecord *first_io_handler;
+-
+ /* XXX: fd_read_poll should be suppressed, but an API change is
+    necessary in the character devices to suppress fd_can_read(). */
+ int qemu_set_fd_handler2(int fd,
+Index: ioemu-remote/block-raw-posix.c
+===================================================================
+--- ioemu-remote.orig/block-raw-posix.c	2008-12-15 16:02:19.000000000 +0000
++++ ioemu-remote/block-raw-posix.c	2008-12-15 16:02:22.000000000 +0000
+@@ -55,6 +55,7 @@
+ #include <sys/ioctl.h>
+ #include <linux/cdrom.h>
+ #include <linux/fd.h>
++#include <sys/mount.h>
+ #endif
+ #ifdef __FreeBSD__
+ #include <sys/disk.h>
+@@ -125,6 +126,10 @@
+         return ret;
+     }
+     s->fd = fd;
++#ifndef CONFIG_STUBDOM
++    /* Invalidate buffer cache for this device. */
++    ioctl(s->fd, BLKFLSBUF, 0);
++#endif
+     return 0;
+ }
+ 
+@@ -505,6 +510,10 @@
+ {
+     BDRVRawState *s = bs->opaque;
+     if (s->fd >= 0) {
++#ifndef CONFIG_STUBDOM
++        /* Invalidate buffer cache for this device. */
++        ioctl(s->fd, BLKFLSBUF, 0);
++#endif
+         close(s->fd);
+         s->fd = -1;
+     }
+Index: ioemu-remote/i386-dm/exec-dm.c
+===================================================================
+--- ioemu-remote.orig/i386-dm/exec-dm.c	2008-12-15 16:02:19.000000000 +0000
++++ ioemu-remote/i386-dm/exec-dm.c	2008-12-15 16:02:22.000000000 +0000
+@@ -267,7 +267,7 @@
+ 
+ /* XXX: Simple implementation. Fix later */
+ #define MAX_MMIO 32
+-struct mmio_space {
++static struct mmio_space {
+         target_phys_addr_t start;
+         unsigned long size;
+         unsigned long io_index;
+@@ -413,6 +413,17 @@
+         return 0;
+ }
+ 
++void unregister_iomem(target_phys_addr_t start)
++{
++    int index = iomem_index(start);
++    if (index) {
++        fprintf(logfile, "squash iomem [%lx, %lx).\n", mmio[index].start,
++                mmio[index].start + mmio[index].size);
++        mmio[index].start = mmio[index].size = 0;
++    }
++}
++
++
+ #if defined(__i386__) || defined(__x86_64__)
+ #define phys_ram_addr(x) (qemu_map_cache(x))
+ #elif defined(__ia64__)
+Index: ioemu-remote/hw/xen_platform.c
+===================================================================
+--- ioemu-remote.orig/hw/xen_platform.c	2008-12-15 16:02:19.000000000 +0000
++++ ioemu-remote/hw/xen_platform.c	2008-12-15 16:02:35.000000000 +0000
+@@ -24,6 +24,7 @@
+  */
+ 
+ #include "hw.h"
++#include "pc.h"
+ #include "pci.h"
+ #include "irq.h"
+ #include "qemu-xen.h"
+@@ -163,6 +164,52 @@
+     cpu_register_physical_memory(addr, 0x1000000, mmio_io_addr);
+ }
+ 
++#define UNPLUG_ALL_IDE_DISKS 1
++#define UNPLUG_ALL_NICS 2
++#define UNPLUG_AUX_IDE_DISKS 4
++
++static void platform_fixed_ioport_write2(void *opaque, uint32_t addr, uint32_t val)
++{
++    switch (addr - 0x10) {
++    case 0:
++        /* Unplug devices.  Value is a bitmask of which devices to
++           unplug, with bit 0 the IDE devices, bit 1 the network
++           devices, and bit 2 the non-primary-master IDE devices. */
++        if (val & UNPLUG_ALL_IDE_DISKS)
++            ide_unplug_harddisks();
++        if (val & UNPLUG_ALL_NICS) {
++            pci_unplug_netifs();
++            net_tap_shutdown_all();
++        }
++        if (val & UNPLUG_AUX_IDE_DISKS) {
++            ide_unplug_aux_harddisks();
++        }
++        break;
++    }
++}
++
++static uint32_t platform_fixed_ioport_read2(void *opaque, uint32_t addr)
++{
++    switch (addr - 0x10) {
++    case 0:
++        return 0x49d2; /* Magic value so that you can identify the
++                          interface. */
++    default:
++        return 0xffff;
++    }
++}
++
++static uint32_t platform_fixed_ioport_read1(void *opaque, uint32_t addr)
++{
++    switch (addr - 0x10) {
++    case 2:
++        /* Version number */
++        return 0;
++    default:
++        return 0xff;
++    }
++}
++
+ struct pci_config_header {
+     uint16_t vendor_id;
+     uint16_t device_id;
+@@ -255,4 +302,7 @@
+ 
+     register_savevm("platform", 0, 2, xen_pci_save, xen_pci_load, d);
+     printf("Done register platform.\n");
++    register_ioport_write(0x10, 16, 2, platform_fixed_ioport_write2, NULL);
++    register_ioport_read(0x10, 16, 2, platform_fixed_ioport_read2, NULL);
++    register_ioport_read(0x10, 16, 1, platform_fixed_ioport_read1, NULL);
+ }
+Index: ioemu-remote/hw/pc.h
+===================================================================
+--- ioemu-remote.orig/hw/pc.h	2008-12-15 16:02:19.000000000 +0000
++++ ioemu-remote/hw/pc.h	2008-12-15 16:02:35.000000000 +0000
+@@ -146,6 +146,8 @@
+                         qemu_irq *pic);
+ void pci_piix4_ide_init(PCIBus *bus, BlockDriverState **hd_table, int devfn,
+                         qemu_irq *pic);
++void ide_unplug_harddisks(void);
++void ide_unplug_aux_harddisks(void);
+ 
+ /* ne2000.c */
+ 
+Index: ioemu-remote/hw/xen_platform.c
+===================================================================
+--- ioemu-remote.orig/hw/xen_platform.c	2008-12-15 15:57:04.000000000 +0000
++++ ioemu-remote/hw/xen_platform.c	2008-12-15 16:00:19.000000000 +0000
+@@ -31,6 +31,8 @@
+ #include <xenguest.h>
+ 
+ extern FILE *logfile;
++static char log_buffer[4096];
++static int log_buffer_off;
+ 
+ #define PFFLAG_ROM_LOCK 1 /* Sets whether ROM memory area is RW or RO */
+ 
+@@ -68,6 +70,18 @@
+             d->platform_flags = val & PFFLAG_ROM_LOCK;
+         break;
+     }
++    case 8:
++        {
++            if (val == '\n' || log_buffer_off == sizeof(log_buffer) - 1) {
++                /* Flush buffer */
++                log_buffer[log_buffer_off] = 0;
++                fprintf(logfile, "%s\n", log_buffer);
++                log_buffer_off = 0;
++                break;
++            }
++            log_buffer[log_buffer_off++] = val;
++        }
++        break;
+     default:
+         break;
+     }
+@@ -180,6 +194,24 @@
+     }
+ }
+ 
++
++static void platform_fixed_ioport_write1(void *opaque, uint32_t addr, uint32_t val)
++{
++    switch (addr - 0x10) {
++    case 2:
++        /* Send bytes to syslog */
++        if (val == '\n' || log_buffer_off == sizeof(log_buffer) - 1) {
++            /* Flush buffer */
++            log_buffer[log_buffer_off] = 0;
++            fprintf(logfile, "%s\n", log_buffer);
++            log_buffer_off = 0;
++            break;
++        }
++        log_buffer[log_buffer_off++] = val;
++        break;
++    }
++}
++
+ static uint32_t platform_fixed_ioport_read2(void *opaque, uint32_t addr)
+ {
+     switch (addr - 0x10) {
+@@ -295,6 +327,7 @@
+     register_savevm("platform", 0, 2, xen_pci_save, xen_pci_load, d);
+     printf("Done register platform.\n");
+     register_ioport_write(0x10, 16, 2, platform_fixed_ioport_write2, NULL);
++    register_ioport_write(0x10, 16, 1, platform_fixed_ioport_write1, NULL);
+     register_ioport_read(0x10, 16, 2, platform_fixed_ioport_read2, NULL);
+     register_ioport_read(0x10, 16, 1, platform_fixed_ioport_read1, NULL);
+ }
+Index: ioemu-remote/hw/xen_platform.c
+===================================================================
+--- ioemu-remote.orig/hw/xen_platform.c	2008-12-15 15:02:53.000000000 +0000
++++ ioemu-remote/hw/xen_platform.c	2008-12-15 15:03:34.000000000 +0000
+@@ -29,8 +29,10 @@
+ #include "irq.h"
+ #include "qemu-xen.h"
+ 
++#include <assert.h>
+ #include <xenguest.h>
+ 
++static int throttling_disabled;
+ extern FILE *logfile;
+ static char log_buffer[4096];
+ static int log_buffer_off;
+@@ -44,6 +46,88 @@
+   uint64_t   vga_stolen_ram;
+ } PCIXenPlatformState;
+ 
++/* We throttle access to dom0 syslog, to avoid DOS attacks.  This is
++   modelled as a token bucket, with one token for every byte of log.
++   The bucket size is 128KB (->1024 lines of 128 bytes each) and
++   refills at 256B/s.  It starts full.  The guest is blocked if no
++   tokens are available when it tries to generate a log message. */
++#define BUCKET_MAX_SIZE (128*1024)
++#define BUCKET_FILL_RATE 256
++
++static void throttle(unsigned count)
++{
++    static unsigned available;
++    static struct timespec last_refil;
++    static int started;
++    static int warned;
++
++    struct timespec waiting_for, now;
++    double delay;
++    struct timespec ts;
++
++    if (throttling_disabled)
++        return;
++
++    if (!started) {
++        clock_gettime(CLOCK_MONOTONIC, &last_refil);
++        available = BUCKET_MAX_SIZE;
++        started = 1;
++    }
++
++    if (count > BUCKET_MAX_SIZE) {
++        fprintf(logfile, "tried to get %d tokens, but bucket size is %d\n",
++                BUCKET_MAX_SIZE, count);
++        exit(1);
++    }
++
++    if (available < count) {
++        /* The bucket is empty.  Refil it */
++
++        /* When will it be full enough to handle this request? */
++        delay = (double)(count - available) / BUCKET_FILL_RATE;
++        waiting_for = last_refil;
++        waiting_for.tv_sec += delay;
++        waiting_for.tv_nsec += (delay - (int)delay) * 1e9;
++        if (waiting_for.tv_nsec >= 1000000000) {
++            waiting_for.tv_nsec -= 1000000000;
++            waiting_for.tv_sec++;
++        }
++
++        /* How long do we have to wait? (might be negative) */
++        clock_gettime(CLOCK_MONOTONIC, &now);
++        ts.tv_sec = waiting_for.tv_sec - now.tv_sec;
++        ts.tv_nsec = waiting_for.tv_nsec - now.tv_nsec;
++        if (ts.tv_nsec < 0) {
++            ts.tv_sec--;
++            ts.tv_nsec += 1000000000;
++        }
++
++        /* Wait for it. */
++        if (ts.tv_sec > 0 ||
++            (ts.tv_sec == 0 && ts.tv_nsec > 0)) {
++            if (!warned) {
++                fprintf(logfile, "throttling guest access to syslog");
++                warned = 1;
++            }
++            while (nanosleep(&ts, &ts) < 0 && errno == EINTR)
++                ;
++        }
++
++        /* Refil */
++        clock_gettime(CLOCK_MONOTONIC, &now);
++        delay = (now.tv_sec - last_refil.tv_sec) +
++            (now.tv_nsec - last_refil.tv_nsec) * 1.0e-9;
++        available += BUCKET_FILL_RATE * delay;
++        if (available > BUCKET_MAX_SIZE)
++            available = BUCKET_MAX_SIZE;
++        last_refil = now;
++    }
++
++    assert(available >= count);
++
++    available -= count;
++}
++
+ static uint32_t xen_platform_ioport_readb(void *opaque, uint32_t addr)
+ {
+     PCIXenPlatformState *s = opaque;
+@@ -76,6 +160,7 @@
+             if (val == '\n' || log_buffer_off == sizeof(log_buffer) - 1) {
+                 /* Flush buffer */
+                 log_buffer[log_buffer_off] = 0;
++                throttle(log_buffer_off);
+                 fprintf(logfile, "%s\n", log_buffer);
+                 log_buffer_off = 0;
+                 break;
+@@ -278,6 +363,7 @@
+         if (val == '\n' || log_buffer_off == sizeof(log_buffer) - 1) {
+             /* Flush buffer */
+             log_buffer[log_buffer_off] = 0;
++            throttle(log_buffer_off);
+             fprintf(logfile, "%s\n", log_buffer);
+             log_buffer_off = 0;
+             break;
+@@ -302,6 +388,7 @@
+ {
+     PCIXenPlatformState *d;
+     struct pci_config_header *pch;
++    struct stat stbuf;
+ 
+     printf("Register xen platform.\n");
+     d = (PCIXenPlatformState *)pci_register_device(
+@@ -337,4 +424,8 @@
+     register_ioport_write(0x10, 16, 1, platform_fixed_ioport_write1, NULL);
+     register_ioport_read(0x10, 16, 2, platform_fixed_ioport_read2, NULL);
+     register_ioport_read(0x10, 16, 1, platform_fixed_ioport_read1, NULL);
++
++    if (stat("/etc/disable-guest-log-throttle", &stbuf) == 0)
++        throttling_disabled = 1;
++
+ }
+Index: ioemu-remote/hw/xen_platform.c
+===================================================================
+--- ioemu-remote.orig/hw/xen_platform.c	2008-12-15 15:03:34.000000000 +0000
++++ ioemu-remote/hw/xen_platform.c	2008-12-15 15:06:08.000000000 +0000
+@@ -32,6 +32,8 @@
+ #include <assert.h>
+ #include <xenguest.h>
+ 
++static int drivers_blacklisted;
++static uint16_t driver_product_version;
+ static int throttling_disabled;
+ extern FILE *logfile;
+ static char log_buffer[4096];
+@@ -341,6 +343,42 @@
+             ide_unplug_aux_harddisks();
+         }
+         break;
++    case 2:
++        switch (val) {
++        case 1:
++            fprintf(logfile, "Citrix Windows PV drivers loaded in guest\n");
++            break;
++        case 0:
++            fprintf(logfile, "Guest claimed to be running PV product 0?\n");
++            break;
++        default:
++            fprintf(logfile, "Unknown PV product %d loaded in guest\n", val);
++            break;
++        }
++        driver_product_version = val;
++        break;
++    }
++}
++
++static void platform_fixed_ioport_write4(void *opaque, uint32_t addr,
++                                         uint32_t val)
++{
++    switch (addr - 0x10) {
++    case 0:
++        /* PV driver version */
++        if (driver_product_version == 0) {
++            fprintf(logfile,
++                    "Drivers tried to set their version number (%d) before setting the product number?\n",
++                    val);
++            return;
++        }
++        fprintf(logfile, "PV driver build %d\n", val);
++        if (xenstore_pv_driver_build_blacklisted(driver_product_version,
++                                                 val)) {
++            fprintf(logfile, "Drivers are blacklisted!\n");
++            drivers_blacklisted = 1;
++        }
++        break;
+     }
+ }
+ 
+@@ -348,8 +386,14 @@
+ {
+     switch (addr - 0x10) {
+     case 0:
+-        return 0x49d2; /* Magic value so that you can identify the
+-                          interface. */
++        if (drivers_blacklisted) {
++            /* The drivers will recognise this magic number and refuse
++             * to do anything. */
++            return 0xd249;
++        } else {
++            /* Magic value so that you can identify the interface. */
++            return 0x49d2;
++        }
+     default:
+         return 0xffff;
+     }
+@@ -378,7 +422,7 @@
+     switch (addr - 0x10) {
+     case 2:
+         /* Version number */
+-        return 0;
++        return 1;
+     default:
+         return 0xff;
+     }
+@@ -420,6 +464,7 @@
+ 
+     register_savevm("platform", 0, 2, xen_pci_save, xen_pci_load, d);
+     printf("Done register platform.\n");
++    register_ioport_write(0x10, 16, 4, platform_fixed_ioport_write4, NULL);
+     register_ioport_write(0x10, 16, 2, platform_fixed_ioport_write2, NULL);
+     register_ioport_write(0x10, 16, 1, platform_fixed_ioport_write1, NULL);
+     register_ioport_read(0x10, 16, 2, platform_fixed_ioport_read2, NULL);
+Index: ioemu-remote/qemu-xen.h
+===================================================================
+--- ioemu-remote.orig/qemu-xen.h	2008-12-15 15:02:53.000000000 +0000
++++ ioemu-remote/qemu-xen.h	2008-12-15 15:06:39.000000000 +0000
+@@ -91,6 +91,8 @@
+ char *xenstore_device_model_read(int domid, char *key, unsigned int *len);
+ char *xenstore_read_battery_data(int battery_status);
+ int xenstore_refresh_battery_status(void);
++int xenstore_pv_driver_build_blacklisted(uint16_t product_number,
++                                         uint32_t build_nr);
+ 
+ /* xenfbfront.c */
+ int xenfb_pv_display_init(DisplayState *ds);
+Index: ioemu-remote/xenstore.c
+===================================================================
+--- ioemu-remote.orig/xenstore.c	2008-12-15 14:30:47.000000000 +0000
++++ ioemu-remote/xenstore.c	2008-12-15 15:06:08.000000000 +0000
+@@ -782,6 +782,34 @@
+     free(path);
+ }
+ 
++int
++xenstore_pv_driver_build_blacklisted(uint16_t product_nr,
++                                     uint32_t build_nr)
++{
++    char *buf = NULL;
++    char *tmp;
++    const char *product;
++
++    switch (product_nr) {
++    case 1:
++        product = "xensource-windows";
++        break;
++    default:
++        /* Don't know what product this is -> we can't blacklist
++         * it. */
++        return 0;
++    }
++    if (asprintf(&buf, "/mh/driver-blacklist/%s/%d", product, build_nr) < 0)
++        return 0;
++    tmp = xs_read(xsh, XBT_NULL, buf, NULL);
++    free(tmp);
++    free(buf);
++    if (tmp == NULL)
++        return 0;
++    else
++        return 1;
++}
++
+ void xenstore_record_dm_state(char *state)
+ {
+     xenstore_record_dm("state", state);
+application/pgp-signature           [Press RETURN to save to a file]
