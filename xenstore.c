@@ -801,6 +801,7 @@ xenstore_pv_driver_build_blacklisted(uint16_t product_nr,
      * indicate a driver which is yet to be released.
      */
     case 1:     product = "xensource-windows";  break;
+    case 2:     product = "gplpv-windows";      break;
     case 0xffff: product = "experimental";      break;
     default:
         /* Don't know what product this is -> we can't blacklist
