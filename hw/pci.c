@@ -26,6 +26,9 @@
 #include "console.h"
 #include "net.h"
 
+#include "exec-all.h"
+#include "qemu-xen.h"
+
 //#define DEBUG_PCI
 
 struct PCIBus {
@@ -645,6 +648,46 @@ void pci_nic_init(PCIBus *bus, NICInfo *nd, int devfn)
     } else {
         fprintf(stderr, "qemu: Unsupported NIC: %s\n", nd->model);
         exit (1);
+    }
+}
+
+void pci_unplug_netifs(void)
+{
+    PCIBus *bus;
+    PCIDevice *dev;
+    PCIIORegion *region;
+    int x;
+    int i;
+
+    /* We only support one PCI bus */
+    for (bus = first_bus; bus; bus = NULL) {
+       for (x = 0; x < 256; x++) {
+           dev = bus->devices[x];
+           if (dev &&
+               dev->config[0xa] == 0 &&
+               dev->config[0xb] == 2) {
+               /* Found a netif.  Remove it from the bus.  Note that
+                  we don't free it here, since there could still be
+                  references to it floating around.  There are only
+                  ever one or two structures leaked, and it's not
+                  worth finding them all. */
+               bus->devices[x] = NULL;
+               for (i = 0; i < PCI_NUM_REGIONS; i++) {
+                   region = &dev->io_regions[i];
+                   if (region->addr == (uint32_t)-1 ||
+                       region->size == 0)
+                       continue;
+                   fprintf(logfile, "region type %d at [%x,%x).\n",
+                           region->type, region->addr,
+                           region->addr+region->size);
+                   if (region->type == PCI_ADDRESS_SPACE_IO) {
+                       isa_unassign_ioport(region->addr, region->size);
+                   } else if (region->type == PCI_ADDRESS_SPACE_MEM) {
+                       unregister_iomem(region->addr);
+                   }
+               }
+           }
+       }
     }
 }
 

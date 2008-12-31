@@ -24,13 +24,20 @@
  */
 
 #include "hw.h"
+#include "pc.h"
 #include "pci.h"
 #include "irq.h"
 #include "qemu-xen.h"
 
+#include <assert.h>
 #include <xenguest.h>
 
+static int drivers_blacklisted;
+static uint16_t driver_product_version;
+static int throttling_disabled;
 extern FILE *logfile;
+static char log_buffer[4096];
+static int log_buffer_off;
 
 #define PFFLAG_ROM_LOCK 1 /* Sets whether ROM memory area is RW or RO */
 
@@ -40,6 +47,88 @@ typedef struct PCIXenPlatformState
   uint8_t    platform_flags;
   uint64_t   vga_stolen_ram;
 } PCIXenPlatformState;
+
+/* We throttle access to dom0 syslog, to avoid DOS attacks.  This is
+   modelled as a token bucket, with one token for every byte of log.
+   The bucket size is 128KB (->1024 lines of 128 bytes each) and
+   refills at 256B/s.  It starts full.  The guest is blocked if no
+   tokens are available when it tries to generate a log message. */
+#define BUCKET_MAX_SIZE (128*1024)
+#define BUCKET_FILL_RATE 256
+
+static void throttle(unsigned count)
+{
+    static unsigned available;
+    static struct timespec last_refil;
+    static int started;
+    static int warned;
+
+    struct timespec waiting_for, now;
+    double delay;
+    struct timespec ts;
+
+    if (throttling_disabled)
+        return;
+
+    if (!started) {
+        clock_gettime(CLOCK_MONOTONIC, &last_refil);
+        available = BUCKET_MAX_SIZE;
+        started = 1;
+    }
+
+    if (count > BUCKET_MAX_SIZE) {
+        fprintf(logfile, "tried to get %d tokens, but bucket size is %d\n",
+                BUCKET_MAX_SIZE, count);
+        exit(1);
+    }
+
+    if (available < count) {
+        /* The bucket is empty.  Refil it */
+
+        /* When will it be full enough to handle this request? */
+        delay = (double)(count - available) / BUCKET_FILL_RATE;
+        waiting_for = last_refil;
+        waiting_for.tv_sec += delay;
+        waiting_for.tv_nsec += (delay - (int)delay) * 1e9;
+        if (waiting_for.tv_nsec >= 1000000000) {
+            waiting_for.tv_nsec -= 1000000000;
+            waiting_for.tv_sec++;
+        }
+
+        /* How long do we have to wait? (might be negative) */
+        clock_gettime(CLOCK_MONOTONIC, &now);
+        ts.tv_sec = waiting_for.tv_sec - now.tv_sec;
+        ts.tv_nsec = waiting_for.tv_nsec - now.tv_nsec;
+        if (ts.tv_nsec < 0) {
+            ts.tv_sec--;
+            ts.tv_nsec += 1000000000;
+        }
+
+        /* Wait for it. */
+        if (ts.tv_sec > 0 ||
+            (ts.tv_sec == 0 && ts.tv_nsec > 0)) {
+            if (!warned) {
+                fprintf(logfile, "throttling guest access to syslog");
+                warned = 1;
+            }
+            while (nanosleep(&ts, &ts) < 0 && errno == EINTR)
+                ;
+        }
+
+        /* Refil */
+        clock_gettime(CLOCK_MONOTONIC, &now);
+        delay = (now.tv_sec - last_refil.tv_sec) +
+            (now.tv_nsec - last_refil.tv_nsec) * 1.0e-9;
+        available += BUCKET_FILL_RATE * delay;
+        if (available > BUCKET_MAX_SIZE)
+            available = BUCKET_MAX_SIZE;
+        last_refil = now;
+    }
+
+    assert(available >= count);
+
+    available -= count;
+}
 
 static uint32_t xen_platform_ioport_readb(void *opaque, uint32_t addr)
 {
@@ -68,6 +157,19 @@ static void xen_platform_ioport_writeb(void *opaque, uint32_t addr, uint32_t val
             d->platform_flags = val & PFFLAG_ROM_LOCK;
         break;
     }
+    case 8:
+        {
+            if (val == '\n' || log_buffer_off == sizeof(log_buffer) - 1) {
+                /* Flush buffer */
+                log_buffer[log_buffer_off] = 0;
+                throttle(log_buffer_off);
+                fprintf(logfile, "%s\n", log_buffer);
+                log_buffer_off = 0;
+                break;
+            }
+            log_buffer[log_buffer_off++] = val;
+        }
+        break;
     default:
         break;
     }
@@ -163,6 +265,113 @@ static void platform_mmio_map(PCIDevice *d, int region_num,
     cpu_register_physical_memory(addr, 0x1000000, mmio_io_addr);
 }
 
+#define UNPLUG_ALL_IDE_DISKS 1
+#define UNPLUG_ALL_NICS 2
+#define UNPLUG_AUX_IDE_DISKS 4
+
+static void platform_fixed_ioport_write2(void *opaque, uint32_t addr, uint32_t val)
+{
+    switch (addr - 0x10) {
+    case 0:
+        /* Unplug devices.  Value is a bitmask of which devices to
+           unplug, with bit 0 the IDE devices, bit 1 the network
+           devices, and bit 2 the non-primary-master IDE devices. */
+        if (val & UNPLUG_ALL_IDE_DISKS)
+            ide_unplug_harddisks();
+        if (val & UNPLUG_ALL_NICS) {
+            pci_unplug_netifs();
+            net_tap_shutdown_all();
+        }
+        if (val & UNPLUG_AUX_IDE_DISKS) {
+            ide_unplug_aux_harddisks();
+        }
+        break;
+    case 2:
+        switch (val) {
+        case 1:
+            fprintf(logfile, "Citrix Windows PV drivers loaded in guest\n");
+            break;
+        case 0:
+            fprintf(logfile, "Guest claimed to be running PV product 0?\n");
+            break;
+        default:
+            fprintf(logfile, "Unknown PV product %d loaded in guest\n", val);
+            break;
+        }
+        driver_product_version = val;
+        break;
+    }
+}
+
+static void platform_fixed_ioport_write4(void *opaque, uint32_t addr,
+                                         uint32_t val)
+{
+    switch (addr - 0x10) {
+    case 0:
+        /* PV driver version */
+        if (driver_product_version == 0) {
+            fprintf(logfile,
+                    "Drivers tried to set their version number (%d) before setting the product number?\n",
+                    val);
+            return;
+        }
+        fprintf(logfile, "PV driver build %d\n", val);
+        if (xenstore_pv_driver_build_blacklisted(driver_product_version,
+                                                 val)) {
+            fprintf(logfile, "Drivers are blacklisted!\n");
+            drivers_blacklisted = 1;
+        }
+        break;
+    }
+}
+
+
+static void platform_fixed_ioport_write1(void *opaque, uint32_t addr, uint32_t val)
+{
+    switch (addr - 0x10) {
+    case 2:
+        /* Send bytes to syslog */
+        if (val == '\n' || log_buffer_off == sizeof(log_buffer) - 1) {
+            /* Flush buffer */
+            log_buffer[log_buffer_off] = 0;
+            throttle(log_buffer_off);
+            fprintf(logfile, "%s\n", log_buffer);
+            log_buffer_off = 0;
+            break;
+        }
+        log_buffer[log_buffer_off++] = val;
+        break;
+    }
+}
+
+static uint32_t platform_fixed_ioport_read2(void *opaque, uint32_t addr)
+{
+    switch (addr - 0x10) {
+    case 0:
+        if (drivers_blacklisted) {
+            /* The drivers will recognise this magic number and refuse
+             * to do anything. */
+            return 0xd249;
+        } else {
+            /* Magic value so that you can identify the interface. */
+            return 0x49d2;
+        }
+    default:
+        return 0xffff;
+    }
+}
+
+static uint32_t platform_fixed_ioport_read1(void *opaque, uint32_t addr)
+{
+    switch (addr - 0x10) {
+    case 2:
+        /* Version number */
+        return 1;
+    default:
+        return 0xff;
+    }
+}
+
 struct pci_config_header {
     uint16_t vendor_id;
     uint16_t device_id;
@@ -224,6 +433,7 @@ void pci_xen_platform_init(PCIBus *bus)
 {
     PCIXenPlatformState *d;
     struct pci_config_header *pch;
+    struct stat stbuf;
 
     printf("Register xen platform.\n");
     d = (PCIXenPlatformState *)pci_register_device(
@@ -255,4 +465,13 @@ void pci_xen_platform_init(PCIBus *bus)
 
     register_savevm("platform", 0, 2, xen_pci_save, xen_pci_load, d);
     printf("Done register platform.\n");
+    register_ioport_write(0x10, 16, 4, platform_fixed_ioport_write4, NULL);
+    register_ioport_write(0x10, 16, 2, platform_fixed_ioport_write2, NULL);
+    register_ioport_write(0x10, 16, 1, platform_fixed_ioport_write1, NULL);
+    register_ioport_read(0x10, 16, 2, platform_fixed_ioport_read2, NULL);
+    register_ioport_read(0x10, 16, 1, platform_fixed_ioport_read1, NULL);
+
+    if (stat("/etc/disable-guest-log-throttle", &stbuf) == 0)
+        throttling_disabled = 1;
+
 }

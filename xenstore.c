@@ -778,6 +778,34 @@ void xenstore_record_dm(char *subpath, char *state)
     free(path);
 }
 
+int
+xenstore_pv_driver_build_blacklisted(uint16_t product_nr,
+                                     uint32_t build_nr)
+{
+    char *buf = NULL;
+    char *tmp;
+    const char *product;
+
+    switch (product_nr) {
+    case 1:
+        product = "xensource-windows";
+        break;
+    default:
+        /* Don't know what product this is -> we can't blacklist
+         * it. */
+        return 0;
+    }
+    if (asprintf(&buf, "/mh/driver-blacklist/%s/%d", product, build_nr) < 0)
+        return 0;
+    tmp = xs_read(xsh, XBT_NULL, buf, NULL);
+    free(tmp);
+    free(buf);
+    if (tmp == NULL)
+        return 0;
+    else
+        return 1;
+}
+
 void xenstore_record_dm_state(char *state)
 {
     xenstore_record_dm("state", state);

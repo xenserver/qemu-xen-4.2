@@ -272,7 +272,7 @@ void cpu_abort(CPUState *env, const char *fmt, ...)
 
 /* XXX: Simple implementation. Fix later */
 #define MAX_MMIO 32
-struct mmio_space {
+static struct mmio_space {
         target_phys_addr_t start;
         unsigned long size;
         unsigned long io_index;
@@ -417,6 +417,17 @@ int iomem_index(target_phys_addr_t addr)
         }
         return 0;
 }
+
+void unregister_iomem(target_phys_addr_t start)
+{
+    int index = iomem_index(start);
+    if (index) {
+        fprintf(logfile, "squash iomem [%lx, %lx).\n", mmio[index].start,
+                mmio[index].start + mmio[index].size);
+        mmio[index].start = mmio[index].size = 0;
+    }
+}
+
 
 #if defined(__i386__) || defined(__x86_64__)
 #define phys_ram_addr(x) (qemu_map_cache(x))

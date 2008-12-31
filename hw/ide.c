@@ -501,6 +501,7 @@ typedef struct PCIIDEState {
     int type; /* see IDE_TYPE_xxx */
 } PCIIDEState;
 
+static PCIIDEState *principal_ide_controller;
 
 #if defined(__ia64__)
 #include <xen/hvm/ioreq.h>
@@ -2906,6 +2907,47 @@ static void ide_reset(IDEState *s)
     s->media_changed = 0;
 }
 
+/* Unplug all of the IDE hard disks, starting at index @start in the
+   table. */
+static void _ide_unplug_harddisks(int start)
+{
+    IDEState *s;
+    int i, j;
+
+    if (!principal_ide_controller) {
+        fprintf(stderr, "No principal controller?\n");
+        return;
+    }
+    for (i = start; i < 4; i++) {
+        s = principal_ide_controller->ide_if + i;
+        if (!s->bs)
+            continue; /* drive not present */
+        if (s->is_cdrom)
+            continue; /* cdrom */
+        /* Is a hard disk, unplug it. */
+        for (j = 0; j < nb_drives; j++)
+            if (drives_table[j].bdrv == s->bs)
+                drives_table[j].bdrv = NULL;
+        bdrv_close(s->bs);
+        s->bs = NULL;
+        ide_reset(s);
+    }
+}
+
+/* Unplug all hard disks except for the primary master (which will
+   almost always be the boot device). */
+void ide_unplug_aux_harddisks(void)
+{
+    _ide_unplug_harddisks(1);
+}
+
+/* Unplug all hard disks, including the boot device. */
+void ide_unplug_harddisks(void)
+{
+    _ide_unplug_harddisks(0);
+}
+
+
 struct partition {
 	uint8_t boot_ind;		/* 0x80 - active */
 	uint8_t head;		/* starting head */
@@ -3423,6 +3465,9 @@ void pci_cmd646_ide_init(PCIBus *bus, BlockDriverState **hd_table,
                                            sizeof(PCIIDEState),
                                            -1,
                                            NULL, NULL);
+    if (principal_ide_controller)
+	abort();
+    principal_ide_controller = d;
     d->type = IDE_TYPE_CMD646;
     pci_conf = d->dev.config;
     pci_conf[0x00] = 0x95; // CMD646
@@ -3557,6 +3602,9 @@ void pci_piix3_ide_init(PCIBus *bus, BlockDriverState **hd_table, int devfn,
                                            sizeof(PCIIDEState),
                                            devfn,
                                            NULL, NULL);
+    if (principal_ide_controller)
+	abort();
+    principal_ide_controller = d;
     d->type = IDE_TYPE_PIIX3;
 
     pci_conf = d->dev.config;

@@ -26,8 +26,11 @@ void xen_vga_populate_vram(uint64_t vram_addr);
 void xen_vga_vram_map(uint64_t vram_addr, int copy);
 #endif
 
-
+void ide_unplug_harddisks(void);
+void net_tap_shutdown_all(void);
+void pci_unplug_netifs(void);
 void destroy_hvm_domain(void);
+void unregister_iomem(target_phys_addr_t start);
 
 #ifdef __ia64__
 static inline void xc_domain_shutdown_hook(int xc_handle, uint32_t domid)
@@ -88,6 +91,8 @@ char *xenstore_vm_read(int domid, const char *key, unsigned int *len);
 char *xenstore_device_model_read(int domid, char *key, unsigned int *len);
 char *xenstore_read_battery_data(int battery_status);
 int xenstore_refresh_battery_status(void);
+int xenstore_pv_driver_build_blacklisted(uint16_t product_number,
+                                         uint32_t build_nr);
 
 /* xenfbfront.c */
 int xenfb_pv_display_init(DisplayState *ds);

@@ -275,6 +275,20 @@ uint8_t qemu_uuid[16];
 
 #include "xen-vl-extra.c"
 
+typedef struct IOHandlerRecord {
+    int fd;
+    IOCanRWHandler *fd_read_poll;
+    IOHandler *fd_read;
+    IOHandler *fd_write;
+    int deleted;
+    void *opaque;
+    /* temporary data */
+    struct pollfd *ufd;
+    struct IOHandlerRecord *next;
+} IOHandlerRecord;
+
+static IOHandlerRecord *first_io_handler;
+
 /***********************************************************/
 /* x86 ISA bus support */
 
@@ -4355,6 +4369,7 @@ void do_info_slirp(void)
 typedef struct TAPState {
     VLANClientState *vc;
     int fd;
+    struct TAPState *next;
     char down_script[1024];
     char script_arg[1024];
 } TAPState;
@@ -4392,6 +4407,34 @@ static void tap_send(void *opaque)
     }
 }
 
+static TAPState *head_net_tap;
+
+void net_tap_shutdown_all(void)
+{
+    struct IOHandlerRecord **pioh, *ioh;
+
+    while (head_net_tap) {
+       pioh = &first_io_handler;
+       for (;;) {
+           ioh = *pioh;
+           if (ioh == NULL)
+               break;
+           if (ioh->fd == head_net_tap->fd) {
+               *pioh = ioh->next;
+               qemu_free(ioh);
+               break;
+           }
+           pioh = &ioh->next;
+       }
+       if (!ioh)
+           fprintf(stderr,
+                   "warning: can't find iohandler for %d to close it properly.\n",
+                   head_net_tap->fd);
+       close(head_net_tap->fd);
+       head_net_tap = head_net_tap->next;
+    }
+}
+
 /* fd support */
 
 static TAPState *net_tap_fd_init(VLANState *vlan, int fd)
@@ -4403,6 +4446,8 @@ static TAPState *net_tap_fd_init(VLANState *vlan, int fd)
         return NULL;
     s->fd = fd;
     s->vc = qemu_new_vlan_client(vlan, tap_receive, NULL, s);
+    s->next = head_net_tap;
+    head_net_tap = s;
     qemu_set_fd_handler(s->fd, tap_send, NULL, s);
     snprintf(s->vc->info_str, sizeof(s->vc->info_str), "tap: fd=%d", fd);
     return s;
@@ -6132,20 +6177,6 @@ static void dumb_display_init(DisplayState *ds)
 /* I/O handling */
 
 #define MAX_IO_HANDLERS 64
-
-typedef struct IOHandlerRecord {
-    int fd;
-    IOCanRWHandler *fd_read_poll;
-    IOHandler *fd_read;
-    IOHandler *fd_write;
-    int deleted;
-    void *opaque;
-    /* temporary data */
-    struct pollfd *ufd;
-    struct IOHandlerRecord *next;
-} IOHandlerRecord;
-
-static IOHandlerRecord *first_io_handler;
 
 /* XXX: fd_read_poll should be suppressed, but an API change is
    necessary in the character devices to suppress fd_can_read(). */

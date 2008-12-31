@@ -51,6 +51,7 @@
 #include <sys/ioctl.h>
 #include <linux/cdrom.h>
 #include <linux/fd.h>
+#include <sys/mount.h>
 #endif
 #ifdef __FreeBSD__
 #include <signal.h>
@@ -792,6 +793,10 @@ static void raw_close(BlockDriverState *bs)
 {
     BDRVRawState *s = bs->opaque;
     if (s->fd >= 0) {
+#ifndef CONFIG_STUBDOM
+        /* Invalidate buffer cache for this device. */
+        ioctl(s->fd, BLKFLSBUF, 0);
+#endif
         close(s->fd);
         s->fd = -1;
         if (s->aligned_buf != NULL)
