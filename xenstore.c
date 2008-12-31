@@ -796,8 +796,12 @@ xenstore_pv_driver_build_blacklisted(uint16_t product_nr,
      * If you maintain a seaparate versioning and distribution path
      * for PV drivers you should have a separate product number so
      * that your drivers can be separated from others'.
+     *
+     * During development, you may use the product ID 0xffff to
+     * indicate a driver which is yet to be released.
      */
-    case 1:  product = "xensource-windows";  break;
+    case 1:     product = "xensource-windows";  break;
+    case 0xffff: product = "experimental";      break;
     default:
         /* Don't know what product this is -> we can't blacklist
          * it. */
