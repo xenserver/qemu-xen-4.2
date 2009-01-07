@@ -541,8 +541,7 @@ static inline int int_clamp(int val, int vmin, int vmax)
 
 static int usb_suppress_report(USBHIDState *hs, int unchanged) {
     /* TODO: Implement finite idle delays.  */
-    if (!hs->idle) return 0; /* SET_IDLE 0 means always report */
-    return unchanged;
+    return !hs->idle && unchanged; /* SET_IDLE 0 means do not report */
 }
 
 static int usb_pointer_poll(USBHIDState *hs, uint8_t *buf, int len)
@@ -551,14 +550,14 @@ static int usb_pointer_poll(USBHIDState *hs, uint8_t *buf, int len)
     USBPointerState *s = &hs->ptr;
     USBPointerEvent *e;
 
-    if (usb_suppress_report(hs, s->head == s->tail))
-	return USB_RET_NAK;
-
     if (!s->mouse_grabbed) {
 	s->eh_entry = qemu_add_mouse_event_handler(usb_pointer_event, hs,
                                           !s->xyrel, "QEMU USB Pointer");
 	s->mouse_grabbed = 1;
     }
+
+    if (usb_suppress_report(hs, s->head == s->tail))
+	return USB_RET_NAK;
 
     if (s->head == s->tail)
         /* use the last report */
