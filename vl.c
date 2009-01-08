@@ -102,6 +102,9 @@
 #include <stropts.h>
 #endif
 #endif
+#if defined(__linux__)
+#include <linux/if_ether.h>
+#endif
 #endif
 
 #include "qemu_socket.h"
@@ -4292,10 +4295,22 @@ typedef struct TAPState {
     char down_script[1024];
 } TAPState;
 
+static void qemu_tap_announce_self(void);
+
 static void tap_receive(void *opaque, const uint8_t *buf, int size)
 {
+    static int arp_state = 0;
     TAPState *s = opaque;
     int ret;
+
+    if (!arp_state ) {
+        arp_state = 1;
+        /* send arp like package to vlan when enter is the first.
+           for xen migration.
+        */
+        qemu_tap_announce_self();
+    }
+
     for(;;) {
         ret = write(s->fd, buf, size); /* No error handling ?! */
         if (ret < 0 && (errno == EINTR || errno == EAGAIN)) {
@@ -4560,6 +4575,56 @@ static int launch_script(const char *setup_script, const char *ifname, int fd)
         }
     return 0;
 }
+
+#if defined(__linux__)
+#define SELF_ANNOUNCE_ROUNDS 5
+#define ETH_P_EXPERIMENTAL 0x01F1 /* just a number in experimental range */
+#define EXPERIMENTAL_MAGIC 0xf1f23f4f
+static int announce_self_create(unsigned char *buf, 
+                         unsigned char mac_addr[ETH_ALEN])
+{
+    struct ethhdr *eh = (struct ethhdr*)buf;
+    uint32_t *magic   = (uint32_t*)(eh+1);
+    unsigned char *p  = (unsigned char*)(magic + 1);
+
+    /* ethernet header */
+    memset(eh->h_dest,   0xff,     ETH_ALEN);
+    memcpy(eh->h_source, mac_addr, ETH_ALEN);
+    eh->h_proto = htons(ETH_P_EXPERIMENTAL);
+
+    /* magic data */
+    *magic = EXPERIMENTAL_MAGIC;
+
+    return p - buf; /* sizeof(*eh) + sizeof(*magic) */
+}
+
+static void qemu_tap_announce_self(void)
+{
+    int i, j, len;
+    VLANState *vlan;
+    VLANClientState *vc;
+    uint8_t buf[256];
+
+    for (i=0; i<nb_nics; i++) {     /* for all nics */
+        fprintf(logfile, "Send fake arp for domain %d, MAC: [%02X:%02X:%02X:%02X:%02X:%02X]\n",
+                          domid, nd_table[i].macaddr[0], 
+                          nd_table[i].macaddr[1], nd_table[i].macaddr[2], 
+                          nd_table[i].macaddr[3], nd_table[i].macaddr[4], 
+                          nd_table[i].macaddr[5]);
+        len = announce_self_create(buf, nd_table[i].macaddr);
+        vlan = nd_table[i].vlan;
+        for(vc = vlan->first_client; vc != NULL; vc = vc->next) {
+            if (vc->fd_read == tap_receive) { /* send only if tap */
+                for (j=0; j<SELF_ANNOUNCE_ROUNDS ; j++) {
+                    vc->fd_read(vc->opaque, buf, len);
+                }
+            }
+        } /* for vc -- look for tap_receive */
+    } /* for i -- all nics */
+}
+#else
+static void qemu_tap_announce_self(void) {}
+#endif
 
 static int net_tap_init(VLANState *vlan, const char *ifname1,
                         const char *setup_script, const char *down_script)
