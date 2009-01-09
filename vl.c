@@ -4700,28 +4700,11 @@ static int launch_script(const char *setup_script, const char *ifname,
     return 0;
 }
 
-#if defined(__linux__)
+static int announce_self_create(uint8_t *buf, 
+				uint8_t *mac_addr);
 #define SELF_ANNOUNCE_ROUNDS 5
-#define ETH_P_EXPERIMENTAL 0x01F1 /* just a number in experimental range */
-#define EXPERIMENTAL_MAGIC 0xf1f23f4f
-static int announce_self_create(unsigned char *buf, 
-                         unsigned char mac_addr[ETH_ALEN])
-{
-    struct ethhdr *eh = (struct ethhdr*)buf;
-    uint32_t *magic   = (uint32_t*)(eh+1);
-    unsigned char *p  = (unsigned char*)(magic + 1);
 
-    /* ethernet header */
-    memset(eh->h_dest,   0xff,     ETH_ALEN);
-    memcpy(eh->h_source, mac_addr, ETH_ALEN);
-    eh->h_proto = htons(ETH_P_EXPERIMENTAL);
-
-    /* magic data */
-    *magic = EXPERIMENTAL_MAGIC;
-
-    return p - buf; /* sizeof(*eh) + sizeof(*magic) */
-}
-
+#if defined(__linux__)
 static void qemu_tap_announce_self(void)
 {
     int i, j, len;
@@ -6376,7 +6359,6 @@ void qemu_del_wait_object(HANDLE handle, WaitObjectFunc *func, void *opaque)
 }
 #endif
 
-#define SELF_ANNOUNCE_ROUNDS 5
 #define ETH_P_EXPERIMENTAL 0x01F1 /* just a number */
 //#define ETH_P_EXPERIMENTAL 0x0012 /* make it the size of the packet */
 #define EXPERIMENTAL_MAGIC 0xf1f23f4f
