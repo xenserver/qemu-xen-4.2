@@ -52,8 +52,8 @@ ifdef CONFIG_STUBDOM
 CONFIG_PASSTHROUGH=1
 else
   ifeq (,$(wildcard /usr/include/pci))
-$(warning "### pciutils-dev package not found - missing /usr/include/pci")
-$(warning "### PCI passthrough capability has been disabled")
+$(warning === pciutils-dev package not found - missing /usr/include/pci)
+$(warning === PCI passthrough capability has been disabled)
   else
 CONFIG_PASSTHROUGH=1
   endif
@@ -63,7 +63,7 @@ ifdef CONFIG_PASSTHROUGH
 OBJS+= pass-through.o pt-msi.o
 LIBS += -lpci
 CFLAGS += -DCONFIG_PASSTHROUGH 
-$(info "### PCI passthrough capability has been enabled ###")
+$(info === PCI passthrough capability has been enabled ===)
 endif
 
 BAD_OBJS += gdbstub.o acpi.o apic.o
