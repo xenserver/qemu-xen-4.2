@@ -794,7 +794,7 @@ static void xenstore_process_dm_command_event(void)
     free(command);
 }
 
-void xenstore_record_dm(char *subpath, char *state)
+void xenstore_record_dm(const char *subpath, const char *state)
 {
     char *path = NULL;
 
@@ -851,7 +851,7 @@ xenstore_pv_driver_build_blacklisted(uint16_t product_nr,
         return 1;
 }
 
-void xenstore_record_dm_state(char *state)
+void xenstore_record_dm_state(const char *state)
 {
     xenstore_record_dm("state", state);
 }
@@ -1173,7 +1173,7 @@ int xenstore_unsubscribe_from_hotplug_status(struct xs_handle *handle,
     return rc;
 }
 
-static char *xenstore_vm_key_path(int domid, char *key) {
+static char *xenstore_vm_key_path(int domid, const char *key) {
     const char *uuid;
     char *buf = NULL;
     
@@ -1240,7 +1240,7 @@ char *xenstore_device_model_read(int domid, char *key, unsigned int *len)
     return value;
 }
 
-char *xenstore_extended_power_mgmt_read(char *key, unsigned int *len)
+char *xenstore_extended_power_mgmt_read(const char *key, unsigned int *len)
 {
     char *path = NULL, *value = NULL;
     
@@ -1255,7 +1255,7 @@ char *xenstore_extended_power_mgmt_read(char *key, unsigned int *len)
     return value;
 }
 
-int xenstore_extended_power_mgmt_write(char * key, char * value)
+int xenstore_extended_power_mgmt_write(const char *key, const char *value)
 {
     int ret;
     char *path = NULL;
@@ -1268,7 +1268,7 @@ int xenstore_extended_power_mgmt_write(char * key, char * value)
     return ret;
 }
 
-int xenstore_extended_power_mgmt_event_trigger(char *key, char * value)
+int xenstore_extended_power_mgmt_event_trigger(const char *key, const char *value)
 {
     int ret;
     char *path = NULL;
