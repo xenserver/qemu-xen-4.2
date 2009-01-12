@@ -290,8 +290,10 @@ const char *xenstore_get_guest_uuid(void) {
 #endif
 }
 
-#define DIRECT_PCI_STR_LEN 160
+#define DIRECT_PCI_STR_LEN 512
+#define PT_PCI_MSITRANSLATE_DEFAULT 1
 char direct_pci_str[DIRECT_PCI_STR_LEN];
+int direct_pci_msitranslate;
 void xenstore_parse_domain_config(int hvm_domid)
 {
     char **e_danger = NULL;
@@ -556,19 +558,49 @@ void xenstore_parse_domain_config(int hvm_domid)
             free(dev);
             dev = xs_read(xsh, XBT_NULL, buf, &len);
 
-            if ( strlen(dev) + strlen(direct_pci_str) > DIRECT_PCI_STR_LEN ) {
+            if ( strlen(dev) + strlen(direct_pci_str) > DIRECT_PCI_STR_LEN - 1) {
                 fprintf(stderr, "qemu: too many pci pass-through devices\n");
                 memset(direct_pci_str, 0, DIRECT_PCI_STR_LEN);
                 goto out;
             }
 
+
             /* append to direct_pci_str */
-            if ( dev ) {
-                strcat(direct_pci_str, dev);
-                strcat(direct_pci_str, "-");
+            if ( !dev )
+                continue;
+
+            strcat(direct_pci_str, dev);
+
+            if (pasprintf(&buf, "/local/domain/0/backend/pci/%u/%u/opts-%d",
+                          hvm_domid, pci_devid, i) != -1) {
+                free(dev);
+                dev = xs_read(xsh, XBT_NULL, buf, &len);
             }
+            if ( dev ) {
+                if ( strlen(dev) + strlen(direct_pci_str) > DIRECT_PCI_STR_LEN - 2) {
+                    fprintf(stderr, "qemu: too many pci pass-through devices\n");
+                    memset(direct_pci_str, 0, DIRECT_PCI_STR_LEN);
+                    goto out;
+                }
+                strcat(direct_pci_str, ",");
+                strcat(direct_pci_str, dev);
+            }
+
+            strcat(direct_pci_str, "-");
         }
     }
+
+    /* get the pci pass-through parameter */
+    if (pasprintf(&buf, "/local/domain/0/backend/pci/%u/%u/msitranslate",
+                  hvm_domid, pci_devid) == -1)
+        goto out;
+
+    free(params);
+    params = xs_read(xsh, XBT_NULL, buf, &len);
+    if (params)
+        direct_pci_msitranslate = atoi(params);
+    else
+        direct_pci_msitranslate = PT_PCI_MSITRANSLATE_DEFAULT;
 
  out:
     free(danger_type);

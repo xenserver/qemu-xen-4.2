@@ -121,6 +121,7 @@ struct pt_region {
 
 struct pt_msi_info {
     uint32_t flags;
+    uint32_t ctrl_offset; /* saved control offset */
     int pirq;          /* guest pirq corresponding */
     uint32_t addr_lo;  /* guest message address */
     uint32_t addr_hi;  /* guest message upper address */
@@ -158,6 +159,10 @@ struct pt_dev {
                                                 /* emul reg group list */
     struct pt_msi_info *msi;                    /* MSI virtualization */
     struct pt_msix_info *msix;                  /* MSI-X virtualization */
+    int machine_irq;                            /* saved pirq */
+    /* Physical MSI to guest INTx translation when possible */
+    int msi_trans_cap;
+    int msi_trans_en;
 };
 
 /* Used for formatting PCI BDF into cf8 format */
