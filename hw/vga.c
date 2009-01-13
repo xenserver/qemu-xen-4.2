@@ -2364,7 +2364,6 @@ static VGAState *xen_vga_state;
 void xen_vga_populate_vram(uint64_t vram_addr)
 {
     unsigned long nr_pfn;
-    struct xen_remove_from_physmap xrfp;
     xen_pfn_t *pfn_list;
     int i;
     int rc;
