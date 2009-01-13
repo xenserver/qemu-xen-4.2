@@ -2800,8 +2800,14 @@ static int pt_msgctrl_reg_write(struct pt_dev *ptdev,
                 PT_LOG("setup msi for dev %x\n", pd->devfn);
                 if (pt_msi_setup(ptdev))
                 {
-                    PT_LOG("pt_msi_setup error!!!\n");
-                    return -1;
+		    /* We do not broadcast the error to the framework code, so
+		     * that MSI errors are contained in MSI emulation code and
+		     * QEMU can go on running.
+		     * Guest MSI would be actually not working.
+		     */
+		    *value &= ~PCI_MSI_FLAGS_ENABLE;
+		    PT_LOG("Warning: Can not map MSI for dev %x\n", pd->devfn);
+		    return 0;
                 }
             }
             pt_msi_update(ptdev);
