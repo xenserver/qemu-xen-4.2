@@ -1,6 +1,9 @@
 #ifndef QEMU_XEN_H
 #define QEMU_XEN_H
 
+/* vl.c */
+extern int restore;
+
 /* xen_machine_fv.c */
 
 #if (defined(__i386__) || defined(__x86_64__)) && !defined(QEMU_TOOL)
@@ -21,9 +24,8 @@ void timeoffset_get(void);
 /* xen_platform.c */
 #ifndef QEMU_TOOL
 void pci_xen_platform_init(PCIBus *bus);
-void xen_vga_stolen_vram_addr(uint64_t vram_addr);
 void xen_vga_populate_vram(uint64_t vram_addr);
-void xen_vga_vram_map(uint64_t vram_addr, int copy);
+void xen_vga_vram_map(uint64_t vram_addr);
 #endif
 
 void ide_unplug_harddisks(void);

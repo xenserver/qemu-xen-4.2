@@ -2125,8 +2125,8 @@ static void vga_save(QEMUFile *f, void *opaque)
 #endif
     vram_size = s->vram_size;
     qemu_put_be32s(f, &vram_size);
-    qemu_put_be64s(f, &s->stolen_vram_addr);
-    if (!s->stolen_vram_addr)
+    qemu_put_be64s(f, &s->vram_gmfn);
+    if (!s->vram_gmfn)
         /* Old guest: VRAM is not mapped, we have to save it ourselves */
         qemu_put_buffer(f, s->vram_ptr, VGA_RAM_SIZE);
 }
@@ -2192,13 +2192,17 @@ static int vga_load(QEMUFile *f, void *opaque, int version_id)
 	if (vram_size != s->vram_size)
 	    return -EINVAL;
         if (version_id >= 4) {
-            qemu_get_be64s(f, &s->stolen_vram_addr);
-            if (s->stolen_vram_addr)
-                xen_vga_vram_map(s->stolen_vram_addr, 0);
+            qemu_get_be64s(f, &s->vram_gmfn);
+            if (s->vram_gmfn)
+                xen_vga_vram_map(s->vram_gmfn);
         }
         /* Old guest, VRAM is not mapped, we have to restore it ourselves */
-        if (!s->stolen_vram_addr)
+        if (!s->vram_gmfn) {
+            xen_vga_populate_vram(0xff000000);
+            xen_vga_vram_map(0xff000000);
+            s->vram_gmfn = 0xff000000;
             qemu_get_buffer(f, s->vram_ptr, s->vram_size); 
+        }
     }
 
     /* force refresh */
@@ -2356,7 +2360,7 @@ void vga_bios_init(VGAState *s)
 
 static VGAState *xen_vga_state;
 
-/* When loading old images we have to populate the video ram ourselves */
+/* Allocate video memory in the GPFN space */
 void xen_vga_populate_vram(uint64_t vram_addr)
 {
     unsigned long nr_pfn;
@@ -2380,23 +2384,10 @@ void xen_vga_populate_vram(uint64_t vram_addr)
         exit(1);
     }
     free(pfn_list);
-
-    xen_vga_vram_map(vram_addr, 0);
-
-    /* Unmap them from the guest for now. */
-    xrfp.domid = domid;
-    for (i = 0; i < nr_pfn; i++) {
-        xrfp.gpfn = (vram_addr >> TARGET_PAGE_BITS) + i;
-        rc = xc_memory_op(xc_handle, XENMEM_remove_from_physmap, &xrfp);
-        if (rc) {
-            fprintf(stderr, "remove_from_physmap PFN %"PRI_xen_pfn" failed: %d\n", xrfp.gpfn, rc);
-            break;
-        }
-    }
 }
 
-/* Called once video memory has been allocated in the GPFN space */
-void xen_vga_vram_map(uint64_t vram_addr, int copy)
+/* Mapping the video memory from GPFN space  */
+void xen_vga_vram_map(uint64_t vram_addr)
 {
     unsigned long nr_pfn;
     xen_pfn_t *pfn_list;
@@ -2424,42 +2415,10 @@ void xen_vga_vram_map(uint64_t vram_addr, int copy)
         exit(1);
     }
 
-    if (xc_domain_memory_translate_gpfn_list(xc_handle, domid, nr_pfn,
-                pfn_list, pfn_list)) {
-        fprintf(stderr, "Failed translation in xen_vga_vram_addr\n");
-        exit(1);
-    }
-
-    if (copy)
-        memcpy(vram, xen_vga_state->vram_ptr, VGA_RAM_SIZE);
-    if (xen_vga_state->vram_mfns) {
-        /* In case this function is called more than once */
-        free(xen_vga_state->vram_mfns);
-        munmap(xen_vga_state->vram_ptr, VGA_RAM_SIZE);
-    } else {
-        qemu_free(xen_vga_state->vram_ptr);
-    }
     xen_vga_state->vram_ptr = vram;
-    xen_vga_state->vram_mfns = pfn_list;
 #ifdef CONFIG_STUBDOM
     xenfb_pv_display_start(vram);
 #endif
-    /* If some display is already working, we need to update it now */
-    ds= xen_vga_state->ds;
-    if (ds) 
-        dpy_update(ds, 0,0, ds->width,ds->height);
-}
-
-/* Called at boot time when the BIOS has allocated video RAM */
-void xen_vga_stolen_vram_addr(uint64_t stolen_vram_addr)
-{
-    fprintf(logfile, "stolen video RAM at %llx\n",
-	    (unsigned long long)stolen_vram_addr);
-
-    xen_vga_state->stolen_vram_addr = stolen_vram_addr;
-
-    /* And copy from the initialization value */
-    xen_vga_vram_map(stolen_vram_addr, 1);
 }
 
 /* when used on xen environment, the vga_ram_base is not used */
@@ -2493,10 +2452,7 @@ void vga_common_init(VGAState *s, DisplayState *ds, uint8_t *vga_ram_base,
 
     vga_reset(s);
 
-    s->vram_ptr = qemu_mallocz(vga_ram_size);
-    s->vram_mfns = NULL;
     xen_vga_state = s;
-
     s->vram_offset = vga_ram_offset;
     s->vram_size = vga_ram_size;
     s->ds = ds;
@@ -2504,6 +2460,13 @@ void vga_common_init(VGAState *s, DisplayState *ds, uint8_t *vga_ram_base,
     s->get_bpp = vga_get_bpp;
     s->get_offsets = vga_get_offsets;
     s->get_resolution = vga_get_resolution;
+
+    if (!restore) {
+        xen_vga_populate_vram(0xff000000);
+        xen_vga_vram_map(0xff000000);
+        s->vram_gmfn = 0xff000000;
+    }
+
     graphic_console_init(s->ds, vga_update_display, vga_invalidate_display,
                          vga_screen_dump, vga_update_text, s);
 

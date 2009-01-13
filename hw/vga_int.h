@@ -100,8 +100,7 @@ typedef void (* vga_update_retrace_info_fn)(struct VGAState *s);
 
 #define VGA_STATE_COMMON                                                \
     uint8_t *vram_ptr;                                                  \
-    xen_pfn_t *vram_mfns;                                               \
-    uint64_t stolen_vram_addr; /* Address of stolen RAM */              \
+    uint64_t vram_gmfn;                                                 \
     unsigned long vram_offset;                                          \
     unsigned int vram_size;                                             \
     unsigned long bios_offset;                                          \

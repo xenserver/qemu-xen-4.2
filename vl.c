@@ -178,6 +178,7 @@
 /* Max number of PCI emulation */
 #define MAX_PCI_EMULATION 32
 
+int restore;
 const char *bios_dir = CONFIG_QEMU_SHAREDIR;
 const char *bios_name = NULL;
 static void *ioport_opaque[MAX_IOPORTS];
@@ -9509,6 +9510,7 @@ int main(int argc, char **argv)
                 break;
 	    case QEMU_OPTION_loadvm:
 		loadvm = optarg;
+                restore = 1;
 		break;
             case QEMU_OPTION_full_screen:
                 full_screen = 1;
