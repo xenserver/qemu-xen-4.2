@@ -793,7 +793,7 @@ static void raw_close(BlockDriverState *bs)
 {
     BDRVRawState *s = bs->opaque;
     if (s->fd >= 0) {
-#ifndef CONFIG_STUBDOM
+#if defined(__linux__) && !defined(CONFIG_STUBDOM)
         /* Invalidate buffer cache for this device. */
         ioctl(s->fd, BLKFLSBUF, 0);
 #endif
