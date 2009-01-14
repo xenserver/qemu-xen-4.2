@@ -288,7 +288,7 @@ QEMUMachine xenfv_machine = {
     "xenfv",
     "Xen Fully-virtualized PC",
     xen_init_fv,
-    (VGA_RAM_SIZE + BIOS_SIZE) | RAMSIZE_FIXED,
+    BIOS_SIZE | RAMSIZE_FIXED,
     .max_cpus = 1,
 };
 

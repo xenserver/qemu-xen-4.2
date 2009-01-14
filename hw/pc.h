@@ -119,12 +119,6 @@ enum vga_retrace_method {
 
 extern enum vga_retrace_method vga_retrace_method;
 
-#ifndef TARGET_SPARC
-#define VGA_RAM_SIZE (8192 * 1024)
-#else
-#define VGA_RAM_SIZE (9 * 1024 * 1024)
-#endif
-
 int isa_vga_init(DisplayState *ds, uint8_t *vga_ram_base,
                  unsigned long vga_ram_offset, int vga_ram_size);
 int pci_vga_init(PCIBus *bus, DisplayState *ds, uint8_t *vga_ram_base,

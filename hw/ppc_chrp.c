@@ -334,6 +334,6 @@ QEMUMachine core99_machine = {
     .name = "mac99",
     .desc = "Mac99 based PowerMAC",
     .init = ppc_core99_init,
-    .ram_require = BIOS_SIZE + VGA_RAM_SIZE,
+    .ram_require = BIOS_SIZE,
     .max_cpus = 1,
 };

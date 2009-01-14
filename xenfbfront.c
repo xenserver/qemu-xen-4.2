@@ -24,6 +24,8 @@ static char *kbd_path, *fb_path;
 
 static unsigned char linux2scancode[KEY_MAX + 1];
 
+extern uint32_t vga_ram_size;
+
 int xenfb_connect_vkbd(const char *path)
 {
     kbd_path = strdup(path);
@@ -74,7 +76,7 @@ static void xenfb_pv_resize_shared(DisplayState *ds, int w, int h, int depth, in
         fbfront_resize(fb_dev, ds->width, ds->height, ds->linesize, ds->depth, offset);
     } else {
         ds->data = xs->nonshared_vram;
-        fbfront_resize(fb_dev, w, h, linesize, ds->depth, VGA_RAM_SIZE);
+        fbfront_resize(fb_dev, w, h, linesize, ds->depth, vga_ram_size);
     }
 }
 
@@ -248,8 +250,8 @@ int xenfb_pv_display_init(DisplayState *ds)
 
     create_thread("kbdfront", kbdfront_thread, (void*) xs);
 
-    ds->data = xs->nonshared_vram = qemu_memalign(PAGE_SIZE, VGA_RAM_SIZE);
-    memset(ds->data, 0, VGA_RAM_SIZE);
+    ds->data = xs->nonshared_vram = qemu_memalign(PAGE_SIZE, vga_ram_size);
+    memset(ds->data, 0, vga_ram_size);
     ds->opaque = xs;
     ds->depth = 32;
     ds->bgr = 0;
@@ -271,7 +273,7 @@ int xenfb_pv_display_start(void *data)
     int kbd_fd, fb_fd;
     int offset = 0;
     unsigned long *mfns;
-    int n = VGA_RAM_SIZE / PAGE_SIZE;
+    int n = vga_ram_size / PAGE_SIZE;
     int i;
 
     if (!fb_path || !kbd_path)
@@ -296,7 +298,7 @@ int xenfb_pv_display_start(void *data)
     if (ds->shared_buf) {
         offset = (void*) ds->data - xs->vga_vram;
     } else {
-        offset = VGA_RAM_SIZE;
+        offset = vga_ram_size;
         ds->data = xs->nonshared_vram;
     }
     if (offset)
