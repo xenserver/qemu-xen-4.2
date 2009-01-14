@@ -25,6 +25,9 @@
 #ifdef CONFIG_STUBDOM
 #define CONFIG_NO_BATTERY_MGMT
 #endif
+#ifdef _BSD /* There's no ioperm(), outb(), inb() */
+#define CONFIG_NO_BATTERY_MGMT
+#endif
 
 enum POWER_MGMT_MODE { PM_MODE_NONE = 0, PM_MODE_PT, PM_MODE_NON_PT };
 enum BATTERY_INFO_TYPE { BATT_NONE, BIF, BST };
