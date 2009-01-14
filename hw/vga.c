@@ -40,6 +40,11 @@
 
 //#define DEBUG_BOCHS_VBE
 
+// PCI 0x04: command(word), 0x06(word): status
+#define PCI_COMMAND_IOACCESS                0x0001
+#define PCI_COMMAND_MEMACCESS               0x0002
+#define PCI_COMMAND_BUSMASTER               0x0004
+
 /* force some bits to zero */
 const uint8_t sr_mask[8] = {
     (uint8_t)~0xfc,
@@ -612,6 +617,10 @@ static void vbe_ioport_write_data(void *opaque, uint32_t addr, uint32_t val)
             if ((val & VBE_DISPI_ENABLED) &&
                 !(s->vbe_regs[VBE_DISPI_INDEX_ENABLE] & VBE_DISPI_ENABLED)) {
                 int h, shift_control;
+                
+                if (s->vram_gmfn != s->lfb_addr) {
+                     set_vram_mapping(s, s->lfb_addr, s->lfb_end);
+                }
 
                 s->vbe_regs[VBE_DISPI_INDEX_VIRT_WIDTH] =
                     s->vbe_regs[VBE_DISPI_INDEX_XRES];
@@ -2078,6 +2087,49 @@ static CPUWriteMemoryFunc *vga_mem_write[3] = {
     vga_mem_writel,
 };
 
+void set_vram_mapping(void *opaque, unsigned long begin, unsigned long end)
+{
+    unsigned long i;
+    struct xen_add_to_physmap xatp;
+    int rc;
+    VGAState *s = (VGAState *) opaque;
+
+    if (end > begin + s->vram_size)
+        end = begin + s->vram_size;
+
+    fprintf(logfile,"mapping vram to %lx - %lx\n", begin, end);
+
+    xatp.domid = domid;
+    xatp.space = XENMAPSPACE_gmfn;
+
+    for (i = 0; i < (end - begin) >> TARGET_PAGE_BITS; i++) {
+        xatp.idx = (s->vram_gmfn >> TARGET_PAGE_BITS) + i;
+        xatp.gpfn = (begin >> TARGET_PAGE_BITS) + i;
+        rc = xc_memory_op(xc_handle, XENMEM_add_to_physmap, &xatp);
+        if (rc) {
+            fprintf(stderr, "add_to_physmap MFN %"PRI_xen_pfn" to PFN %"PRI_xen_pfn" failed: %d\n", xatp.idx, xatp.gpfn, rc);
+            return;
+        }
+    }
+
+    (void)xc_domain_pin_memory_cacheattr(
+        xc_handle, domid,
+        begin >> TARGET_PAGE_BITS,
+        end >> TARGET_PAGE_BITS,
+        XEN_DOMCTL_MEM_CACHEATTR_WB);
+
+    s->vram_gmfn = begin;
+}
+
+void unset_vram_mapping(void *opaque)
+{
+    VGAState *s = (VGAState *) opaque;
+    if (s->vram_gmfn) {
+        /* We can put it there for xend to save it efficiently */
+        set_vram_mapping(s, 0xff000000, 0xff000000 + s->vram_size);
+    }
+}
+
 static void vga_save(QEMUFile *f, void *opaque)
 {
     VGAState *s = opaque;
@@ -2125,10 +2177,10 @@ static void vga_save(QEMUFile *f, void *opaque)
 #endif
     vram_size = s->vram_size;
     qemu_put_be32s(f, &vram_size);
-    qemu_put_be64s(f, &s->stolen_vram_addr);
-    if (!s->stolen_vram_addr)
+    qemu_put_be64s(f, &s->vram_gmfn);
+    if (!s->vram_gmfn)
         /* Old guest: VRAM is not mapped, we have to save it ourselves */
-        qemu_put_buffer(f, s->vram_ptr, VGA_RAM_SIZE);
+        qemu_put_buffer(f, s->vram_ptr, vram_size);
 }
 
 static int vga_load(QEMUFile *f, void *opaque, int version_id)
@@ -2192,13 +2244,17 @@ static int vga_load(QEMUFile *f, void *opaque, int version_id)
 	if (vram_size != s->vram_size)
 	    return -EINVAL;
         if (version_id >= 4) {
-            qemu_get_be64s(f, &s->stolen_vram_addr);
-            if (s->stolen_vram_addr)
-                xen_vga_vram_map(s->stolen_vram_addr, 0);
+            qemu_get_be64s(f, &s->vram_gmfn);
+            if (s->vram_gmfn)
+                xen_vga_vram_map(s->vram_gmfn, s->vram_size);
         }
         /* Old guest, VRAM is not mapped, we have to restore it ourselves */
-        if (!s->stolen_vram_addr)
+        if (!s->vram_gmfn) {
+            xen_vga_populate_vram(0xff000000, s->vram_size);
+            xen_vga_vram_map(0xff000000, s->vram_size);
+            s->vram_gmfn = 0xff000000;
             qemu_get_buffer(f, s->vram_ptr, s->vram_size); 
+        }
     }
 
     /* force refresh */
@@ -2220,6 +2276,18 @@ static void vga_map(PCIDevice *pci_dev, int region_num,
         cpu_register_physical_memory(addr, s->bios_size, s->bios_offset);
     } else {
         cpu_register_physical_memory(addr, s->vram_size, s->vram_offset);
+        s->lfb_addr = addr;
+        s->lfb_end = addr + size;
+#ifdef CONFIG_BOCHS_VBE
+        s->vbe_regs[VBE_DISPI_INDEX_LFB_ADDRESS_H] = s->lfb_addr >> 16;
+        s->vbe_regs[VBE_DISPI_INDEX_LFB_ADDRESS_L] = s->lfb_addr & 0xFFFF;
+        s->vbe_regs[VBE_DISPI_INDEX_VIDEO_MEMORY_64K] = s->vram_size >> 16;
+#endif
+   
+        fprintf(stderr, "vga s->lfb_addr = %lx s->lfb_end = %lx \n", (unsigned long) s->lfb_addr,(unsigned long) s->lfb_end);
+
+        if (size != s->vram_size)
+            fprintf(stderr, "vga map with size %x != %x\n", size, s->vram_size);
     }
 }
 
@@ -2356,11 +2424,10 @@ void vga_bios_init(VGAState *s)
 
 static VGAState *xen_vga_state;
 
-/* When loading old images we have to populate the video ram ourselves */
-void xen_vga_populate_vram(uint64_t vram_addr)
+/* Allocate video memory in the GPFN space */
+void xen_vga_populate_vram(uint64_t vram_addr, uint32_t vga_ram_size)
 {
     unsigned long nr_pfn;
-    struct xen_remove_from_physmap xrfp;
     xen_pfn_t *pfn_list;
     int i;
     int rc;
@@ -2368,7 +2435,7 @@ void xen_vga_populate_vram(uint64_t vram_addr)
     fprintf(logfile, "populating video RAM at %llx\n",
 	    (unsigned long long)vram_addr);
 
-    nr_pfn = VGA_RAM_SIZE >> TARGET_PAGE_BITS;
+    nr_pfn = vga_ram_size >> TARGET_PAGE_BITS;
 
     pfn_list = malloc(sizeof(*pfn_list) * nr_pfn);
 
@@ -2380,23 +2447,10 @@ void xen_vga_populate_vram(uint64_t vram_addr)
         exit(1);
     }
     free(pfn_list);
-
-    xen_vga_vram_map(vram_addr, 0);
-
-    /* Unmap them from the guest for now. */
-    xrfp.domid = domid;
-    for (i = 0; i < nr_pfn; i++) {
-        xrfp.gpfn = (vram_addr >> TARGET_PAGE_BITS) + i;
-        rc = xc_memory_op(xc_handle, XENMEM_remove_from_physmap, &xrfp);
-        if (rc) {
-            fprintf(stderr, "remove_from_physmap PFN %"PRI_xen_pfn" failed: %d\n", xrfp.gpfn, rc);
-            break;
-        }
-    }
 }
 
-/* Called once video memory has been allocated in the GPFN space */
-void xen_vga_vram_map(uint64_t vram_addr, int copy)
+/* Mapping the video memory from GPFN space  */
+void xen_vga_vram_map(uint64_t vram_addr, uint32_t vga_ram_size)
 {
     unsigned long nr_pfn;
     xen_pfn_t *pfn_list;
@@ -2407,7 +2461,7 @@ void xen_vga_vram_map(uint64_t vram_addr, int copy)
     fprintf(logfile, "mapping video RAM from %llx\n",
 	    (unsigned long long)vram_addr);
 
-    nr_pfn = VGA_RAM_SIZE >> TARGET_PAGE_BITS;
+    nr_pfn = vga_ram_size >> TARGET_PAGE_BITS;
 
     pfn_list = malloc(sizeof(*pfn_list) * nr_pfn);
 
@@ -2424,42 +2478,10 @@ void xen_vga_vram_map(uint64_t vram_addr, int copy)
         exit(1);
     }
 
-    if (xc_domain_memory_translate_gpfn_list(xc_handle, domid, nr_pfn,
-                pfn_list, pfn_list)) {
-        fprintf(stderr, "Failed translation in xen_vga_vram_addr\n");
-        exit(1);
-    }
-
-    if (copy)
-        memcpy(vram, xen_vga_state->vram_ptr, VGA_RAM_SIZE);
-    if (xen_vga_state->vram_mfns) {
-        /* In case this function is called more than once */
-        free(xen_vga_state->vram_mfns);
-        munmap(xen_vga_state->vram_ptr, VGA_RAM_SIZE);
-    } else {
-        qemu_free(xen_vga_state->vram_ptr);
-    }
     xen_vga_state->vram_ptr = vram;
-    xen_vga_state->vram_mfns = pfn_list;
 #ifdef CONFIG_STUBDOM
     xenfb_pv_display_start(vram);
 #endif
-    /* If some display is already working, we need to update it now */
-    ds= xen_vga_state->ds;
-    if (ds) 
-        dpy_update(ds, 0,0, ds->width,ds->height);
-}
-
-/* Called at boot time when the BIOS has allocated video RAM */
-void xen_vga_stolen_vram_addr(uint64_t stolen_vram_addr)
-{
-    fprintf(logfile, "stolen video RAM at %llx\n",
-	    (unsigned long long)stolen_vram_addr);
-
-    xen_vga_state->stolen_vram_addr = stolen_vram_addr;
-
-    /* And copy from the initialization value */
-    xen_vga_vram_map(stolen_vram_addr, 1);
 }
 
 /* when used on xen environment, the vga_ram_base is not used */
@@ -2493,10 +2515,7 @@ void vga_common_init(VGAState *s, DisplayState *ds, uint8_t *vga_ram_base,
 
     vga_reset(s);
 
-    s->vram_ptr = qemu_mallocz(vga_ram_size);
-    s->vram_mfns = NULL;
     xen_vga_state = s;
-
     s->vram_offset = vga_ram_offset;
     s->vram_size = vga_ram_size;
     s->ds = ds;
@@ -2504,6 +2523,13 @@ void vga_common_init(VGAState *s, DisplayState *ds, uint8_t *vga_ram_base,
     s->get_bpp = vga_get_bpp;
     s->get_offsets = vga_get_offsets;
     s->get_resolution = vga_get_resolution;
+
+    if (!restore) {
+        xen_vga_populate_vram(0xff000000, s->vram_size);
+        xen_vga_vram_map(0xff000000, s->vram_size);
+        s->vram_gmfn = 0xff000000;
+    }
+
     graphic_console_init(s->ds, vga_update_display, vga_invalidate_display,
                          vga_screen_dump, vga_update_text, s);
 
@@ -2582,6 +2608,11 @@ int isa_vga_init(DisplayState *ds, uint8_t *vga_ram_base,
     s = qemu_mallocz(sizeof(VGAState));
     if (!s)
         return -1;
+    
+    if (vga_ram_size > 16*1024*1024) {
+        fprintf (stderr, "The stdvga/VBE device model has no use for more than 16 Megs of vram. Video ram set to 16M. \n");
+        vga_ram_size = 16*1024*1024;
+    }
 
     vga_common_init(s, ds, vga_ram_base, vga_ram_offset, vga_ram_size);
     vga_init(s);
@@ -2609,6 +2640,11 @@ int pci_vga_init(PCIBus *bus, DisplayState *ds, uint8_t *vga_ram_base,
         return -1;
     s = &d->vga_state;
 
+    if (vga_ram_size > 16*1024*1024) {
+        fprintf (stderr, "The stdvga/VBE device model has no use for more than 16 Megs of vram. Video ram set to 16M. \n");
+        vga_ram_size = 16*1024*1024;
+    }
+
     vga_common_init(s, ds, vga_ram_base, vga_ram_offset, vga_ram_size);
     vga_init(s);
     s->pci_dev = &d->dev;
@@ -2618,9 +2654,14 @@ int pci_vga_init(PCIBus *bus, DisplayState *ds, uint8_t *vga_ram_base,
     pci_conf[0x01] = 0x12;
     pci_conf[0x02] = 0x11;
     pci_conf[0x03] = 0x11;
+    pci_conf[0x04] = PCI_COMMAND_IOACCESS | PCI_COMMAND_MEMACCESS /* | PCI_COMMAND_BUSMASTER */;
     pci_conf[0x0a] = 0x00; // VGA controller
     pci_conf[0x0b] = 0x03;
     pci_conf[0x0e] = 0x00; // header_type
+    pci_conf[0x2c] = 0x53; /* subsystem vendor: XenSource */
+    pci_conf[0x2d] = 0x58;
+    pci_conf[0x2e] = 0x01; /* subsystem device */
+    pci_conf[0x2f] = 0x00;
 
     /* XXX: vga_ram_size must be a power of two */
     pci_register_io_region(&d->dev, 0, vga_ram_size,

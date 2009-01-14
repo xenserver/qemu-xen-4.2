@@ -290,8 +290,10 @@ const char *xenstore_get_guest_uuid(void) {
 #endif
 }
 
-#define DIRECT_PCI_STR_LEN 160
+#define DIRECT_PCI_STR_LEN 512
+#define PT_PCI_MSITRANSLATE_DEFAULT 1
 char direct_pci_str[DIRECT_PCI_STR_LEN];
+int direct_pci_msitranslate;
 void xenstore_parse_domain_config(int hvm_domid)
 {
     char **e_danger = NULL;
@@ -556,19 +558,49 @@ void xenstore_parse_domain_config(int hvm_domid)
             free(dev);
             dev = xs_read(xsh, XBT_NULL, buf, &len);
 
-            if ( strlen(dev) + strlen(direct_pci_str) > DIRECT_PCI_STR_LEN ) {
+            if ( strlen(dev) + strlen(direct_pci_str) > DIRECT_PCI_STR_LEN - 1) {
                 fprintf(stderr, "qemu: too many pci pass-through devices\n");
                 memset(direct_pci_str, 0, DIRECT_PCI_STR_LEN);
                 goto out;
             }
 
+
             /* append to direct_pci_str */
-            if ( dev ) {
-                strcat(direct_pci_str, dev);
-                strcat(direct_pci_str, "-");
+            if ( !dev )
+                continue;
+
+            strcat(direct_pci_str, dev);
+
+            if (pasprintf(&buf, "/local/domain/0/backend/pci/%u/%u/opts-%d",
+                          hvm_domid, pci_devid, i) != -1) {
+                free(dev);
+                dev = xs_read(xsh, XBT_NULL, buf, &len);
             }
+            if ( dev ) {
+                if ( strlen(dev) + strlen(direct_pci_str) > DIRECT_PCI_STR_LEN - 2) {
+                    fprintf(stderr, "qemu: too many pci pass-through devices\n");
+                    memset(direct_pci_str, 0, DIRECT_PCI_STR_LEN);
+                    goto out;
+                }
+                strcat(direct_pci_str, ",");
+                strcat(direct_pci_str, dev);
+            }
+
+            strcat(direct_pci_str, "-");
         }
     }
+
+    /* get the pci pass-through parameter */
+    if (pasprintf(&buf, "/local/domain/0/backend/pci/%u/%u/msitranslate",
+                  hvm_domid, pci_devid) == -1)
+        goto out;
+
+    free(params);
+    params = xs_read(xsh, XBT_NULL, buf, &len);
+    if (params)
+        direct_pci_msitranslate = atoi(params);
+    else
+        direct_pci_msitranslate = PT_PCI_MSITRANSLATE_DEFAULT;
 
  out:
     free(danger_type);
@@ -762,7 +794,7 @@ static void xenstore_process_dm_command_event(void)
     free(command);
 }
 
-void xenstore_record_dm(char *subpath, char *state)
+void xenstore_record_dm(const char *subpath, const char *state)
 {
     char *path = NULL;
 
@@ -819,7 +851,7 @@ xenstore_pv_driver_build_blacklisted(uint16_t product_nr,
         return 1;
 }
 
-void xenstore_record_dm_state(char *state)
+void xenstore_record_dm_state(const char *state)
 {
     xenstore_record_dm("state", state);
 }
@@ -1141,7 +1173,7 @@ int xenstore_unsubscribe_from_hotplug_status(struct xs_handle *handle,
     return rc;
 }
 
-static char *xenstore_vm_key_path(int domid, char *key) {
+static char *xenstore_vm_key_path(int domid, const char *key) {
     const char *uuid;
     char *buf = NULL;
     
@@ -1208,7 +1240,7 @@ char *xenstore_device_model_read(int domid, char *key, unsigned int *len)
     return value;
 }
 
-char *xenstore_extended_power_mgmt_read(char *key, unsigned int *len)
+char *xenstore_extended_power_mgmt_read(const char *key, unsigned int *len)
 {
     char *path = NULL, *value = NULL;
     
@@ -1223,7 +1255,7 @@ char *xenstore_extended_power_mgmt_read(char *key, unsigned int *len)
     return value;
 }
 
-int xenstore_extended_power_mgmt_write(char * key, char * value)
+int xenstore_extended_power_mgmt_write(const char *key, const char *value)
 {
     int ret;
     char *path = NULL;
@@ -1236,7 +1268,7 @@ int xenstore_extended_power_mgmt_write(char * key, char * value)
     return ret;
 }
 
-int xenstore_extended_power_mgmt_event_trigger(char *key, char * value)
+int xenstore_extended_power_mgmt_event_trigger(const char *key, const char *value)
 {
     int ret;
     char *path = NULL;

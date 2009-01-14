@@ -64,6 +64,7 @@ struct PCIDevice {
 };
 
 extern char direct_pci_str[];
+extern int direct_pci_msitranslate;
 
 PCIDevice *pci_register_device(PCIBus *bus, const char *name,
                                int instance_size, int devfn,

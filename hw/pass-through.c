@@ -34,6 +34,7 @@ struct php_dev {
     uint8_t r_bus;
     uint8_t r_dev;
     uint8_t r_func;
+    char *opt;
 };
 struct dpci_infos {
 
@@ -492,7 +493,7 @@ static struct pt_reg_info_tbl pt_emu_reg_msi_tbl[] = {
         .size       = 2,
         .init_val   = 0x0000,
         .ro_mask    = 0x018E,
-        .emu_mask   = 0xFFFE,
+        .emu_mask   = 0xFFFF,
         .init       = pt_msgctrl_reg_init,
         .u.w.read   = pt_word_reg_read,
         .u.w.write  = pt_msgctrl_reg_write,
@@ -702,7 +703,7 @@ static int token_value(char *token)
     return strtol(token, NULL, 16);
 }
 
-static int next_bdf(char **str, int *seg, int *bus, int *dev, int *func)
+static int next_bdf(char **str, int *seg, int *bus, int *dev, int *func, char **opt)
 {
     char *token;
     const char *delim = ":.-";
@@ -721,9 +722,50 @@ static int next_bdf(char **str, int *seg, int *bus, int *dev, int *func)
     *dev  = token_value(token);
 
     token  = strsep(str, delim);
+    *opt = strchr(token, ',');
+    if (*opt)
+        *(*opt)++ = '\0';
+
     *func  = token_value(token);
 
     return 1;
+}
+
+static int get_next_keyval(char **option, char **key, char **val)
+{
+    char *opt, *k, *v;
+
+    k = *option;
+    opt = strchr(k, ',');
+    if (opt)
+        *opt++ = '\0';
+    v = strchr(k, '=');
+    if (!v)
+        return -1;
+    *v++ = '\0';
+
+    *key = k;
+    *val = v;
+    *option = opt;
+
+    return 0;
+}
+
+static void msi_set_enable(struct pt_dev *ptdev, int en)
+{
+    uint16_t val;
+    uint32_t address;
+    if (!ptdev->msi)
+        return;
+
+    address = ptdev->msi->ctrl_offset;
+    if (!address)
+        return;
+
+    val = pci_read_word(ptdev->pci_dev, address);
+    val &= ~PCI_MSI_FLAGS_ENABLE;
+    val |= en & PCI_MSI_FLAGS_ENABLE;
+    pci_write_word(ptdev->pci_dev, address, val);
 }
 
 /* Insert a new pass-through device into a specific pci slot.
@@ -732,7 +774,8 @@ static int next_bdf(char **str, int *seg, int *bus, int *dev, int *func)
  *         0: no free hotplug slots, but normal slot should okay
  *        >0: the new hotplug slot
  */
-static int __insert_to_pci_slot(int bus, int dev, int func, int slot)
+static int __insert_to_pci_slot(int bus, int dev, int func, int slot,
+                                char *opt)
 {
     int i, php_slot;
 
@@ -769,6 +812,7 @@ found:
     dpci_infos.php_devs[php_slot].r_bus  = bus;
     dpci_infos.php_devs[php_slot].r_dev  = dev;
     dpci_infos.php_devs[php_slot].r_func = func;
+    dpci_infos.php_devs[php_slot].opt = opt;
     return PHP_TO_PCI_SLOT(php_slot);
 }
 
@@ -778,19 +822,19 @@ found:
 int insert_to_pci_slot(char *bdf_slt)
 {
     int seg, bus, dev, func, slot;
-    char *bdf_str, *slt_str;
+    char *bdf_str, *slt_str, *opt;
     const char *delim="@";
 
     bdf_str = strsep(&bdf_slt, delim);
     slt_str = bdf_slt;
     slot = token_value(slt_str);
 
-    if ( !next_bdf(&bdf_str, &seg, &bus, &dev, &func))
+    if ( !next_bdf(&bdf_str, &seg, &bus, &dev, &func, &opt))
     {
         return -1;
     }
 
-    return __insert_to_pci_slot(bus, dev, func, slot);
+    return __insert_to_pci_slot(bus, dev, func, slot, opt);
 
 }
 
@@ -817,8 +861,9 @@ int test_pci_slot(int slot)
 int bdf_to_slot(char *bdf_str)
 {
     int seg, bus, dev, func, i;
+    char *opt;
 
-    if ( !next_bdf(&bdf_str, &seg, &bus, &dev, &func))
+    if ( !next_bdf(&bdf_str, &seg, &bus, &dev, &func, &opt))
     {
         return -1;
     }
@@ -1970,9 +2015,15 @@ static uint32_t pt_msgctrl_reg_init(struct pt_dev *ptdev,
         pci_write_word(pdev, real_offset, reg_field & ~PCI_MSI_FLAGS_ENABLE);
     }
     ptdev->msi->flags |= (reg_field | MSI_FLAG_UNINIT);
+    ptdev->msi->ctrl_offset = real_offset;
     
     /* All register is 0 after reset, except first 4 byte */
     reg_field &= reg->ro_mask;
+
+    if (ptdev->msi_trans_cap) {
+        PT_LOG("Turning on MSI-INTx translation\n");
+        ptdev->msi_trans_en = 1;
+    }
     
     return reg_field;
 }
@@ -2683,6 +2734,34 @@ static int pt_linkctrl2_reg_write(struct pt_dev *ptdev,
     return 0;
 }
 
+static void pt_unmap_msi_translate(struct pt_dev *ptdev)
+{
+    uint16_t e_device, e_intx;
+    int rc;
+
+    /* MSI_ENABLE bit should be disabed until the new handler is set */
+    msi_set_enable(ptdev, 0);
+
+    e_device = (ptdev->dev.devfn >> 3) & 0x1f;
+    /* fix virtual interrupt pin to INTA# */
+    e_intx = 0;
+    rc = xc_domain_unbind_pt_irq(xc_handle, domid, ptdev->msi->pirq,
+                                 PT_IRQ_TYPE_MSI_TRANSLATE, 0,
+                                 e_device, e_intx, 0);
+    if (rc < 0)
+        PT_LOG("Error: Unbinding pt irq for MSI-INTx failed! rc=%d\n", rc);
+
+    if (ptdev->machine_irq)
+    {
+        rc = xc_domain_bind_pt_pci_irq(xc_handle, domid, ptdev->machine_irq,
+                                       0, e_device, e_intx);
+        if ( rc < 0 )
+            PT_LOG("Error: Rebinding of interrupt failed! rc=%d\n", rc);
+    }
+
+    ptdev->msi_trans_en = 0;
+}
+
 /* write Message Control register */
 static int pt_msgctrl_reg_write(struct pt_dev *ptdev, 
     struct pt_reg_tbl *cfg_entry, 
@@ -2692,7 +2771,9 @@ static int pt_msgctrl_reg_write(struct pt_dev *ptdev,
     uint16_t writable_mask = 0;
     uint16_t throughable_mask = 0;
     uint16_t old_ctrl = cfg_entry->data;
+    uint8_t e_device, e_intx;
     PCIDevice *pd = (PCIDevice *)ptdev;
+    uint16_t val;
 
     /* Currently no support for multi-vector */
     if ((*value & PCI_MSI_FLAGS_QSIZE) != 0x0)
@@ -2709,21 +2790,35 @@ static int pt_msgctrl_reg_write(struct pt_dev *ptdev,
     PT_LOG("old_ctrl:%04xh new_ctrl:%04xh\n", old_ctrl, cfg_entry->data);
     
     /* create value for writing to I/O device register */
+    val = *value;
     throughable_mask = ~reg->emu_mask & valid_mask;
     *value = ((*value & throughable_mask) | (dev_value & ~throughable_mask));
 
     /* update MSI */
-    if (*value & PCI_MSI_FLAGS_ENABLE)
+    if (val & PCI_MSI_FLAGS_ENABLE)
     {
         /* setup MSI pirq for the first time */
         if (ptdev->msi->flags & MSI_FLAG_UNINIT)
         {
-            /* Init physical one */
-            PT_LOG("setup msi for dev %x\n", pd->devfn);
-            if (pt_msi_setup(ptdev))
+            if (ptdev->msi_trans_en) {
+                PT_LOG("guest enabling MSI, disable MSI-INTx translation\n");
+                pt_unmap_msi_translate(ptdev);
+            }
+            else
             {
-                PT_LOG("pt_msi_setup error!!!\n");
-                return -1;
+                /* Init physical one */
+                PT_LOG("setup msi for dev %x\n", pd->devfn);
+                if (pt_msi_setup(ptdev))
+                {
+		    /* We do not broadcast the error to the framework code, so
+		     * that MSI errors are contained in MSI emulation code and
+		     * QEMU can go on running.
+		     * Guest MSI would be actually not working.
+		     */
+		    *value &= ~PCI_MSI_FLAGS_ENABLE;
+		    PT_LOG("Warning: Can not map MSI for dev %x\n", pd->devfn);
+		    return 0;
+                }
             }
             pt_msi_update(ptdev);
 
@@ -2734,6 +2829,12 @@ static int pt_msgctrl_reg_write(struct pt_dev *ptdev,
     }
     else
         ptdev->msi->flags &= ~PCI_MSI_FLAGS_ENABLE;
+
+    /* pass through MSI_ENABLE bit when no MSI-INTx translation */
+    if (!ptdev->msi_trans_en) {
+        *value &= ~PCI_MSI_FLAGS_ENABLE;
+        *value |= val & PCI_MSI_FLAGS_ENABLE;
+    }
 
     return 0;
 }
@@ -2880,7 +2981,13 @@ static int pt_msixctrl_reg_write(struct pt_dev *ptdev,
 
     /* update MSI-X */
     if ((*value & PCI_MSIX_ENABLE) && !(*value & PCI_MSIX_MASK))
+    {
+        if (ptdev->msi_trans_en) {
+            PT_LOG("guest enabling MSI-X, disable MSI-INTx translation\n");
+            pt_unmap_msi_translate(ptdev);
+        }
         pt_msix_update(ptdev);
+    }
 
     ptdev->msix->enabled = !!(*value & PCI_MSIX_ENABLE);
 
@@ -2889,7 +2996,8 @@ static int pt_msixctrl_reg_write(struct pt_dev *ptdev,
 
 struct pt_dev * register_real_device(PCIBus *e_bus,
         const char *e_dev_name, int e_devfn, uint8_t r_bus, uint8_t r_dev,
-        uint8_t r_func, uint32_t machine_irq, struct pci_access *pci_access)
+        uint8_t r_func, uint32_t machine_irq, struct pci_access *pci_access,
+        char *opt)
 {
     int rc = -1, i;
     struct pt_dev *assigned_device = NULL;
@@ -2897,6 +3005,8 @@ struct pt_dev * register_real_device(PCIBus *e_bus,
     uint8_t e_device, e_intx;
     struct pci_config_cf8 machine_bdf;
     int free_pci_slot = -1;
+    char *key, *val;
+    int msi_translate;
 
     PT_LOG("Assigning real physical device %02x:%02x.%x ...\n",
         r_bus, r_dev, r_func);
@@ -2918,12 +3028,40 @@ struct pt_dev * register_real_device(PCIBus *e_bus,
 
     if ( e_devfn == PT_VIRT_DEVFN_AUTO ) {
         /*indicate a static assignment(not hotplug), so find a free PCI hot plug slot */
-        free_pci_slot = __insert_to_pci_slot(r_bus, r_dev, r_func, 0);
+        free_pci_slot = __insert_to_pci_slot(r_bus, r_dev, r_func, 0, NULL);
         if ( free_pci_slot > 0 )
             e_devfn = free_pci_slot  << 3;
         else
             PT_LOG("Error: no free virtual PCI hot plug slot, thus no live migration.\n");
     }
+
+    msi_translate = direct_pci_msitranslate;
+    while (opt) {
+        if (get_next_keyval(&opt, &key, &val)) {
+            PT_LOG("Error: unrecognized PCI assignment option \"%s\"\n", opt);
+            break;
+        }
+
+        if (strcmp(key, "msitranslate") == 0)
+        {
+            if (strcmp(val, "0") == 0 || strcmp(val, "no") == 0)
+            {
+                PT_LOG("Disable MSI translation via per device option\n");
+                msi_translate = 0;
+            }
+            else if (strcmp(val, "1") == 0 || strcmp(val, "yes") == 0)
+            {
+                PT_LOG("Enable MSI translation via per device option\n");
+                msi_translate = 1;
+            }
+            else
+                PT_LOG("Error: unrecognized value for msitranslate=\n");
+        }
+        else
+            PT_LOG("Error: unrecognized PCI assignment option \"%s=%s\"\n", key, val);
+
+    }
+
 
     /* Register device */
     assigned_device = (struct pt_dev *) pci_register_device(e_bus, e_dev_name,
@@ -2939,6 +3077,7 @@ struct pt_dev * register_real_device(PCIBus *e_bus,
         dpci_infos.php_devs[PCI_TO_PHP_SLOT(free_pci_slot)].pt_dev = assigned_device;
 
     assigned_device->pci_dev = pci_dev;
+    assigned_device->msi_trans_cap = msi_translate;
 
     /* Assign device */
     machine_bdf.reg = 0;
@@ -2970,6 +3109,28 @@ struct pt_dev * register_real_device(PCIBus *e_bus,
     /* fix virtual interrupt pin to INTA# */
     e_intx = 0;
 
+    while (assigned_device->msi_trans_en)
+    {
+        if (pt_msi_setup(assigned_device))
+        {
+            PT_LOG("Error: MSI-INTx translation MSI setup failed, fallback\n");
+            assigned_device->msi_trans_en = 0;
+            break;
+        }
+
+        rc = xc_domain_bind_pt_irq(xc_handle, domid, assigned_device->msi->pirq,
+                                   PT_IRQ_TYPE_MSI_TRANSLATE, 0,
+                                   e_device, e_intx, 0);
+        if ( rc < 0)
+        {
+            PT_LOG("Error: MSI-INTx translation bind failed, fallback\n");
+            assigned_device->msi_trans_en = 0;
+            break;
+        }
+        msi_set_enable(assigned_device, 1);
+        break;
+    }
+
     if ( PT_MACHINE_IRQ_AUTO == machine_irq )
     {
         int pirq = pci_dev->irq;
@@ -2983,8 +3144,14 @@ struct pt_dev * register_real_device(PCIBus *e_bus,
             PT_LOG("Error: Mapping irq failed, rc = %d\n", rc);
         }
         else
+        {
             machine_irq = pirq;
+            assigned_device->machine_irq = pirq;
+        }
     }
+
+    if (assigned_device->msi_trans_en)
+        goto out;
 
     /* bind machine_irq to device */
     if ( 0 != machine_irq )
@@ -3005,8 +3172,9 @@ struct pt_dev * register_real_device(PCIBus *e_bus,
     }
 
 out:
-    PT_LOG("Real physical device %02x:%02x.%x registered successfuly!\n", 
-        r_bus, r_dev, r_func);
+    PT_LOG("Real physical device %02x:%02x.%x registered successfuly!\n"
+           "IRQ type = %s\n", r_bus, r_dev, r_func,
+           assigned_device->msi_trans_en? "MSI-INTx":"INTx");
 
     return assigned_device;
 }
@@ -3039,9 +3207,9 @@ int unregister_real_device(int php_slot)
     e_device = (assigned_device->dev.devfn >> 3) & 0x1f;
     /* fix virtual interrupt pin to INTA# */
     e_intx = 0;
-    machine_irq = pci_dev->irq;
+    machine_irq = assigned_device->machine_irq;
 
-    if ( machine_irq != 0 ) {
+    if ( assigned_device->msi_trans_en == 0 && machine_irq ) {
         rc = xc_domain_unbind_pt_irq(xc_handle, domid, machine_irq, PT_IRQ_TYPE_PCI, 0,
                                        e_device, e_intx, 0);
         if ( rc < 0 )
@@ -3050,6 +3218,16 @@ int unregister_real_device(int php_slot)
             PT_LOG("Error: Unbinding of interrupt failed! rc=%d\n", rc);
         }
     }
+    else if (assigned_device->msi_trans_en)
+    {
+        rc = xc_domain_unbind_pt_irq(xc_handle, domid, assigned_device->msi->pirq,
+                                     PT_IRQ_TYPE_MSI_TRANSLATE, 0,
+                                     e_device, e_intx, 0);
+        if (rc < 0)
+            PT_LOG("Error: Unbinding pt irq for MSI-INTx failed! rc=%d\n", rc);
+    }
+
+    /* TODO: unmap passthrough MSI and MSI-X irqs */
 
     /* delete all emulated config registers */
     pt_config_delete(assigned_device);
@@ -3085,7 +3263,10 @@ int power_on_php_slot(int php_slot)
             php_dev->r_dev,
             php_dev->r_func,
             PT_MACHINE_IRQ_AUTO,
-            dpci_infos.pci_access);
+            dpci_infos.pci_access,
+            php_dev->opt);
+
+    php_dev->opt = NULL;
 
     php_dev->pt_dev = pt_dev;
 
@@ -3107,6 +3288,7 @@ int pt_init(PCIBus *e_bus, const char *direct_pci)
     char slot_str[8];
     char *direct_pci_head = NULL;
     char *direct_pci_p = NULL;
+    char *opt;
 
     /* Initialize libpci */
     pci_access = pci_alloc();
@@ -3135,11 +3317,11 @@ int pt_init(PCIBus *e_bus, const char *direct_pci)
     vslots = qemu_mallocz ( strlen(direct_pci) / 3 );
 
     /* Assign given devices to guest */
-    while ( next_bdf(&direct_pci_p, &seg, &b, &d, &f) )
+    while ( next_bdf(&direct_pci_p, &seg, &b, &d, &f, &opt) )
     {
         /* Register real device with the emulated bus */
         pt_dev = register_real_device(e_bus, "DIRECT PCI", PT_VIRT_DEVFN_AUTO,
-            b, d, f, PT_MACHINE_IRQ_AUTO, pci_access);
+            b, d, f, PT_MACHINE_IRQ_AUTO, pci_access, opt);
         if ( pt_dev == NULL )
         {
             PT_LOG("Error: Registration failed (%02x:%02x.%x)\n", b, d, f);

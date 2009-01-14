@@ -178,6 +178,7 @@
 /* Max number of PCI emulation */
 #define MAX_PCI_EMULATION 32
 
+int restore;
 const char *bios_dir = CONFIG_QEMU_SHAREDIR;
 const char *bios_name = NULL;
 static void *ioport_opaque[MAX_IOPORTS];
@@ -189,7 +190,6 @@ DriveInfo drives_table[MAX_DRIVES+1];
 int nb_drives;
 /* point to the block driver where the snapshots are managed */
 static BlockDriverState *bs_snapshots;
-static int vga_ram_size;
 enum vga_retrace_method vga_retrace_method = VGA_RETRACE_DUMB;
 static DisplayState display_state;
 int nographic;
@@ -204,7 +204,9 @@ static int rtc_utc = 1;
 static int rtc_date_offset = -1; /* -1 means no change */
 int cirrus_vga_enabled = 1;
 int vmsvga_enabled = 0;
+int vga_ram_size = 4 * 1024 * 1024;
 #ifdef TARGET_SPARC
+vga_ram_size += 1024 * 1024;
 int graphic_width = 1024;
 int graphic_height = 768;
 int graphic_depth = 8;
@@ -8454,6 +8456,7 @@ static void help(int exitcode)
 #ifdef TARGET_I386
            "-std-vga        simulate a standard VGA card with VESA Bochs Extensions\n"
            "                (default is CL-GD5446 PCI VGA)\n"
+           "-videoram       set amount of memory available to virtual video adapter\n"
            "-no-acpi        disable ACPI\n"
 #endif
 #ifdef CONFIG_CURSES
@@ -8548,6 +8551,7 @@ enum {
     QEMU_OPTION_g,
     QEMU_OPTION_vga,
     QEMU_OPTION_std_vga,
+    QEMU_OPTION_videoram,
     QEMU_OPTION_echr,
     QEMU_OPTION_monitor,
     QEMU_OPTION_domainname,
@@ -8660,6 +8664,7 @@ static const QEMUOption qemu_options[] = {
 #endif
     { "localtime", 0, QEMU_OPTION_localtime },
     { "std-vga", 0, QEMU_OPTION_std_vga },
+    { "videoram", HAS_ARG, QEMU_OPTION_videoram },
     { "vga", HAS_ARG, QEMU_OPTION_vga },
     { "echr", HAS_ARG, QEMU_OPTION_echr },
     { "monitor", HAS_ARG, QEMU_OPTION_monitor },
@@ -9079,7 +9084,6 @@ int main(int argc, char **argv)
     cpu_model = NULL;
     initrd_filename = NULL;
     ram_size = 0;
-    vga_ram_size = VGA_RAM_SIZE;
 #ifdef CONFIG_GDBSTUB
     use_gdbstub = 0;
     gdbstub_port = DEFAULT_GDBSTUB_PORT;
@@ -9446,6 +9450,16 @@ int main(int argc, char **argv)
             case QEMU_OPTION_vga:
                 select_vgahw (optarg);
                 break;
+            case QEMU_OPTION_videoram:
+                {
+                    char *ptr;
+                    vga_ram_size = strtol(optarg,&ptr,10);
+                    vga_ram_size *= 1024 * 1024;
+#ifdef TARGET_SPARC
+                    vga_ram_size += (1024 * 1024);
+#endif
+                }
+                break;
             case QEMU_OPTION_g:
                 {
                     const char *p;
@@ -9509,6 +9523,7 @@ int main(int argc, char **argv)
                 break;
 	    case QEMU_OPTION_loadvm:
 		loadvm = optarg;
+                restore = 1;
 		break;
             case QEMU_OPTION_full_screen:
                 full_screen = 1;
@@ -9870,7 +9885,15 @@ int main(int argc, char **argv)
 #endif
 
     /* init the memory */
-    phys_ram_size = machine->ram_require & ~RAMSIZE_FIXED;
+
+    /* If we're on cirrus, set vga_ram_size to 4M whatever the videoram option might have set it to */
+    if ( cirrus_vga_enabled && vga_ram_size != 4 * 1024 * 1024 )
+    {
+       fprintf(stderr,"-videoram option does not work with cirrus vga device model. Videoram set to 4M.\n");
+       vga_ram_size = 4 * 1024 * 1024;
+    }
+
+    phys_ram_size = (machine->ram_require + vga_ram_size) & ~RAMSIZE_FIXED;
 
     if (machine->ram_require & RAMSIZE_FIXED) {
         if (ram_size > 0) {
