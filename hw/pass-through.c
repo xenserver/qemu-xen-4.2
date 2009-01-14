@@ -622,6 +622,10 @@ static const struct pt_reg_grp_info_tbl pt_emu_reg_grp_tbl[] = {
         .grp_size   = 0x04,
         .size_init  = pt_reg_grp_size_init,
     },
+#ifndef __ia64__
+    /* At present IA64 Xen doesn't support MSI for passthrough, so let's not
+     * expose MSI capability to IA64 HVM guest for now. 
+     */
     /* MSI Capability Structure reg group */
     {
         .grp_id     = PCI_CAP_ID_MSI,
@@ -630,6 +634,7 @@ static const struct pt_reg_grp_info_tbl pt_emu_reg_grp_tbl[] = {
         .size_init  = pt_msi_size_init,
         .emu_reg_tbl= pt_emu_reg_msi_tbl,
     },
+#endif
     /* PCI-X Capabilities List Item reg group */
     {
         .grp_id     = PCI_CAP_ID_PCIX,
@@ -674,6 +679,10 @@ static const struct pt_reg_grp_info_tbl pt_emu_reg_grp_tbl[] = {
         .size_init  = pt_pcie_size_init,
         .emu_reg_tbl= pt_emu_reg_pcie_tbl,
     },
+#ifndef __ia64__
+    /* At present IA64 Xen doesn't support MSI for passthrough, so let's not
+     * expose MSI-X capability to IA64 HVM guest for now. 
+     */
     /* MSI-X Capability Structure reg group */
     {
         .grp_id     = PCI_CAP_ID_MSIX,
@@ -682,6 +691,7 @@ static const struct pt_reg_grp_info_tbl pt_emu_reg_grp_tbl[] = {
         .size_init  = pt_msix_size_init,
         .emu_reg_tbl= pt_emu_reg_msix_tbl,
     },
+#endif
     {
         .grp_size = 0,
     }, 
