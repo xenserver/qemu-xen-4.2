@@ -2126,7 +2126,7 @@ void unset_vram_mapping(void *opaque)
     VGAState *s = (VGAState *) opaque;
     if (s->vram_gmfn) {
         /* We can put it there for xend to save it efficiently */
-        set_vram_mapping(s, 0xff000000, 0xff000000 + s->vram_size);
+        set_vram_mapping(s, VRAM_RESERVED_ADDRESS, VRAM_RESERVED_ADDRESS + s->vram_size);
     }
 }
 
@@ -2250,9 +2250,9 @@ static int vga_load(QEMUFile *f, void *opaque, int version_id)
         }
         /* Old guest, VRAM is not mapped, we have to restore it ourselves */
         if (!s->vram_gmfn) {
-            xen_vga_populate_vram(0xff000000, s->vram_size);
-            xen_vga_vram_map(0xff000000, s->vram_size);
-            s->vram_gmfn = 0xff000000;
+            xen_vga_populate_vram(VRAM_RESERVED_ADDRESS, s->vram_size);
+            xen_vga_vram_map(VRAM_RESERVED_ADDRESS, s->vram_size);
+            s->vram_gmfn = VRAM_RESERVED_ADDRESS;
             qemu_get_buffer(f, s->vram_ptr, s->vram_size); 
         }
     }
@@ -2525,9 +2525,9 @@ void vga_common_init(VGAState *s, DisplayState *ds, uint8_t *vga_ram_base,
     s->get_resolution = vga_get_resolution;
 
     if (!restore) {
-        xen_vga_populate_vram(0xff000000, s->vram_size);
-        xen_vga_vram_map(0xff000000, s->vram_size);
-        s->vram_gmfn = 0xff000000;
+        xen_vga_populate_vram(VRAM_RESERVED_ADDRESS, s->vram_size);
+        xen_vga_vram_map(VRAM_RESERVED_ADDRESS, s->vram_size);
+        s->vram_gmfn = VRAM_RESERVED_ADDRESS;
     }
 
     graphic_console_init(s->ds, vga_update_display, vga_invalidate_display,

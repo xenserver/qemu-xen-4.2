@@ -3165,7 +3165,7 @@ static int cirrus_vga_load(QEMUFile *f, void *opaque, int version_id)
     if (!s->vram_gmfn) {
         /* Old guest, VRAM is not mapped, we have to restore it
          * ourselves */
-        s->vram_gmfn = vga_acc ? s->lfb_addr : 0xff000000;
+        s->vram_gmfn = vga_acc ? s->lfb_addr : VRAM_RESERVED_ADDRESS;
         xen_vga_populate_vram(s->vram_gmfn, s->vram_size);
     }
     xen_vga_vram_map(s->vram_gmfn, s->vram_size);
