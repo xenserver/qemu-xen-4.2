@@ -24,7 +24,6 @@
 
 #include "hw.h"
 #include "pc.h"
-#include "xen_console.h"
 #include "xenfb.h"
 #include "sysemu.h"
 #include "boards.h"
@@ -65,14 +64,7 @@ static void xen_init_pv(ram_addr_t ram_size, int vga_ram_size,
         fprintf(stderr, "%s: xen backend core setup failed\n", __FUNCTION__);
         exit(1);
     }
-
-    /* Connect to text console */
-    if (serial_hds[0]) {
-        if (xencons_init(domid, serial_hds[0]) < 0) {
-            fprintf(stderr, "Could not connect to domain console\n");
-            exit(1);
-        }
-    }
+    xen_be_register("console", &xen_console_ops);
 
     /* Prepare PVFB state */
     xenfb = xenfb_new(domid, ds);
