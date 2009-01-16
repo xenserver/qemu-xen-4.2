@@ -32,6 +32,7 @@ qemu-nbd.pod
 *.vr
 *.d
 *.o
+*.orig
 *~
 
 i386-dm/Makefile

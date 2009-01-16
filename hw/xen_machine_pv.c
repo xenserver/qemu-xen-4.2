@@ -24,10 +24,13 @@
 
 #include "hw.h"
 #include "pc.h"
-#include "xen_console.h"
 #include "xenfb.h"
 #include "sysemu.h"
 #include "boards.h"
+#include "xen_backend.h"
+
+int xen_domid;
+enum xen_mode xen_mode = XEN_EMULATE;
 
 extern void init_blktap(void);
 
@@ -56,13 +59,12 @@ static void xen_init_pv(ram_addr_t ram_size, int vga_ram_size,
     /* Initialize a dummy CPU */
     env = cpu_init(NULL);
 
-    /* Connect to text console */
-    if (serial_hds[0]) {
-        if (xencons_init(domid, serial_hds[0]) < 0) {
-            fprintf(stderr, "Could not connect to domain console\n");
-            exit(1);
-        }
+    /* Initialize backend core & drivers */
+    if (-1 == xen_be_init()) {
+        fprintf(stderr, "%s: xen backend core setup failed\n", __FUNCTION__);
+        exit(1);
     }
+    xen_be_register("console", &xen_console_ops);
 
     /* Prepare PVFB state */
     xenfb = xenfb_new(domid, ds);

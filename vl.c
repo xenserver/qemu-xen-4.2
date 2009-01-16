@@ -31,6 +31,7 @@
 #include "hw/pci.h"
 #include "hw/baum.h"
 #include "hw/bt.h"
+#include "hw/xen.h"
 #include "net.h"
 #include "console.h"
 #include "sysemu.h"
@@ -8594,6 +8595,11 @@ enum {
     QEMU_OPTION_icount,
     QEMU_OPTION_uuid,
     QEMU_OPTION_incoming,
+#ifdef CONFIG_XEN
+    QEMU_OPTION_xen_domid,
+    QEMU_OPTION_xen_create,
+    QEMU_OPTION_xen_attach,
+#endif
 };
 
 typedef struct QEMUOption {
@@ -8695,6 +8701,11 @@ static const QEMUOption qemu_options[] = {
     { "curses", 0, QEMU_OPTION_curses },
 #endif
     { "uuid", HAS_ARG, QEMU_OPTION_uuid },
+#ifdef CONFIG_XEN
+    { "xen-domid", HAS_ARG, QEMU_OPTION_xen_domid },
+    { "xen-create", 0, QEMU_OPTION_xen_create },
+    { "xen-attach", 0, QEMU_OPTION_xen_attach },
+#endif
 
     /* temporary options */
     { "usb", 0, QEMU_OPTION_usb },
@@ -9400,8 +9411,9 @@ int main(int argc, char **argv)
                 nb_pci_emulation++;
                 break;
             }
-            case QEMU_OPTION_domid:
-                domid = atoi(optarg);
+            case QEMU_OPTION_domid: /* depricated, use -xen-* instead */
+                xen_domid = domid = atoi(optarg);
+                xen_mode  = XEN_ATTACH;
                 fprintf(logfile, "domid: %d\n", domid);
                 break;
             case QEMU_OPTION_d:
@@ -9626,12 +9638,11 @@ int main(int argc, char **argv)
             case QEMU_OPTION_semihosting:
                 semihosting_enabled = 1;
                 break;
-            case QEMU_OPTION_domainname:
-                snprintf(domain_name, sizeof(domain_name),
-                         "Xen-%s", optarg);
-                break;
+            case QEMU_OPTION_domainname: /* depricated, use -name instead */
             case QEMU_OPTION_name:
                 qemu_name = optarg;
+                snprintf(domain_name, sizeof(domain_name),
+                         "Xen-%s", optarg);
                 break;
 #ifdef TARGET_SPARC
             case QEMU_OPTION_prom_env:
@@ -9705,6 +9716,17 @@ int main(int argc, char **argv)
             case QEMU_OPTION_incoming:
                 incoming = optarg;
                 break;
+#ifdef CONFIG_XEN
+            case QEMU_OPTION_xen_domid:
+                xen_domid = domid = atoi(optarg);
+                break;
+            case QEMU_OPTION_xen_create:
+                xen_mode = XEN_CREATE;
+                break;
+            case QEMU_OPTION_xen_attach:
+                xen_mode = XEN_ATTACH;
+                break;
+#endif
             }
         }
     }
