@@ -2251,7 +2251,6 @@ static int vga_load(QEMUFile *f, void *opaque, int version_id)
         /* Old guest, VRAM is not mapped, we have to restore it ourselves */
         if (!s->vram_gmfn) {
             xen_vga_populate_vram(VRAM_RESERVED_ADDRESS, s->vram_size);
-            xen_vga_vram_map(VRAM_RESERVED_ADDRESS, s->vram_size);
             s->vram_gmfn = VRAM_RESERVED_ADDRESS;
             qemu_get_buffer(f, s->vram_ptr, s->vram_size); 
         }
@@ -2447,6 +2446,12 @@ void xen_vga_populate_vram(uint64_t vram_addr, uint32_t vga_ram_size)
         exit(1);
     }
     free(pfn_list);
+
+    xen_vga_vram_map(vram_addr, vga_ram_size);
+
+    /* Win2K seems to assume that the pattern buffer is at 0xff
+       initially ! */
+    memset(xen_vga_state->vram_ptr, 0xff, vga_ram_size);
 }
 
 /* Mapping the video memory from GPFN space  */
@@ -2456,7 +2461,6 @@ void xen_vga_vram_map(uint64_t vram_addr, uint32_t vga_ram_size)
     xen_pfn_t *pfn_list;
     int i;
     void *vram;
-    DisplayState *ds;
 
     fprintf(logfile, "mapping video RAM from %llx\n",
 	    (unsigned long long)vram_addr);
@@ -2526,7 +2530,6 @@ void vga_common_init(VGAState *s, DisplayState *ds, uint8_t *vga_ram_base,
 
     if (!restore) {
         xen_vga_populate_vram(VRAM_RESERVED_ADDRESS, s->vram_size);
-        xen_vga_vram_map(VRAM_RESERVED_ADDRESS, s->vram_size);
         s->vram_gmfn = VRAM_RESERVED_ADDRESS;
     }
 

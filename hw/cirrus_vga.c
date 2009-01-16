@@ -3167,8 +3167,9 @@ static int cirrus_vga_load(QEMUFile *f, void *opaque, int version_id)
          * ourselves */
         s->vram_gmfn = vga_acc ? s->lfb_addr : VRAM_RESERVED_ADDRESS;
         xen_vga_populate_vram(s->vram_gmfn, s->vram_size);
+    } else {
+        xen_vga_vram_map(s->vram_gmfn, s->vram_size);
     }
-    xen_vga_vram_map(s->vram_gmfn, s->vram_size);
     if (version_id < 3 || (!vga_acc && !t))
         qemu_get_buffer(f, s->vram_ptr, s->vram_size);
 
