@@ -28,6 +28,10 @@
 #include "xenfb.h"
 #include "sysemu.h"
 #include "boards.h"
+#include "xen.h"
+
+int xen_domid;
+enum xen_mode xen_mode = XEN_EMULATE;
 
 extern void init_blktap(void);
 
