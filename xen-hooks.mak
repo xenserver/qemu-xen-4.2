@@ -27,6 +27,7 @@ OBJS += xenstore.o
 OBJS += xen_platform.o
 OBJS += xen_machine_fv.o
 OBJS += xen_machine_pv.o
+OBJS += xen_backend.o
 OBJS += xenfb.o
 OBJS += xen_console.o
 OBJS += xen_machine_fv.o

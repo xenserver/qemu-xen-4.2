@@ -28,7 +28,7 @@
 #include "xenfb.h"
 #include "sysemu.h"
 #include "boards.h"
-#include "xen.h"
+#include "xen_backend.h"
 
 int xen_domid;
 enum xen_mode xen_mode = XEN_EMULATE;
@@ -59,6 +59,12 @@ static void xen_init_pv(ram_addr_t ram_size, int vga_ram_size,
 
     /* Initialize a dummy CPU */
     env = cpu_init(NULL);
+
+    /* Initialize backend core & drivers */
+    if (-1 == xen_be_init()) {
+        fprintf(stderr, "%s: xen backend core setup failed\n", __FUNCTION__);
+        exit(1);
+    }
 
     /* Connect to text console */
     if (serial_hds[0]) {
