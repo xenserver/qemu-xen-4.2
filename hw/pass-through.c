@@ -1447,6 +1447,27 @@ exit:
     return val;
 }
 
+static int pt_pci_enable_rom(struct pci_dev *dev)
+{
+    FILE *fp;
+    char path[PATH_MAX];
+
+    sprintf(path, "/sys/bus/pci/devices/%04x:%02x:%02x.%x/rom",
+            dev->domain, dev->bus, dev->dev, dev->func);
+
+    fp = fopen(path, "w");
+    if ( !fp )
+    {
+        PT_LOG("Can't open %s: %s\n", path, strerror(errno));
+        return -1;
+    }
+
+    fprintf(fp, "1");
+    fclose(fp);
+
+    return 0;
+}
+
 static void pt_libpci_fixup(struct pci_dev *dev)
 {
 #if PCI_LIB_VERSION < 0x030100
@@ -1526,8 +1547,8 @@ static int pt_register_regions(struct pt_dev *assigned_device)
 
         /* Re-set BAR reported by OS, otherwise ROM can't be read. */
         if ( (pci_dev->rom_base_addr & PCI_ROM_ADDRESS_MASK) == 0 )
-            pci_write_long(pci_dev, PCI_ROM_ADDRESS,
-                           (pci_dev->rom_base_addr | PCI_ROM_ADDRESS_MASK));
+            if ( pt_pci_enable_rom(pci_dev) )
+                return -1;
 
         assigned_device->bases[PCI_ROM_SLOT].e_physbase =
             pci_dev->rom_base_addr;
