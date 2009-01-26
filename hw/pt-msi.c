@@ -322,6 +322,12 @@ int pt_msix_init(struct pt_dev *dev, int pos)
     dev->msix->phys_iomem_base = mmap(0, total_entries * 16,
                           PROT_WRITE | PROT_READ, MAP_SHARED | MAP_LOCKED,
                           dev->msix->fd, dev->msix->table_base + table_off);
+    if ( dev->msix->phys_iomem_base == MAP_FAILED )
+    {
+        PT_LOG("Can't map physical MSI-X table: %s\n", strerror(errno));
+        return -1;
+    }
+
     PT_LOG("mapping physical MSI-X table to %lx\n",
            (unsigned long)dev->msix->phys_iomem_base);
     return 0;
