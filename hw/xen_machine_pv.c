@@ -24,7 +24,6 @@
 
 #include "hw.h"
 #include "pc.h"
-#include "xenfb.h"
 #include "sysemu.h"
 #include "boards.h"
 #include "xen_backend.h"
@@ -65,14 +64,11 @@ static void xen_init_pv(ram_addr_t ram_size, int vga_ram_size,
         exit(1);
     }
     xen_be_register("console", &xen_console_ops);
+    xen_be_register("vkbd", &xen_kbdmouse_ops);
+    xen_be_register("vfb", &xen_framebuffer_ops);
 
-    /* Prepare PVFB state */
-    xenfb = xenfb_new(domid, ds);
-    if (xenfb == NULL) {
-        fprintf(stderr, "Could not create framebuffer (%s)\n",
-                strerror(errno));
-        exit(1);
-    }
+    /* setup framebuffer */
+    xen_set_display(xen_domid, ds);
 }
 
 QEMUMachine xenpv_machine = {
