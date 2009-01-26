@@ -48,6 +48,10 @@ struct dpci_infos {
 /* prototype */
 static uint32_t pt_common_reg_init(struct pt_dev *ptdev,
     struct pt_reg_info_tbl *reg, uint32_t real_offset);
+static uint32_t pt_vendor_reg_init(struct pt_dev *ptdev,
+    struct pt_reg_info_tbl *reg, uint32_t real_offset);
+static uint32_t pt_device_reg_init(struct pt_dev *ptdev,
+    struct pt_reg_info_tbl *reg, uint32_t real_offset);
 static uint32_t pt_ptr_reg_init(struct pt_dev *ptdev,
     struct pt_reg_info_tbl *reg, uint32_t real_offset);
 static uint32_t pt_status_reg_init(struct pt_dev *ptdev,
@@ -152,6 +156,28 @@ static int pt_msixctrl_reg_write(struct pt_dev *ptdev,
  
 /* Header Type0 reg static infomation table */
 static struct pt_reg_info_tbl pt_emu_reg_header0_tbl[] = {
+    /* Vendor ID reg */
+    {
+        .offset     = PCI_VENDOR_ID,
+        .size       = 2,
+        .init_val   = 0x0000,
+        .ro_mask    = 0xFFFF,
+        .emu_mask   = 0xFFFF,
+        .init       = pt_vendor_reg_init,
+        .u.w.read   = pt_word_reg_read,
+        .u.w.write  = pt_word_reg_write,
+    },
+    /* Device ID reg */
+    {
+        .offset     = PCI_DEVICE_ID,
+        .size       = 2,
+        .init_val   = 0x0000,
+        .ro_mask    = 0xFFFF,
+        .emu_mask   = 0xFFFF,
+        .init       = pt_device_reg_init,
+        .u.w.read   = pt_word_reg_read,
+        .u.w.write  = pt_word_reg_write,
+    },
     /* Command reg */
     {
         .offset     = PCI_COMMAND,
@@ -1421,28 +1447,65 @@ exit:
     return val;
 }
 
+static void pt_libpci_fixup(struct pci_dev *dev)
+{
+#if PCI_LIB_VERSION < 0x030100
+    int i;
+    FILE *fp;
+    char path[PATH_MAX], buf[256];
+    unsigned long long start, end, flags;
+
+    sprintf(path, "/sys/bus/pci/devices/%04x:%02x:%02x.%x/resource",
+            dev->domain, dev->bus, dev->dev, dev->func);
+    fp = fopen(path, "r");
+    if ( !fp )
+    {
+        PT_LOG("Can't open %s: %s\n", path, strerror(errno));
+        return;
+    }
+
+    for ( i = 0; i < PCI_NUM_REGIONS; i++ )
+    {
+        if ( fscanf(fp, "%llx %llx %llx", &start, &end, &flags) != 3 )
+        {
+            PT_LOG("Syntax error in %s\n", path);
+            break;
+        }
+
+        flags &= 0xf;
+
+        if ( i < PCI_ROM_SLOT )
+            dev->base_addr[i] |= flags;
+        else
+            dev->rom_base_addr |= flags;
+    }
+
+    fclose(fp);
+#endif /* PCI_LIB_VERSION < 0x030100 */
+}
+
 static int pt_register_regions(struct pt_dev *assigned_device)
 {
     int i = 0;
-    uint32_t bar_data = 0;
     struct pci_dev *pci_dev = assigned_device->pci_dev;
     PCIDevice *d = &assigned_device->dev;
 
     /* Register PIO/MMIO BARs */
     for ( i = 0; i < PCI_BAR_ENTRIES; i++ )
     {
-        if ( pci_dev->base_addr[i] )
+        if ( pt_pci_base_addr(pci_dev->base_addr[i]) )
         {
-            assigned_device->bases[i].e_physbase = pci_dev->base_addr[i];
-            assigned_device->bases[i].access.u = pci_dev->base_addr[i];
+            assigned_device->bases[i].e_physbase =
+                    pt_pci_base_addr(pci_dev->base_addr[i]);
+            assigned_device->bases[i].access.u =
+                    pt_pci_base_addr(pci_dev->base_addr[i]);
 
             /* Register current region */
-            bar_data = *((uint32_t*)(d->config + PCI_BASE_ADDRESS_0) + i);
-            if ( bar_data & PCI_ADDRESS_SPACE_IO )
+            if ( pci_dev->base_addr[i] & PCI_ADDRESS_SPACE_IO )
                 pci_register_io_region((PCIDevice *)assigned_device, i,
                     (uint32_t)pci_dev->size[i], PCI_ADDRESS_SPACE_IO,
                     pt_ioport_map);
-            else if ( bar_data & PCI_ADDRESS_SPACE_MEM_PREFETCH )
+            else if ( pci_dev->base_addr[i] & PCI_ADDRESS_SPACE_MEM_PREFETCH )
                 pci_register_io_region((PCIDevice *)assigned_device, i,
                     (uint32_t)pci_dev->size[i], PCI_ADDRESS_SPACE_MEM_PREFETCH,
                     pt_iomem_map);
@@ -1458,16 +1521,13 @@ static int pt_register_regions(struct pt_dev *assigned_device)
     }
 
     /* Register expansion ROM address */
-    if ( pci_dev->rom_base_addr && pci_dev->rom_size )
+    if ( pt_pci_base_addr(pci_dev->rom_base_addr) && pci_dev->rom_size )
     {
 
         /* Re-set BAR reported by OS, otherwise ROM can't be read. */
-        bar_data = pci_read_long(pci_dev, PCI_ROM_ADDRESS);
-        if ( (bar_data & PCI_ROM_ADDRESS_MASK) == 0 )
-        {
-            bar_data |= (pci_dev->rom_base_addr & PCI_ROM_ADDRESS_MASK);
-            pci_write_long(pci_dev, PCI_ROM_ADDRESS, bar_data);
-        }
+        if ( (pci_dev->rom_base_addr & PCI_ROM_ADDRESS_MASK) == 0 )
+            pci_write_long(pci_dev, PCI_ROM_ADDRESS,
+                           (pci_dev->rom_base_addr | PCI_ROM_ADDRESS_MASK));
 
         assigned_device->bases[PCI_ROM_SLOT].e_physbase =
             pci_dev->rom_base_addr;
@@ -1569,21 +1629,14 @@ static int pt_bar_reg_parse(
     PCIDevice *d = &ptdev->dev;
     struct pt_region *region = NULL;
     PCIIORegion *r;
-    uint32_t bar_64 = (reg->offset - 4);
     int bar_flag = PT_BAR_FLAG_UNUSED;
     int index = 0;
     int i;
 
-    /* set again the BAR config because it has been overwritten
-     * by pci_register_io_region()
-     */
-    for (i=reg->offset; i<(reg->offset + 4); i++)
-        d->config[i] = pci_read_byte(ptdev->pci_dev, i);
-
     /* check 64bit BAR */
     index = pt_bar_offset_to_index(reg->offset);
     if ((index > 0) && (index < PCI_ROM_SLOT) &&
-        ((d->config[bar_64] & (PCI_BASE_ADDRESS_SPACE |
+        ((ptdev->pci_dev->base_addr[index-1] & (PCI_BASE_ADDRESS_SPACE |
                                PCI_BASE_ADDRESS_MEM_TYPE_MASK)) ==
          (PCI_BASE_ADDRESS_SPACE_MEMORY | PCI_BASE_ADDRESS_MEM_TYPE_64)))
     {
@@ -1608,7 +1661,7 @@ static int pt_bar_reg_parse(
     }
 
     /* check BAR I/O indicator */
-    if (d->config[reg->offset] & PCI_BASE_ADDRESS_SPACE_IO)
+    if ( ptdev->pci_dev->base_addr[index] & PCI_BASE_ADDRESS_SPACE_IO )
         bar_flag = PT_BAR_FLAG_IO;
     else
         bar_flag = PT_BAR_FLAG_MEM;
@@ -1824,6 +1877,20 @@ static uint32_t pt_common_reg_init(struct pt_dev *ptdev,
         struct pt_reg_info_tbl *reg, uint32_t real_offset)
 {
     return reg->init_val;
+}
+
+/* initialize Vendor ID register value */
+static uint32_t pt_vendor_reg_init(struct pt_dev *ptdev,
+        struct pt_reg_info_tbl *reg, uint32_t real_offset)
+{
+    return ptdev->pci_dev->vendor_id;
+}
+
+/* initialize Device ID register value */
+static uint32_t pt_device_reg_init(struct pt_dev *ptdev,
+        struct pt_reg_info_tbl *reg, uint32_t real_offset)
+{
+    return ptdev->pci_dev->device_id;
 }
 
 /* initialize Capabilities Pointer or Next Pointer register */
@@ -2309,6 +2376,9 @@ static int pt_bar_reg_read(struct pt_dev *ptdev,
             "I/O emulator exit.\n", index);
         exit(1);
     }
+
+    /* use fixed-up value from kernel sysfs */
+    *value = ptdev->pci_dev->base_addr[index];
 
     /* set emulate mask depend on BAR flag */
     switch (ptdev->bases[index].bar_flag)
@@ -3025,6 +3095,7 @@ struct pt_dev * register_real_device(PCIBus *e_bus,
         return NULL;
     }
     pci_fill_info(pci_dev, PCI_FILL_IRQ | PCI_FILL_BASES | PCI_FILL_ROM_BASE | PCI_FILL_SIZES);
+    pt_libpci_fixup(pci_dev);
 
     if ( e_devfn == PT_VIRT_DEVFN_AUTO ) {
         /*indicate a static assignment(not hotplug), so find a free PCI hot plug slot */
