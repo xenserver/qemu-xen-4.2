@@ -130,17 +130,16 @@ static void common_unbind(struct common *c)
 
 /* -------------------------------------------------------------------- */
 
-#if 0
 /*
- * These two tables are not needed any more, but left in here
- * intentionally as documentation, to show how scancode2linux[]
- * was generated.
+ * These two tables are not needed any more here, but left in here
+ * intentionally as documentation, to show how scancode2linux[] was
+ * generated, and also because xenfbfront needs them.
  *
  * Tables to map from scancode to Linux input layer keycode.
  * Scancodes are hardware-specific.  These maps assumes a
  * standard AT or PS/2 keyboard which is what QEMU feeds us.
  */
-static const unsigned char atkbd_set2_keycode[512] = {
+const unsigned char atkbd_set2_keycode[512] = {
 
      0, 67, 65, 63, 61, 59, 60, 88,  0, 68, 66, 64, 62, 15, 41,117,
      0, 56, 42, 93, 29, 16,  2,  0,  0,  0, 44, 31, 30, 17,  3,  0,
@@ -162,7 +161,7 @@ static const unsigned char atkbd_set2_keycode[512] = {
 
 };
 
-static const unsigned char atkbd_unxlate_table[128] = {
+const unsigned char atkbd_unxlate_table[128] = {
 
       0,118, 22, 30, 38, 37, 46, 54, 61, 62, 70, 69, 78, 85,102, 13,
      21, 29, 36, 45, 44, 53, 60, 67, 68, 77, 84, 91, 90, 20, 28, 27,
@@ -174,7 +173,6 @@ static const unsigned char atkbd_unxlate_table[128] = {
      19, 25, 57, 81, 83, 92, 95, 98, 99,100,101,103,104,106,109,110
 
 };
-#endif
 
 /*
  * for (i = 0; i < 128; i++) {
