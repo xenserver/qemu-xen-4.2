@@ -247,47 +247,58 @@ static void xenstore_get_backend_path(char **backend, const char *devtype,
     free(frontend_doublecheck);
 }
 
-const char *xenstore_get_guest_uuid(void) {
-#ifdef CONFIG_STUBDOM
-    return 0;
-#else
+const char *xenstore_get_guest_uuid(void)
+{
+    static char *already_computed = NULL;
 
-    static char *already_computed;
-
-    xc_domaininfo_t info;
-    int xch = -1, r, i;
-    char *p;
+    char *domain_path = NULL, *vm_path = NULL, *vm_value = NULL, *p = NULL;
+    unsigned int len;
 
     if (already_computed)
         return already_computed;
 
-    xch = xc_interface_open();
-    if (xch == -1) {
-        fprintf(logfile, "cannot get uuid - xc_interface_open() failed: %s\n",
-                strerror(errno));
+    if (xsh == NULL)
+        return NULL;
+
+    domain_path = xs_get_domain_path(xsh, domid);
+    if (domain_path == NULL) {
+        fprintf(logfile, "xs_get_domain_path() error. domid %d.\n", domid);
         goto out;
     }
-    r = xc_domain_getinfolist(xch, domid, 1, &info);
-    if (r != 1) {
-        fprintf(logfile, "cannot get uuid - xc_domain_getinfolist() failed:"
-                " %s\n", strerror(errno));
+
+    if (pasprintf(&vm_path, "%s/vm", domain_path) == -1) {
+        fprintf(logfile, "xenstore_get_guest_uuid(): out of memory.\n");
         goto out;
     }
-    already_computed = malloc(37);
-    for (i = 0, p = already_computed; i < 16; i++, p += 2) {
-        if (i==4 || i==6 || i==8 || i==10)
-            *p++ = '-';
-        sprintf(p, "%02x", info.handle[i]);
+    vm_value = xs_read(xsh, XBT_NULL, vm_path, &len);
+    if (vm_value == NULL) {
+        fprintf(logfile, "xs_read(): uuid get error. %s.\n", vm_path);
+        goto out;
     }
-    close(xch);
-    return already_computed;
+
+    if (strtok(vm_value, "/") == NULL) {
+        fprintf(logfile, "failed to parse guest uuid\n");
+        goto out;
+    }
+    p = strtok(NULL, "/");
+    if (p == NULL) {
+        fprintf(logfile, "failed to parse guest uuid\n");
+        goto out;
+    }
+
+    if (pasprintf(&already_computed, "%s", p) == -1) {
+        fprintf(logfile, "xenstore_get_guest_uuid(): out of memory.\n");
+        goto out;
+    }
+
+    fprintf(logfile, "Guest uuid = %s\n", already_computed);
 
  out:
-    if (xch != -1)
-        close(xch);
-    
-    return 0;
-#endif
+    free(domain_path);
+    free(vm_path);
+    free(vm_value);
+
+    return already_computed;
 }
 
 #define DIRECT_PCI_STR_LEN 512
