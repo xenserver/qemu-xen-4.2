@@ -210,6 +210,7 @@ typedef struct sparc_def_t {
     uint32_t mmu_cxr_mask;
     uint32_t mmu_sfsr_mask;
     uint32_t mmu_trcr_mask;
+    uint32_t mxcc_version;
     uint32_t features;
     uint32_t nwindows;
     uint32_t maxtl;
@@ -300,6 +301,7 @@ typedef struct CPUSPARCState {
     uint32_t mmuregs[32];
     uint64_t mxccdata[4];
     uint64_t mxccregs[8];
+    uint64_t mmubpregs[4];
     uint64_t prom_addr;
 #endif
     /* temporary float registers */
@@ -330,7 +332,8 @@ typedef struct CPUSPARCState {
     uint64_t hpstate, htstate[MAXTL_MAX], hintp, htba, hver, hstick_cmpr, ssr;
     void *hstick; // UA 2005
     uint32_t softint;
-#define SOFTINT_TIMER 1
+#define SOFTINT_TIMER   1
+#define SOFTINT_STIMER  (1 << 16)
 #endif
     sparc_def_t *def;
 } CPUSPARCState;
@@ -491,12 +494,8 @@ static inline void cpu_clone_regs(CPUState *env, target_ulong newsp)
 }
 #endif
 
-#define CPU_PC_FROM_TB(env, tb) do { \
-    env->pc = tb->pc; \
-    env->npc = tb->cs_base; \
-    } while(0)
-
 #include "cpu-all.h"
+#include "exec-all.h"
 
 /* sum4m.c, sun4u.c */
 void cpu_check_irqs(CPUSPARCState *env);
@@ -507,5 +506,27 @@ void cpu_tick_set_count(void *opaque, uint64_t count);
 uint64_t cpu_tick_get_count(void *opaque);
 void cpu_tick_set_limit(void *opaque, uint64_t limit);
 #endif
+
+static inline void cpu_pc_from_tb(CPUState *env, TranslationBlock *tb)
+{
+    env->pc = tb->pc;
+    env->npc = tb->cs_base;
+}
+
+static inline void cpu_get_tb_cpu_state(CPUState *env, target_ulong *pc,
+                                        target_ulong *cs_base, int *flags)
+{
+    *pc = env->pc;
+    *cs_base = env->npc;
+#ifdef TARGET_SPARC64
+    // AM . Combined FPU enable bits . PRIV . DMMU enabled . IMMU enabled
+    *flags = ((env->pstate & PS_AM) << 2)
+        | (((env->pstate & PS_PEF) >> 1) | ((env->fprs & FPRS_FEF) << 2))
+        | (env->pstate & PS_PRIV) | ((env->lsu & (DMMU_E | IMMU_E)) >> 2);
+#else
+    // FPU enable . Supervisor
+    *flags = (env->psref << 4) | env->psrs;
+#endif
+}
 
 #endif

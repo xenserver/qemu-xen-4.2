@@ -15,10 +15,12 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston MA  02110-1301 USA
  */
 #ifndef CPU_ALL_H
 #define CPU_ALL_H
+
+#include "qemu-common.h"
 
 #if defined(__arm__) || defined(__sparc__) || defined(__mips__) || defined(__hppa__)
 #define WORDS_ALIGNED
@@ -206,12 +208,12 @@ typedef union {
  *   user   : user mode access using soft MMU
  *   kernel : kernel mode access using soft MMU
  */
-static inline int ldub_p(void *ptr)
+static inline int ldub_p(const void *ptr)
 {
     return *(uint8_t *)ptr;
 }
 
-static inline int ldsb_p(void *ptr)
+static inline int ldsb_p(const void *ptr)
 {
     return *(int8_t *)ptr;
 }
@@ -227,45 +229,45 @@ static inline void stb_p(void *ptr, int v)
 #if defined(WORDS_BIGENDIAN) || defined(WORDS_ALIGNED)
 
 /* conservative code for little endian unaligned accesses */
-static inline int lduw_le_p(void *ptr)
+static inline int lduw_le_p(const void *ptr)
 {
-#ifdef __powerpc__
+#ifdef _ARCH_PPC
     int val;
     __asm__ __volatile__ ("lhbrx %0,0,%1" : "=r" (val) : "r" (ptr));
     return val;
 #else
-    uint8_t *p = ptr;
+    const uint8_t *p = ptr;
     return p[0] | (p[1] << 8);
 #endif
 }
 
-static inline int ldsw_le_p(void *ptr)
+static inline int ldsw_le_p(const void *ptr)
 {
-#ifdef __powerpc__
+#ifdef _ARCH_PPC
     int val;
     __asm__ __volatile__ ("lhbrx %0,0,%1" : "=r" (val) : "r" (ptr));
     return (int16_t)val;
 #else
-    uint8_t *p = ptr;
+    const uint8_t *p = ptr;
     return (int16_t)(p[0] | (p[1] << 8));
 #endif
 }
 
-static inline int ldl_le_p(void *ptr)
+static inline int ldl_le_p(const void *ptr)
 {
-#ifdef __powerpc__
+#ifdef _ARCH_PPC
     int val;
     __asm__ __volatile__ ("lwbrx %0,0,%1" : "=r" (val) : "r" (ptr));
     return val;
 #else
-    uint8_t *p = ptr;
+    const uint8_t *p = ptr;
     return p[0] | (p[1] << 8) | (p[2] << 16) | (p[3] << 24);
 #endif
 }
 
-static inline uint64_t ldq_le_p(void *ptr)
+static inline uint64_t ldq_le_p(const void *ptr)
 {
-    uint8_t *p = ptr;
+    const uint8_t *p = ptr;
     uint32_t v1, v2;
     v1 = ldl_le_p(p);
     v2 = ldl_le_p(p + 4);
@@ -274,7 +276,7 @@ static inline uint64_t ldq_le_p(void *ptr)
 
 static inline void stw_le_p(void *ptr, int v)
 {
-#ifdef __powerpc__
+#ifdef _ARCH_PPC
     __asm__ __volatile__ ("sthbrx %1,0,%2" : "=m" (*(uint16_t *)ptr) : "r" (v), "r" (ptr));
 #else
     uint8_t *p = ptr;
@@ -285,7 +287,7 @@ static inline void stw_le_p(void *ptr, int v)
 
 static inline void stl_le_p(void *ptr, int v)
 {
-#ifdef __powerpc__
+#ifdef _ARCH_PPC
     __asm__ __volatile__ ("stwbrx %1,0,%2" : "=m" (*(uint32_t *)ptr) : "r" (v), "r" (ptr));
 #else
     uint8_t *p = ptr;
@@ -305,7 +307,7 @@ static inline void stq_le_p(void *ptr, uint64_t v)
 
 /* float access */
 
-static inline float32 ldfl_le_p(void *ptr)
+static inline float32 ldfl_le_p(const void *ptr)
 {
     union {
         float32 f;
@@ -325,7 +327,7 @@ static inline void stfl_le_p(void *ptr, float32 v)
     stl_le_p(ptr, u.i);
 }
 
-static inline float64 ldfq_le_p(void *ptr)
+static inline float64 ldfq_le_p(const void *ptr)
 {
     CPU_DoubleU u;
     u.l.lower = ldl_le_p(ptr);
@@ -343,22 +345,22 @@ static inline void stfq_le_p(void *ptr, float64 v)
 
 #else
 
-static inline int lduw_le_p(void *ptr)
+static inline int lduw_le_p(const void *ptr)
 {
     return *(uint16_t *)ptr;
 }
 
-static inline int ldsw_le_p(void *ptr)
+static inline int ldsw_le_p(const void *ptr)
 {
     return *(int16_t *)ptr;
 }
 
-static inline int ldl_le_p(void *ptr)
+static inline int ldl_le_p(const void *ptr)
 {
     return *(uint32_t *)ptr;
 }
 
-static inline uint64_t ldq_le_p(void *ptr)
+static inline uint64_t ldq_le_p(const void *ptr)
 {
     return *(uint64_t *)ptr;
 }
@@ -380,12 +382,12 @@ static inline void stq_le_p(void *ptr, uint64_t v)
 
 /* float access */
 
-static inline float32 ldfl_le_p(void *ptr)
+static inline float32 ldfl_le_p(const void *ptr)
 {
     return *(float32 *)ptr;
 }
 
-static inline float64 ldfq_le_p(void *ptr)
+static inline float64 ldfq_le_p(const void *ptr)
 {
     return *(float64 *)ptr;
 }
@@ -403,7 +405,7 @@ static inline void stfq_le_p(void *ptr, float64 v)
 
 #if !defined(WORDS_BIGENDIAN) || defined(WORDS_ALIGNED)
 
-static inline int lduw_be_p(void *ptr)
+static inline int lduw_be_p(const void *ptr)
 {
 #if defined(__i386__)
     int val;
@@ -413,12 +415,12 @@ static inline int lduw_be_p(void *ptr)
                   : "m" (*(uint16_t *)ptr));
     return val;
 #else
-    uint8_t *b = (uint8_t *) ptr;
+    const uint8_t *b = ptr;
     return ((b[0] << 8) | b[1]);
 #endif
 }
 
-static inline int ldsw_be_p(void *ptr)
+static inline int ldsw_be_p(const void *ptr)
 {
 #if defined(__i386__)
     int val;
@@ -428,12 +430,12 @@ static inline int ldsw_be_p(void *ptr)
                   : "m" (*(uint16_t *)ptr));
     return (int16_t)val;
 #else
-    uint8_t *b = (uint8_t *) ptr;
+    const uint8_t *b = ptr;
     return (int16_t)((b[0] << 8) | b[1]);
 #endif
 }
 
-static inline int ldl_be_p(void *ptr)
+static inline int ldl_be_p(const void *ptr)
 {
 #if defined(__i386__) || defined(__x86_64__)
     int val;
@@ -443,12 +445,12 @@ static inline int ldl_be_p(void *ptr)
                   : "m" (*(uint32_t *)ptr));
     return val;
 #else
-    uint8_t *b = (uint8_t *) ptr;
+    const uint8_t *b = ptr;
     return (b[0] << 24) | (b[1] << 16) | (b[2] << 8) | b[3];
 #endif
 }
 
-static inline uint64_t ldq_be_p(void *ptr)
+static inline uint64_t ldq_be_p(const void *ptr)
 {
     uint32_t a,b;
     a = ldl_be_p(ptr);
@@ -494,7 +496,7 @@ static inline void stq_be_p(void *ptr, uint64_t v)
 
 /* float access */
 
-static inline float32 ldfl_be_p(void *ptr)
+static inline float32 ldfl_be_p(const void *ptr)
 {
     union {
         float32 f;
@@ -514,7 +516,7 @@ static inline void stfl_be_p(void *ptr, float32 v)
     stl_be_p(ptr, u.i);
 }
 
-static inline float64 ldfq_be_p(void *ptr)
+static inline float64 ldfq_be_p(const void *ptr)
 {
     CPU_DoubleU u;
     u.l.upper = ldl_be_p(ptr);
@@ -532,22 +534,22 @@ static inline void stfq_be_p(void *ptr, float64 v)
 
 #else
 
-static inline int lduw_be_p(void *ptr)
+static inline int lduw_be_p(const void *ptr)
 {
     return *(uint16_t *)ptr;
 }
 
-static inline int ldsw_be_p(void *ptr)
+static inline int ldsw_be_p(const void *ptr)
 {
     return *(int16_t *)ptr;
 }
 
-static inline int ldl_be_p(void *ptr)
+static inline int ldl_be_p(const void *ptr)
 {
     return *(uint32_t *)ptr;
 }
 
-static inline uint64_t ldq_be_p(void *ptr)
+static inline uint64_t ldq_be_p(const void *ptr)
 {
     return *(uint64_t *)ptr;
 }
@@ -569,12 +571,12 @@ static inline void stq_be_p(void *ptr, uint64_t v)
 
 /* float access */
 
-static inline float32 ldfl_be_p(void *ptr)
+static inline float32 ldfl_be_p(const void *ptr)
 {
     return *(float32 *)ptr;
 }
 
-static inline float64 ldfq_be_p(void *ptr)
+static inline float64 ldfq_be_p(const void *ptr)
 {
     return *(float64 *)ptr;
 }
@@ -621,6 +623,9 @@ static inline void stfq_be_p(void *ptr, float64 v)
 /* MMU memory access macros */
 
 #if defined(CONFIG_USER_ONLY)
+#include <assert.h>
+#include "qemu-types.h"
+
 /* On some host systems the guest address space is reserved on the host.
  * This allows the guest address space to be offset to a convenient location.
  */
@@ -629,7 +634,16 @@ static inline void stfq_be_p(void *ptr, float64 v)
 
 /* All direct uses of g2h and h2g need to go away for usermode softmmu.  */
 #define g2h(x) ((void *)((unsigned long)(x) + GUEST_BASE))
-#define h2g(x) ((target_ulong)((unsigned long)(x) - GUEST_BASE))
+#define h2g(x) ({ \
+    unsigned long __ret = (unsigned long)(x) - GUEST_BASE; \
+    /* Check if given address fits target address space */ \
+    assert(__ret == (abi_ulong)__ret); \
+    (abi_ulong)__ret; \
+})
+#define h2g_valid(x) ({ \
+    unsigned long __guest = (unsigned long)(x) - GUEST_BASE; \
+    (__guest == (abi_ulong)__guest); \
+})
 
 #define saddr(x) g2h(x)
 #define laddr(x) g2h(x)
@@ -739,9 +753,8 @@ void cpu_dump_statistics (CPUState *env, FILE *f,
                           int (*cpu_fprintf)(FILE *f, const char *fmt, ...),
                           int flags);
 
-void cpu_abort(CPUState *env, const char *fmt, ...)
-    __attribute__ ((__format__ (__printf__, 2, 3)))
-    __attribute__ ((__noreturn__));
+void noreturn cpu_abort(CPUState *env, const char *fmt, ...)
+    __attribute__ ((__format__ (__printf__, 2, 3)));
 extern CPUState *first_cpu;
 extern CPUState *cpu_single_env;
 extern int64_t qemu_icount;
@@ -761,12 +774,26 @@ extern int use_icount;
 void cpu_interrupt(CPUState *s, int mask);
 void cpu_reset_interrupt(CPUState *env, int mask);
 
-int cpu_watchpoint_insert(CPUState *env, target_ulong addr, int type);
-int cpu_watchpoint_remove(CPUState *env, target_ulong addr);
-void cpu_watchpoint_remove_all(CPUState *env);
-int cpu_breakpoint_insert(CPUState *env, target_ulong pc);
-int cpu_breakpoint_remove(CPUState *env, target_ulong pc);
-void cpu_breakpoint_remove_all(CPUState *env);
+/* Breakpoint/watchpoint flags */
+#define BP_MEM_READ           0x01
+#define BP_MEM_WRITE          0x02
+#define BP_MEM_ACCESS         (BP_MEM_READ | BP_MEM_WRITE)
+#define BP_STOP_BEFORE_ACCESS 0x04
+#define BP_WATCHPOINT_HIT     0x08
+#define BP_GDB                0x10
+#define BP_CPU                0x20
+
+int cpu_breakpoint_insert(CPUState *env, target_ulong pc, int flags,
+                          CPUBreakpoint **breakpoint);
+int cpu_breakpoint_remove(CPUState *env, target_ulong pc, int flags);
+void cpu_breakpoint_remove_by_ref(CPUState *env, CPUBreakpoint *breakpoint);
+void cpu_breakpoint_remove_all(CPUState *env, int mask);
+int cpu_watchpoint_insert(CPUState *env, target_ulong addr, target_ulong len,
+                          int flags, CPUWatchpoint **watchpoint);
+int cpu_watchpoint_remove(CPUState *env, target_ulong addr,
+                          target_ulong len, int flags);
+void cpu_watchpoint_remove_by_ref(CPUState *env, CPUWatchpoint *watchpoint);
+void cpu_watchpoint_remove_all(CPUState *env, int mask);
 
 #define SSTEP_ENABLE  0x1  /* Enable simulated HW single stepping */
 #define SSTEP_NOIRQ   0x2  /* Do not use IRQ while single stepping */
@@ -863,9 +890,17 @@ extern ram_addr_t ram_size;
 typedef void CPUWriteMemoryFunc(void *opaque, target_phys_addr_t addr, uint32_t value);
 typedef uint32_t CPUReadMemoryFunc(void *opaque, target_phys_addr_t addr);
 
-void cpu_register_physical_memory(target_phys_addr_t start_addr,
-                                  ram_addr_t size,
-                                  ram_addr_t phys_offset);
+void cpu_register_physical_memory_offset(target_phys_addr_t start_addr,
+                                         ram_addr_t size,
+                                         ram_addr_t phys_offset,
+                                         ram_addr_t region_offset);
+static inline void cpu_register_physical_memory(target_phys_addr_t start_addr,
+                                                ram_addr_t size,
+                                                ram_addr_t phys_offset)
+{
+    cpu_register_physical_memory_offset(start_addr, size, phys_offset, 0);
+}
+
 ram_addr_t cpu_get_physical_page_desc(target_phys_addr_t addr);
 ram_addr_t qemu_ram_alloc(ram_addr_t);
 void qemu_ram_free(ram_addr_t addr);
@@ -934,13 +969,24 @@ int cpu_physical_memory_set_dirty_tracking(int enable);
 
 int cpu_physical_memory_get_dirty_tracking(void);
 
+void cpu_physical_sync_dirty_bitmap(target_phys_addr_t start_addr, target_phys_addr_t end_addr);
+
 void dump_exec_info(FILE *f,
                     int (*cpu_fprintf)(FILE *f, const char *fmt, ...));
+
+/* Coalesced MMIO regions are areas where write operations can be reordered.
+ * This usually implies that write operations are side-effect free.  This allows
+ * batching which can make a major impact on performance when using
+ * virtualization.
+ */
+void qemu_register_coalesced_mmio(target_phys_addr_t addr, ram_addr_t size);
+
+void qemu_unregister_coalesced_mmio(target_phys_addr_t addr, ram_addr_t size);
 
 /*******************************************/
 /* host CPU ticks (if available) */
 
-#if defined(__powerpc__)
+#if defined(_ARCH_PPC)
 
 static inline uint32_t get_tbl(void)
 {

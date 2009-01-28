@@ -15,7 +15,7 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston MA  02110-1301 USA
  */
 #include "config.h"
 #include "qemu-common.h"
@@ -38,17 +38,218 @@
 #define MAX_PACKET_LENGTH 4096
 
 #include "qemu_socket.h"
-#ifdef _WIN32
-/* XXX: these constants may be independent of the host ones even for Unix */
-#ifndef SIGTRAP
-#define SIGTRAP 5
-#endif
-#ifndef SIGINT
-#define SIGINT 2
-#endif
+
+
+enum {
+    GDB_SIGNAL_0 = 0,
+    GDB_SIGNAL_INT = 2,
+    GDB_SIGNAL_TRAP = 5,
+    GDB_SIGNAL_UNKNOWN = 143
+};
+
+#ifdef CONFIG_USER_ONLY
+
+/* Map target signal numbers to GDB protocol signal numbers and vice
+ * versa.  For user emulation's currently supported systems, we can
+ * assume most signals are defined.
+ */
+
+static int gdb_signal_table[] = {
+    0,
+    TARGET_SIGHUP,
+    TARGET_SIGINT,
+    TARGET_SIGQUIT,
+    TARGET_SIGILL,
+    TARGET_SIGTRAP,
+    TARGET_SIGABRT,
+    -1, /* SIGEMT */
+    TARGET_SIGFPE,
+    TARGET_SIGKILL,
+    TARGET_SIGBUS,
+    TARGET_SIGSEGV,
+    TARGET_SIGSYS,
+    TARGET_SIGPIPE,
+    TARGET_SIGALRM,
+    TARGET_SIGTERM,
+    TARGET_SIGURG,
+    TARGET_SIGSTOP,
+    TARGET_SIGTSTP,
+    TARGET_SIGCONT,
+    TARGET_SIGCHLD,
+    TARGET_SIGTTIN,
+    TARGET_SIGTTOU,
+    TARGET_SIGIO,
+    TARGET_SIGXCPU,
+    TARGET_SIGXFSZ,
+    TARGET_SIGVTALRM,
+    TARGET_SIGPROF,
+    TARGET_SIGWINCH,
+    -1, /* SIGLOST */
+    TARGET_SIGUSR1,
+    TARGET_SIGUSR2,
+#ifdef TARGET_SIGPWR
+    TARGET_SIGPWR,
 #else
-#include <signal.h>
+    -1,
 #endif
+    -1, /* SIGPOLL */
+    -1,
+    -1,
+    -1,
+    -1,
+    -1,
+    -1,
+    -1,
+    -1,
+    -1,
+    -1,
+    -1,
+#ifdef __SIGRTMIN
+    __SIGRTMIN + 1,
+    __SIGRTMIN + 2,
+    __SIGRTMIN + 3,
+    __SIGRTMIN + 4,
+    __SIGRTMIN + 5,
+    __SIGRTMIN + 6,
+    __SIGRTMIN + 7,
+    __SIGRTMIN + 8,
+    __SIGRTMIN + 9,
+    __SIGRTMIN + 10,
+    __SIGRTMIN + 11,
+    __SIGRTMIN + 12,
+    __SIGRTMIN + 13,
+    __SIGRTMIN + 14,
+    __SIGRTMIN + 15,
+    __SIGRTMIN + 16,
+    __SIGRTMIN + 17,
+    __SIGRTMIN + 18,
+    __SIGRTMIN + 19,
+    __SIGRTMIN + 20,
+    __SIGRTMIN + 21,
+    __SIGRTMIN + 22,
+    __SIGRTMIN + 23,
+    __SIGRTMIN + 24,
+    __SIGRTMIN + 25,
+    __SIGRTMIN + 26,
+    __SIGRTMIN + 27,
+    __SIGRTMIN + 28,
+    __SIGRTMIN + 29,
+    __SIGRTMIN + 30,
+    __SIGRTMIN + 31,
+    -1, /* SIGCANCEL */
+    __SIGRTMIN,
+    __SIGRTMIN + 32,
+    __SIGRTMIN + 33,
+    __SIGRTMIN + 34,
+    __SIGRTMIN + 35,
+    __SIGRTMIN + 36,
+    __SIGRTMIN + 37,
+    __SIGRTMIN + 38,
+    __SIGRTMIN + 39,
+    __SIGRTMIN + 40,
+    __SIGRTMIN + 41,
+    __SIGRTMIN + 42,
+    __SIGRTMIN + 43,
+    __SIGRTMIN + 44,
+    __SIGRTMIN + 45,
+    __SIGRTMIN + 46,
+    __SIGRTMIN + 47,
+    __SIGRTMIN + 48,
+    __SIGRTMIN + 49,
+    __SIGRTMIN + 50,
+    __SIGRTMIN + 51,
+    __SIGRTMIN + 52,
+    __SIGRTMIN + 53,
+    __SIGRTMIN + 54,
+    __SIGRTMIN + 55,
+    __SIGRTMIN + 56,
+    __SIGRTMIN + 57,
+    __SIGRTMIN + 58,
+    __SIGRTMIN + 59,
+    __SIGRTMIN + 60,
+    __SIGRTMIN + 61,
+    __SIGRTMIN + 62,
+    __SIGRTMIN + 63,
+    __SIGRTMIN + 64,
+    __SIGRTMIN + 65,
+    __SIGRTMIN + 66,
+    __SIGRTMIN + 67,
+    __SIGRTMIN + 68,
+    __SIGRTMIN + 69,
+    __SIGRTMIN + 70,
+    __SIGRTMIN + 71,
+    __SIGRTMIN + 72,
+    __SIGRTMIN + 73,
+    __SIGRTMIN + 74,
+    __SIGRTMIN + 75,
+    __SIGRTMIN + 76,
+    __SIGRTMIN + 77,
+    __SIGRTMIN + 78,
+    __SIGRTMIN + 79,
+    __SIGRTMIN + 80,
+    __SIGRTMIN + 81,
+    __SIGRTMIN + 82,
+    __SIGRTMIN + 83,
+    __SIGRTMIN + 84,
+    __SIGRTMIN + 85,
+    __SIGRTMIN + 86,
+    __SIGRTMIN + 87,
+    __SIGRTMIN + 88,
+    __SIGRTMIN + 89,
+    __SIGRTMIN + 90,
+    __SIGRTMIN + 91,
+    __SIGRTMIN + 92,
+    __SIGRTMIN + 93,
+    __SIGRTMIN + 94,
+    __SIGRTMIN + 95,
+    -1, /* SIGINFO */
+    -1, /* UNKNOWN */
+    -1, /* DEFAULT */
+    -1,
+    -1,
+    -1,
+    -1,
+    -1,
+    -1
+#endif
+};
+#else
+/* In system mode we only need SIGINT and SIGTRAP; other signals
+   are not yet supported.  */
+
+enum {
+    TARGET_SIGINT = 2,
+    TARGET_SIGTRAP = 5
+};
+
+static int gdb_signal_table[] = {
+    -1,
+    -1,
+    TARGET_SIGINT,
+    -1,
+    -1,
+    TARGET_SIGTRAP
+};
+#endif
+
+#ifdef CONFIG_USER_ONLY
+static int target_signal_to_gdb (int sig)
+{
+    int i;
+    for (i = 0; i < ARRAY_SIZE (gdb_signal_table); i++)
+        if (gdb_signal_table[i] == sig)
+            return i;
+    return GDB_SIGNAL_UNKNOWN;
+}
+#endif
+
+static int gdb_signal_to_target (int sig)
+{
+    if (sig < ARRAY_SIZE (gdb_signal_table))
+        return gdb_signal_table[sig];
+    else
+        return -1;
+}
 
 //#define DEBUG_GDB
 
@@ -69,7 +270,9 @@ enum RSState {
     RS_SYSCALL,
 };
 typedef struct GDBState {
-    CPUState *env; /* current CPU */
+    CPUState *c_cpu; /* current CPU for step/continue ops */
+    CPUState *g_cpu; /* current CPU for other ops */
+    CPUState *query_cpu; /* for q{f|s}ThreadInfo */
     enum RSState state; /* parsing state */
     char line_buf[MAX_PACKET_LENGTH];
     int line_buf_index;
@@ -90,6 +293,8 @@ typedef struct GDBState {
  */
 static int sstep_flags = SSTEP_ENABLE|SSTEP_NOIRQ|SSTEP_NOTIMER;
 
+static GDBState *gdbserver_state;
+
 /* This is an ugly hack to cope with both new and old gdb.
    If gdb sends qXfer:features:read then assume we're talking to a newish
    gdb that understands target descriptions.  */
@@ -98,9 +303,6 @@ static int gdb_has_xml;
 #ifdef CONFIG_USER_ONLY
 /* XXX: This is not thread safe.  Do we care?  */
 static int gdbserver_fd = -1;
-
-/* XXX: remove this hack.  */
-static GDBState gdbserver_state;
 
 static int get_char(GDBState *s)
 {
@@ -126,8 +328,6 @@ static int get_char(GDBState *s)
 }
 #endif
 
-/* GDB stub state for use by semihosting syscalls.  */
-static GDBState *gdb_syscall_state;
 static gdb_syscall_complete_cb gdb_current_syscall_cb;
 
 enum {
@@ -141,8 +341,8 @@ enum {
 int use_gdb_syscalls(void)
 {
     if (gdb_syscall_mode == GDB_SYS_UNKNOWN) {
-        gdb_syscall_mode = (gdb_syscall_state ? GDB_SYS_ENABLED
-                                              : GDB_SYS_DISABLED);
+        gdb_syscall_mode = (gdbserver_state ? GDB_SYS_ENABLED
+                                            : GDB_SYS_DISABLED);
     }
     return gdb_syscall_mode == GDB_SYS_ENABLED;
 }
@@ -429,7 +629,7 @@ static int cpu_gdb_read_register(CPUState *env, uint8_t *mem_buf, int n)
         GET_REGL(env->gpr[n]);
     } else if (n < 64) {
         /* fprs */
-        stfq_p(mem_buf, env->fpr[n]);
+        stfq_p(mem_buf, env->fpr[n-32]);
         return 8;
     } else {
         switch (n) {
@@ -460,7 +660,7 @@ static int cpu_gdb_write_register(CPUState *env, uint8_t *mem_buf, int n)
         return sizeof(target_ulong);
     } else if (n < 64) {
         /* fprs */
-        env->fpr[n] = ldfq_p(mem_buf);
+        env->fpr[n-32] = ldfq_p(mem_buf);
         return 8;
     } else {
         switch (n) {
@@ -500,7 +700,7 @@ static int cpu_gdb_write_register(CPUState *env, uint8_t *mem_buf, int n)
 #if defined(TARGET_SPARC64) && !defined(TARGET_ABI32)
 #define NUM_CORE_REGS 86
 #else
-#define NUM_CORE_REGS 73
+#define NUM_CORE_REGS 72
 #endif
 
 #ifdef TARGET_ABI32
@@ -534,7 +734,7 @@ static int cpu_gdb_read_register(CPUState *env, uint8_t *mem_buf, int n)
     case 69: GET_REGA(env->npc);
     case 70: GET_REGA(env->fsr);
     case 71: GET_REGA(0); /* csr */
-    case 72: GET_REGA(0);
+    default: GET_REGA(0);
     }
 #else
     if (n < 64) {
@@ -991,6 +1191,56 @@ static int cpu_gdb_write_register(CPUState *env, uint8_t *mem_buf, int n)
 
     return 4;
 }
+#elif defined (TARGET_ALPHA)
+
+#define NUM_CORE_REGS 65
+
+static int cpu_gdb_read_register(CPUState *env, uint8_t *mem_buf, int n)
+{
+    if (n < 31) {
+       GET_REGL(env->ir[n]);
+    }
+    else if (n == 31) {
+       GET_REGL(0);
+    }
+    else if (n<63) {
+       uint64_t val;
+
+       val=*((uint64_t *)&env->fir[n-32]);
+       GET_REGL(val);
+    }
+    else if (n==63) {
+       GET_REGL(env->fpcr);
+    }
+    else if (n==64) {
+       GET_REGL(env->pc);
+    }
+    else {
+       GET_REGL(0);
+    }
+
+    return 0;
+}
+
+static int cpu_gdb_write_register(CPUState *env, uint8_t *mem_buf, int n)
+{
+    target_ulong tmp;
+    tmp = ldtul_p(mem_buf);
+
+    if (n < 31) {
+        env->ir[n] = tmp;
+    }
+
+    if (n > 31 && n < 63) {
+        env->fir[n - 32] = ldfl_p(mem_buf);
+    }
+
+    if (n == 64 ) {
+       env->pc=tmp;
+    }
+
+    return 8;
+}
 #else
 
 #define NUM_CORE_REGS 0
@@ -1031,7 +1281,7 @@ static int memtox(char *buf, const char *mem, int len)
     return p - buf;
 }
 
-const char *get_feature_xml(CPUState *env, const char *p, const char **newp)
+static const char *get_feature_xml(const char *p, const char **newp)
 {
     extern const char *const xml_builtin[][2];
     size_t len;
@@ -1050,14 +1300,14 @@ const char *get_feature_xml(CPUState *env, const char *p, const char **newp)
         if (!target_xml[0]) {
             GDBRegisterState *r;
 
-            sprintf(target_xml,
-                    "<?xml version=\"1.0\"?>"
-                    "<!DOCTYPE target SYSTEM \"gdb-target.dtd\">"
-                    "<target>"
-                    "<xi:include href=\"%s\"/>",
-                    GDB_CORE_XML);
+            snprintf(target_xml, sizeof(target_xml),
+                     "<?xml version=\"1.0\"?>"
+                     "<!DOCTYPE target SYSTEM \"gdb-target.dtd\">"
+                     "<target>"
+                     "<xi:include href=\"%s\"/>",
+                     GDB_CORE_XML);
 
-            for (r = env->gdb_regs; r; r = r->next) {
+            for (r = first_cpu->gdb_regs; r; r = r->next) {
                 strcat(target_xml, "<xi:include href=\"");
                 strcat(target_xml, r->xml);
                 strcat(target_xml, "\"/>");
@@ -1145,10 +1395,99 @@ void gdb_register_coprocessor(CPUState * env,
     }
 }
 
-static int gdb_handle_packet(GDBState *s, CPUState *env, const char *line_buf)
+/* GDB breakpoint/watchpoint types */
+#define GDB_BREAKPOINT_SW        0
+#define GDB_BREAKPOINT_HW        1
+#define GDB_WATCHPOINT_WRITE     2
+#define GDB_WATCHPOINT_READ      3
+#define GDB_WATCHPOINT_ACCESS    4
+
+#ifndef CONFIG_USER_ONLY
+static const int xlat_gdb_type[] = {
+    [GDB_WATCHPOINT_WRITE]  = BP_GDB | BP_MEM_WRITE,
+    [GDB_WATCHPOINT_READ]   = BP_GDB | BP_MEM_READ,
+    [GDB_WATCHPOINT_ACCESS] = BP_GDB | BP_MEM_ACCESS,
+};
+#endif
+
+static int gdb_breakpoint_insert(target_ulong addr, target_ulong len, int type)
 {
+    CPUState *env;
+    int err = 0;
+
+    switch (type) {
+    case GDB_BREAKPOINT_SW:
+    case GDB_BREAKPOINT_HW:
+        for (env = first_cpu; env != NULL; env = env->next_cpu) {
+            err = cpu_breakpoint_insert(env, addr, BP_GDB, NULL);
+            if (err)
+                break;
+        }
+        return err;
+#ifndef CONFIG_USER_ONLY
+    case GDB_WATCHPOINT_WRITE:
+    case GDB_WATCHPOINT_READ:
+    case GDB_WATCHPOINT_ACCESS:
+        for (env = first_cpu; env != NULL; env = env->next_cpu) {
+            err = cpu_watchpoint_insert(env, addr, len, xlat_gdb_type[type],
+                                        NULL);
+            if (err)
+                break;
+        }
+        return err;
+#endif
+    default:
+        return -ENOSYS;
+    }
+}
+
+static int gdb_breakpoint_remove(target_ulong addr, target_ulong len, int type)
+{
+    CPUState *env;
+    int err = 0;
+
+    switch (type) {
+    case GDB_BREAKPOINT_SW:
+    case GDB_BREAKPOINT_HW:
+        for (env = first_cpu; env != NULL; env = env->next_cpu) {
+            err = cpu_breakpoint_remove(env, addr, BP_GDB);
+            if (err)
+                break;
+        }
+        return err;
+#ifndef CONFIG_USER_ONLY
+    case GDB_WATCHPOINT_WRITE:
+    case GDB_WATCHPOINT_READ:
+    case GDB_WATCHPOINT_ACCESS:
+        for (env = first_cpu; env != NULL; env = env->next_cpu) {
+            err = cpu_watchpoint_remove(env, addr, len, xlat_gdb_type[type]);
+            if (err)
+                break;
+        }
+        return err;
+#endif
+    default:
+        return -ENOSYS;
+    }
+}
+
+static void gdb_breakpoint_remove_all(void)
+{
+    CPUState *env;
+
+    for (env = first_cpu; env != NULL; env = env->next_cpu) {
+        cpu_breakpoint_remove_all(env, BP_GDB);
+#ifndef CONFIG_USER_ONLY
+        cpu_watchpoint_remove_all(env, BP_GDB);
+#endif
+    }
+}
+
+static int gdb_handle_packet(GDBState *s, const char *line_buf)
+{
+    CPUState *env;
     const char *p;
-    int ch, reg_size, type;
+    int ch, reg_size, type, res, thread;
     char buf[MAX_PACKET_LENGTH];
     uint8_t mem_buf[MAX_PACKET_LENGTH];
     uint8_t *registers;
@@ -1162,39 +1501,44 @@ static int gdb_handle_packet(GDBState *s, CPUState *env, const char *line_buf)
     switch(ch) {
     case '?':
         /* TODO: Make this return the correct value for user-mode.  */
-        snprintf(buf, sizeof(buf), "S%02x", SIGTRAP);
+        snprintf(buf, sizeof(buf), "T%02xthread:%02x;", GDB_SIGNAL_TRAP,
+                 s->c_cpu->cpu_index+1);
         put_packet(s, buf);
         /* Remove all the breakpoints when this query is issued,
          * because gdb is doing and initial connect and the state
          * should be cleaned up.
          */
-        cpu_breakpoint_remove_all(env);
-        cpu_watchpoint_remove_all(env);
+        gdb_breakpoint_remove_all();
         break;
     case 'c':
         if (*p != '\0') {
             addr = strtoull(p, (char **)&p, 16);
 #if defined(TARGET_I386)
-            env->eip = addr;
+            s->c_cpu->eip = addr;
 #elif defined (TARGET_PPC)
-            env->nip = addr;
+            s->c_cpu->nip = addr;
 #elif defined (TARGET_SPARC)
-            env->pc = addr;
-            env->npc = addr + 4;
+            s->c_cpu->pc = addr;
+            s->c_cpu->npc = addr + 4;
 #elif defined (TARGET_ARM)
-            env->regs[15] = addr;
+            s->c_cpu->regs[15] = addr;
 #elif defined (TARGET_SH4)
-            env->pc = addr;
+            s->c_cpu->pc = addr;
 #elif defined (TARGET_MIPS)
-            env->active_tc.PC = addr;
+            s->c_cpu->active_tc.PC = addr;
 #elif defined (TARGET_CRIS)
-            env->pc = addr;
+            s->c_cpu->pc = addr;
+#elif defined (TARGET_ALPHA)
+            s->c_cpu->pc = addr;
 #endif
         }
+        s->signal = 0;
         gdb_continue(s);
 	return RS_IDLE;
     case 'C':
-        s->signal = strtoul(p, (char **)&p, 16);
+        s->signal = gdb_signal_to_target (strtoul(p, (char **)&p, 16));
+        if (s->signal == -1)
+            s->signal = 0;
         gdb_continue(s);
         return RS_IDLE;
     case 'k':
@@ -1203,8 +1547,7 @@ static int gdb_handle_packet(GDBState *s, CPUState *env, const char *line_buf)
         exit(0);
     case 'D':
         /* Detach packet */
-        cpu_breakpoint_remove_all(env);
-        cpu_watchpoint_remove_all(env);
+        gdb_breakpoint_remove_all();
         gdb_continue(s);
         put_packet(s, "OK");
         break;
@@ -1212,23 +1555,25 @@ static int gdb_handle_packet(GDBState *s, CPUState *env, const char *line_buf)
         if (*p != '\0') {
             addr = strtoull(p, (char **)&p, 16);
 #if defined(TARGET_I386)
-            env->eip = addr;
+            s->c_cpu->eip = addr;
 #elif defined (TARGET_PPC)
-            env->nip = addr;
+            s->c_cpu->nip = addr;
 #elif defined (TARGET_SPARC)
-            env->pc = addr;
-            env->npc = addr + 4;
+            s->c_cpu->pc = addr;
+            s->c_cpu->npc = addr + 4;
 #elif defined (TARGET_ARM)
-            env->regs[15] = addr;
+            s->c_cpu->regs[15] = addr;
 #elif defined (TARGET_SH4)
-            env->pc = addr;
+            s->c_cpu->pc = addr;
 #elif defined (TARGET_MIPS)
-            env->active_tc.PC = addr;
+            s->c_cpu->active_tc.PC = addr;
 #elif defined (TARGET_CRIS)
-            env->pc = addr;
+            s->c_cpu->pc = addr;
+#elif defined (TARGET_ALPHA)
+            s->c_cpu->pc = addr;
 #endif
         }
-        cpu_single_step(env, sstep_flags);
+        cpu_single_step(s->c_cpu, sstep_flags);
         gdb_continue(s);
 	return RS_IDLE;
     case 'F':
@@ -1247,7 +1592,7 @@ static int gdb_handle_packet(GDBState *s, CPUState *env, const char *line_buf)
                 p++;
             type = *p;
             if (gdb_current_syscall_cb)
-                gdb_current_syscall_cb(s->env, ret, err);
+                gdb_current_syscall_cb(s->c_cpu, ret, err);
             if (type == 'C') {
                 put_packet(s, "T02");
             } else {
@@ -1258,7 +1603,7 @@ static int gdb_handle_packet(GDBState *s, CPUState *env, const char *line_buf)
     case 'g':
         len = 0;
         for (addr = 0; addr < num_g_regs; addr++) {
-            reg_size = gdb_read_register(env, mem_buf + len, addr);
+            reg_size = gdb_read_register(s->g_cpu, mem_buf + len, addr);
             len += reg_size;
         }
         memtohex(buf, mem_buf, len);
@@ -1269,7 +1614,7 @@ static int gdb_handle_packet(GDBState *s, CPUState *env, const char *line_buf)
         len = strlen(p) / 2;
         hextomem((uint8_t *)registers, p, len);
         for (addr = 0; addr < num_g_regs && len > 0; addr++) {
-            reg_size = gdb_write_register(env, registers, addr);
+            reg_size = gdb_write_register(s->g_cpu, registers, addr);
             len -= reg_size;
             registers += reg_size;
         }
@@ -1280,7 +1625,7 @@ static int gdb_handle_packet(GDBState *s, CPUState *env, const char *line_buf)
         if (*p == ',')
             p++;
         len = strtoull(p, NULL, 16);
-        if (cpu_memory_rw_debug(env, addr, mem_buf, len, 0) != 0) {
+        if (cpu_memory_rw_debug(s->g_cpu, addr, mem_buf, len, 0) != 0) {
             put_packet (s, "E14");
         } else {
             memtohex(buf, mem_buf, len);
@@ -1295,7 +1640,7 @@ static int gdb_handle_packet(GDBState *s, CPUState *env, const char *line_buf)
         if (*p == ':')
             p++;
         hextomem(mem_buf, p, len);
-        if (cpu_memory_rw_debug(env, addr, mem_buf, len, 1) != 0)
+        if (cpu_memory_rw_debug(s->g_cpu, addr, mem_buf, len, 1) != 0)
             put_packet(s, "E14");
         else
             put_packet(s, "OK");
@@ -1307,7 +1652,7 @@ static int gdb_handle_packet(GDBState *s, CPUState *env, const char *line_buf)
         if (!gdb_has_xml)
             goto unknown_command;
         addr = strtoull(p, (char **)&p, 16);
-        reg_size = gdb_read_register(env, mem_buf, addr);
+        reg_size = gdb_read_register(s->g_cpu, mem_buf, addr);
         if (reg_size) {
             memtohex(buf, mem_buf, reg_size);
             put_packet(s, buf);
@@ -1323,48 +1668,10 @@ static int gdb_handle_packet(GDBState *s, CPUState *env, const char *line_buf)
             p++;
         reg_size = strlen(p) / 2;
         hextomem(mem_buf, p, reg_size);
-        gdb_write_register(env, mem_buf, addr);
+        gdb_write_register(s->g_cpu, mem_buf, addr);
         put_packet(s, "OK");
         break;
     case 'Z':
-        type = strtoul(p, (char **)&p, 16);
-        if (*p == ',')
-            p++;
-        addr = strtoull(p, (char **)&p, 16);
-        if (*p == ',')
-            p++;
-        len = strtoull(p, (char **)&p, 16);
-        switch (type) {
-        case 0:
-        case 1:
-            if (cpu_breakpoint_insert(env, addr) < 0)
-                goto breakpoint_error;
-            put_packet(s, "OK");
-            break;
-#ifndef CONFIG_USER_ONLY
-        case 2:
-            type = PAGE_WRITE;
-            goto insert_watchpoint;
-        case 3:
-            type = PAGE_READ;
-            goto insert_watchpoint;
-        case 4:
-            type = PAGE_READ | PAGE_WRITE;
-        insert_watchpoint:
-            if (cpu_watchpoint_insert(env, addr, type) < 0)
-                goto breakpoint_error;
-            put_packet(s, "OK");
-            break;
-#endif
-        default:
-            put_packet(s, "");
-            break;
-        }
-        break;
-    breakpoint_error:
-        put_packet(s, "E22");
-        break;
-
     case 'z':
         type = strtoul(p, (char **)&p, 16);
         if (*p == ',')
@@ -1373,17 +1680,55 @@ static int gdb_handle_packet(GDBState *s, CPUState *env, const char *line_buf)
         if (*p == ',')
             p++;
         len = strtoull(p, (char **)&p, 16);
-        if (type == 0 || type == 1) {
-            cpu_breakpoint_remove(env, addr);
-            put_packet(s, "OK");
-#ifndef CONFIG_USER_ONLY
-        } else if (type >= 2 || type <= 4) {
-            cpu_watchpoint_remove(env, addr);
-            put_packet(s, "OK");
-#endif
-        } else {
+        if (ch == 'Z')
+            res = gdb_breakpoint_insert(addr, len, type);
+        else
+            res = gdb_breakpoint_remove(addr, len, type);
+        if (res >= 0)
+             put_packet(s, "OK");
+        else if (res == -ENOSYS)
             put_packet(s, "");
+        else
+            put_packet(s, "E22");
+        break;
+    case 'H':
+        type = *p++;
+        thread = strtoull(p, (char **)&p, 16);
+        if (thread == -1 || thread == 0) {
+            put_packet(s, "OK");
+            break;
         }
+        for (env = first_cpu; env != NULL; env = env->next_cpu)
+            if (env->cpu_index + 1 == thread)
+                break;
+        if (env == NULL) {
+            put_packet(s, "E22");
+            break;
+        }
+        switch (type) {
+        case 'c':
+            s->c_cpu = env;
+            put_packet(s, "OK");
+            break;
+        case 'g':
+            s->g_cpu = env;
+            put_packet(s, "OK");
+            break;
+        default:
+             put_packet(s, "E22");
+             break;
+        }
+        break;
+    case 'T':
+        thread = strtoull(p, (char **)&p, 16);
+#ifndef CONFIG_USER_ONLY
+        if (thread > 0 && thread < smp_cpus + 1)
+#else
+        if (thread == 1)
+#endif
+             put_packet(s, "OK");
+        else
+            put_packet(s, "E22");
         break;
     case 'q':
     case 'Q':
@@ -1410,10 +1755,39 @@ static int gdb_handle_packet(GDBState *s, CPUState *env, const char *line_buf)
             sstep_flags = type;
             put_packet(s, "OK");
             break;
+        } else if (strcmp(p,"C") == 0) {
+            /* "Current thread" remains vague in the spec, so always return
+             *  the first CPU (gdb returns the first thread). */
+            put_packet(s, "QC1");
+            break;
+        } else if (strcmp(p,"fThreadInfo") == 0) {
+            s->query_cpu = first_cpu;
+            goto report_cpuinfo;
+        } else if (strcmp(p,"sThreadInfo") == 0) {
+        report_cpuinfo:
+            if (s->query_cpu) {
+                snprintf(buf, sizeof(buf), "m%x", s->query_cpu->cpu_index+1);
+                put_packet(s, buf);
+                s->query_cpu = s->query_cpu->next_cpu;
+            } else
+                put_packet(s, "l");
+            break;
+        } else if (strncmp(p,"ThreadExtraInfo,", 16) == 0) {
+            thread = strtoull(p+16, (char **)&p, 16);
+            for (env = first_cpu; env != NULL; env = env->next_cpu)
+                if (env->cpu_index + 1 == thread) {
+                    len = snprintf((char *)mem_buf, sizeof(mem_buf),
+                                   "CPU#%d [%s]", env->cpu_index,
+                                   env->halted ? "halted " : "running");
+                    memtohex(buf, mem_buf, len);
+                    put_packet(s, buf);
+                    break;
+                }
+            break;
         }
 #ifdef CONFIG_LINUX_USER
         else if (strncmp(p, "Offsets", 7) == 0) {
-            TaskState *ts = env->opaque;
+            TaskState *ts = s->c_cpu->opaque;
 
             snprintf(buf, sizeof(buf),
                      "Text=" TARGET_ABI_FMT_lx ";Data=" TARGET_ABI_FMT_lx
@@ -1426,7 +1800,7 @@ static int gdb_handle_packet(GDBState *s, CPUState *env, const char *line_buf)
         }
 #endif
         if (strncmp(p, "Supported", 9) == 0) {
-            sprintf(buf, "PacketSize=%x", MAX_PACKET_LENGTH);
+            snprintf(buf, sizeof(buf), "PacketSize=%x", MAX_PACKET_LENGTH);
 #ifdef GDB_CORE_XML
             strcat(buf, ";qXfer:features:read+");
 #endif
@@ -1440,9 +1814,9 @@ static int gdb_handle_packet(GDBState *s, CPUState *env, const char *line_buf)
 
             gdb_has_xml = 1;
             p += 19;
-            xml = get_feature_xml(env, p, &p);
+            xml = get_feature_xml(p, &p);
             if (!xml) {
-                sprintf(buf, "E00");
+                snprintf(buf, sizeof(buf), "E00");
                 put_packet(s, buf);
                 break;
             }
@@ -1456,7 +1830,7 @@ static int gdb_handle_packet(GDBState *s, CPUState *env, const char *line_buf)
 
             total_len = strlen(xml);
             if (addr > total_len) {
-                sprintf(buf, "E00");
+                snprintf(buf, sizeof(buf), "E00");
                 put_packet(s, buf);
                 break;
             }
@@ -1486,38 +1860,56 @@ static int gdb_handle_packet(GDBState *s, CPUState *env, const char *line_buf)
     return RS_IDLE;
 }
 
-extern void tb_flush(CPUState *env);
+void gdb_set_stop_cpu(CPUState *env)
+{
+    gdbserver_state->c_cpu = env;
+    gdbserver_state->g_cpu = env;
+}
 
 #ifndef CONFIG_USER_ONLY
 static void gdb_vm_stopped(void *opaque, int reason)
 {
-    GDBState *s = opaque;
+    GDBState *s = gdbserver_state;
+    CPUState *env = s->c_cpu;
     char buf[256];
+    const char *type;
     int ret;
 
     if (s->state == RS_SYSCALL)
         return;
 
     /* disable single step if it was enable */
-    cpu_single_step(s->env, 0);
+    cpu_single_step(env, 0);
 
     if (reason == EXCP_DEBUG) {
-        if (s->env->watchpoint_hit) {
-            snprintf(buf, sizeof(buf), "T%02xwatch:" TARGET_FMT_lx ";",
-                     SIGTRAP,
-                     s->env->watchpoint[s->env->watchpoint_hit - 1].vaddr);
+        if (env->watchpoint_hit) {
+            switch (env->watchpoint_hit->flags & BP_MEM_ACCESS) {
+            case BP_MEM_READ:
+                type = "r";
+                break;
+            case BP_MEM_ACCESS:
+                type = "a";
+                break;
+            default:
+                type = "";
+                break;
+            }
+            snprintf(buf, sizeof(buf),
+                     "T%02xthread:%02x;%swatch:" TARGET_FMT_lx ";",
+                     GDB_SIGNAL_TRAP, env->cpu_index+1, type,
+                     env->watchpoint_hit->vaddr);
             put_packet(s, buf);
-            s->env->watchpoint_hit = 0;
+            env->watchpoint_hit = NULL;
             return;
         }
-	tb_flush(s->env);
-        ret = SIGTRAP;
+	tb_flush(env);
+        ret = GDB_SIGNAL_TRAP;
     } else if (reason == EXCP_INTERRUPT) {
-        ret = SIGINT;
+        ret = GDB_SIGNAL_INT;
     } else {
         ret = 0;
     }
-    snprintf(buf, sizeof(buf), "S%02x", ret);
+    snprintf(buf, sizeof(buf), "T%02xthread:%02x;", ret, env->cpu_index+1);
     put_packet(s, buf);
 }
 #endif
@@ -1536,7 +1928,7 @@ void gdb_do_syscall(gdb_syscall_complete_cb cb, const char *fmt, ...)
     uint64_t i64;
     GDBState *s;
 
-    s = gdb_syscall_state;
+    s = gdbserver_state;
     if (!s)
         return;
     gdb_current_syscall_cb = cb;
@@ -1581,15 +1973,14 @@ void gdb_do_syscall(gdb_syscall_complete_cb cb, const char *fmt, ...)
     va_end(va);
     put_packet(s, buf);
 #ifdef CONFIG_USER_ONLY
-    gdb_handlesig(s->env, 0);
+    gdb_handlesig(s->c_cpu, 0);
 #else
-    cpu_interrupt(s->env, CPU_INTERRUPT_EXIT);
+    cpu_interrupt(s->c_cpu, CPU_INTERRUPT_EXIT);
 #endif
 }
 
 static void gdb_read_byte(GDBState *s, int ch)
 {
-    CPUState *env = s->env;
     int i, csum;
     uint8_t reply;
 
@@ -1655,7 +2046,7 @@ static void gdb_read_byte(GDBState *s, int ch)
             } else {
                 reply = '+';
                 put_buffer(s, &reply, 1);
-                s->state = gdb_handle_packet(s, env, s->line_buf);
+                s->state = gdb_handle_packet(s, s->line_buf);
             }
             break;
         default:
@@ -1666,13 +2057,26 @@ static void gdb_read_byte(GDBState *s, int ch)
 
 #ifdef CONFIG_USER_ONLY
 int
+gdb_queuesig (void)
+{
+    GDBState *s;
+
+    s = gdbserver_state;
+
+    if (gdbserver_fd < 0 || s->fd < 0)
+        return 0;
+    else
+        return 1;
+}
+
+int
 gdb_handlesig (CPUState *env, int sig)
 {
   GDBState *s;
   char buf[256];
   int n;
 
-  s = &gdbserver_state;
+  s = gdbserver_state;
   if (gdbserver_fd < 0 || s->fd < 0)
     return sig;
 
@@ -1682,7 +2086,7 @@ gdb_handlesig (CPUState *env, int sig)
 
   if (sig != 0)
     {
-      snprintf(buf, sizeof(buf), "S%02x", sig);
+      snprintf(buf, sizeof(buf), "S%02x", target_signal_to_gdb (sig));
       put_packet(s, buf);
     }
   /* put_packet() might have detected that the peer terminated the 
@@ -1720,7 +2124,7 @@ void gdb_exit(CPUState *env, int code)
   GDBState *s;
   char buf[4];
 
-  s = &gdbserver_state;
+  s = gdbserver_state;
   if (gdbserver_fd < 0 || s->fd < 0)
     return;
 
@@ -1728,8 +2132,21 @@ void gdb_exit(CPUState *env, int code)
   put_packet(s, buf);
 }
 
+/* Tell the remote gdb that the process has exited due to SIG.  */
+void gdb_signalled(CPUState *env, int sig)
+{
+  GDBState *s;
+  char buf[4];
 
-static void gdb_accept(void *opaque)
+  s = gdbserver_state;
+  if (gdbserver_fd < 0 || s->fd < 0)
+    return;
+
+  snprintf(buf, sizeof(buf), "X%02x", target_signal_to_gdb (sig));
+  put_packet(s, buf);
+}
+
+static void gdb_accept(void)
 {
     GDBState *s;
     struct sockaddr_in sockaddr;
@@ -1751,13 +2168,20 @@ static void gdb_accept(void *opaque)
     val = 1;
     setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, (char *)&val, sizeof(val));
 
-    s = &gdbserver_state;
+    s = qemu_mallocz(sizeof(GDBState));
+    if (!s) {
+        errno = ENOMEM;
+        perror("accept");
+        return;
+    }
+
     memset (s, 0, sizeof (GDBState));
-    s->env = first_cpu; /* XXX: allow to change CPU */
+    s->c_cpu = first_cpu;
+    s->g_cpu = first_cpu;
     s->fd = fd;
     gdb_has_xml = 0;
 
-    gdb_syscall_state = s;
+    gdbserver_state = s;
 
     fcntl(fd, F_SETFL, O_NONBLOCK);
 }
@@ -1799,8 +2223,20 @@ int gdbserver_start(int port)
     if (gdbserver_fd < 0)
         return -1;
     /* accept connections */
-    gdb_accept (NULL);
+    gdb_accept();
     return 0;
+}
+
+/* Disable gdb stub for child processes.  */
+void gdbserver_fork(CPUState *env)
+{
+    GDBState *s = gdbserver_state;
+    if (gdbserver_fd < 0 || s->fd < 0)
+      return;
+    close(s->fd);
+    s->fd = -1;
+    cpu_breakpoint_remove_all(env, BP_GDB);
+    cpu_watchpoint_remove_all(env, BP_GDB);
 }
 #else
 static int gdb_chr_can_receive(void *opaque)
@@ -1812,11 +2248,10 @@ static int gdb_chr_can_receive(void *opaque)
 
 static void gdb_chr_receive(void *opaque, const uint8_t *buf, int size)
 {
-    GDBState *s = opaque;
     int i;
 
     for (i = 0; i < size; i++) {
-        gdb_read_byte(s, buf[i]);
+        gdb_read_byte(gdbserver_state, buf[i]);
     }
 }
 
@@ -1825,7 +2260,6 @@ static void gdb_chr_event(void *opaque, int event)
     switch (event) {
     case CHR_EVENT_RESET:
         vm_stop(EXCP_INTERRUPT);
-        gdb_syscall_state = opaque;
         gdb_has_xml = 0;
         break;
     default:
@@ -1852,7 +2286,7 @@ int gdbserver_start(const char *port)
         port = gdbstub_port_name;
     }
 
-    chr = qemu_chr_open(port);
+    chr = qemu_chr_open("gdb", port);
     if (!chr)
         return -1;
 
@@ -1860,11 +2294,13 @@ int gdbserver_start(const char *port)
     if (!s) {
         return -1;
     }
-    s->env = first_cpu; /* XXX: allow to change CPU */
+    s->c_cpu = first_cpu;
+    s->g_cpu = first_cpu;
     s->chr = chr;
+    gdbserver_state = s;
     qemu_chr_add_handlers(chr, gdb_chr_can_receive, gdb_chr_receive,
-                          gdb_chr_event, s);
-    qemu_add_vm_stop_handler(gdb_vm_stopped, s);
+                          gdb_chr_event, NULL);
+    qemu_add_vm_stop_handler(gdb_vm_stopped, NULL);
     return 0;
 }
 #endif

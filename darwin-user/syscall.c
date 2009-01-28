@@ -16,7 +16,8 @@
  *
  *  You should have received a copy of the GNU General Public License
  *  along with this program; if not, write to the Free Software
- *  Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+ *  Foundation, Inc., 51 Franklin Street - Fifth Floor, Boston,
+ *  MA 02110-1301, USA.
  */
 #include <fcntl.h>
 #include <stdio.h>
@@ -135,7 +136,7 @@ void static inline print_description_msg_header(mach_msg_header_t *hdr)
         { 4241876,  "lu_message_reply_id" }, /* lookupd */
     };
 
-    for(i = 0; i < sizeof(msg_name)/sizeof(msg_name[0]); i++) {
+    for(i = 0; i < ARRAY_SIZE(msg_name); i++) {
         if(msg_name[i].number == hdr->msgh_id)
         {
             name = msg_name[i].name;
@@ -210,7 +211,7 @@ static inline void print_mach_msg_return(mach_msg_return_t ret)
         DPRINTF("MACH_MSG_SUCCESS\n");
     else
     {
-        for( i = 0; i < sizeof(msg_name)/sizeof(msg_name[0]); i++) {
+        for( i = 0; i < ARRAY_SIZE(msg_name); i++) {
             if(msg_name[i].code == ret) {
                 DPRINTF("%s\n", msg_name[i].name);
                 found = 1;

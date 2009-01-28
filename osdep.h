@@ -4,6 +4,10 @@
 #include <stdarg.h>
 #include <sys/types.h>
 
+#ifndef _WIN32
+#include <sys/time.h>
+#endif
+
 #ifndef glue
 #define xglue(x, y) x ## y
 #define glue(x, y) xglue(x, y)
@@ -45,7 +49,9 @@
 #define always_inline inline
 #else
 #define always_inline __attribute__ (( always_inline )) __inline__
+#ifdef __OPTIMIZE__
 #define inline always_inline
+#endif
 #endif
 #else
 #define inline always_inline
@@ -59,7 +65,7 @@
 
 #define qemu_printf printf
 
-#if defined (__GNUC__) && defined (__GNUC_MINOR_)
+#if defined (__GNUC__) && defined (__GNUC_MINOR__)
 # define QEMU_GNUC_PREREQ(maj, min) \
          ((__GNUC__ << 16) + __GNUC_MINOR__ >= ((maj) << 16) + (min))
 #else

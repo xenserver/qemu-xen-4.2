@@ -1392,7 +1392,6 @@ static void pci_map(PCIDevice * pci_dev, int region_num,
 static void pci_mmio_writeb(void *opaque, target_phys_addr_t addr, uint32_t val)
 {
     EEPRO100State *s = opaque;
-    addr -= s->region[0];
     //~ logout("addr=%s val=0x%02x\n", regname(addr), val);
     eepro100_write1(s, addr, val);
 }
@@ -1400,7 +1399,6 @@ static void pci_mmio_writeb(void *opaque, target_phys_addr_t addr, uint32_t val)
 static void pci_mmio_writew(void *opaque, target_phys_addr_t addr, uint32_t val)
 {
     EEPRO100State *s = opaque;
-    addr -= s->region[0];
     //~ logout("addr=%s val=0x%02x\n", regname(addr), val);
     eepro100_write2(s, addr, val);
 }
@@ -1408,7 +1406,6 @@ static void pci_mmio_writew(void *opaque, target_phys_addr_t addr, uint32_t val)
 static void pci_mmio_writel(void *opaque, target_phys_addr_t addr, uint32_t val)
 {
     EEPRO100State *s = opaque;
-    addr -= s->region[0];
     //~ logout("addr=%s val=0x%02x\n", regname(addr), val);
     eepro100_write4(s, addr, val);
 }
@@ -1416,7 +1413,6 @@ static void pci_mmio_writel(void *opaque, target_phys_addr_t addr, uint32_t val)
 static uint32_t pci_mmio_readb(void *opaque, target_phys_addr_t addr)
 {
     EEPRO100State *s = opaque;
-    addr -= s->region[0];
     //~ logout("addr=%s\n", regname(addr));
     return eepro100_read1(s, addr);
 }
@@ -1424,7 +1420,6 @@ static uint32_t pci_mmio_readb(void *opaque, target_phys_addr_t addr)
 static uint32_t pci_mmio_readw(void *opaque, target_phys_addr_t addr)
 {
     EEPRO100State *s = opaque;
-    addr -= s->region[0];
     //~ logout("addr=%s\n", regname(addr));
     return eepro100_read2(s, addr);
 }
@@ -1432,7 +1427,6 @@ static uint32_t pci_mmio_readw(void *opaque, target_phys_addr_t addr)
 static uint32_t pci_mmio_readl(void *opaque, target_phys_addr_t addr)
 {
     EEPRO100State *s = opaque;
-    addr -= s->region[0];
     //~ logout("addr=%s\n", regname(addr));
     return eepro100_read4(s, addr);
 }
@@ -1782,13 +1776,10 @@ static void nic_init(PCIBus * bus, NICInfo * nd,
 
     nic_reset(s);
 
-    s->vc = qemu_new_vlan_client(nd->vlan, nic_receive, nic_can_receive, s);
+    s->vc = qemu_new_vlan_client(nd->vlan, nd->model, nd->name,
+                                 nic_receive, nic_can_receive, s);
 
-    snprintf(s->vc->info_str, sizeof(s->vc->info_str),
-             "eepro100 pci macaddr=%02x:%02x:%02x:%02x:%02x:%02x",
-             s->macaddr[0],
-             s->macaddr[1],
-             s->macaddr[2], s->macaddr[3], s->macaddr[4], s->macaddr[5]);
+    qemu_format_nic_info_str(s->vc, s->macaddr);
 
     qemu_register_reset(nic_reset, s);
 

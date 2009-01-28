@@ -34,7 +34,6 @@
 #include "qemu-timer.h"
 #include "console.h"
 
-#if defined(__linux__)
 #include <dirent.h>
 #include <sys/ioctl.h>
 /* Some versions of usbdevice_fs.h need __user to be defined for them.   */
@@ -78,6 +77,8 @@ static int usb_host_find_device(int *pbus_num, int *paddr,
 #else
 #define dprintf(...)
 #endif
+
+#define USBDBG_DEVOPENED "husb: opened %s/devices\n"
 
 #define USBPROCBUS_PATH "/proc/bus/usb"
 #define PRODUCT_NAME_SZ 32
@@ -789,7 +790,7 @@ static int usb_linux_update_endp_table(USBHostDevice *s)
 {
     uint8_t *descriptors;
     uint8_t devep, type, configuration, alt_interface;
-    struct usbdevfs_ctrltransfer ct;
+    struct usb_ctrltransfer ct;
     int interface, ret, length, i;
 
     ct.bRequestType = USB_DIR_IN;
@@ -1049,7 +1050,7 @@ static int get_tag_value(char *buf, int buf_size,
     if (!p)
         return -1;
     p += strlen(tag);
-    while (CTYPE(isspace,*p))
+    while (qemu_isspace(*p))
         p++;
     q = buf;
     while (*p != '\0' && !strchr(stopchars, *p)) {
@@ -1165,7 +1166,8 @@ static int usb_host_read_file(char *line, size_t line_size, const char *device_f
     int ret = 0;
     char filename[PATH_MAX];
 
-    snprintf(filename, PATH_MAX, device_file, device_name);
+    snprintf(filename, PATH_MAX, USBSYSBUS_PATH "/devices/%s/%s", device_name,
+             device_file);
     f = fopen(filename, "r");
     if (f) {
         if (fgets(line, line_size, f) != NULL &&
@@ -1208,27 +1210,30 @@ static int usb_host_scan_sys(void *opaque, USBScanFunc *func)
                 tmpstr += 3;
             bus_num = atoi(tmpstr);
 
-            if (!usb_host_read_file(line, sizeof(line), USBSYSBUS_PATH "/devices/%s/devnum", de->d_name))
+            if (!usb_host_read_file(line, sizeof(line), "devnum", de->d_name))
                 goto the_end;
             if (sscanf(line, "%d", &addr) != 1)
                 goto the_end;
 
-            if (!usb_host_read_file(line, sizeof(line), USBSYSBUS_PATH "/devices/%s/bDeviceClass", de->d_name))
+            if (!usb_host_read_file(line, sizeof(line), "bDeviceClass",
+                                    de->d_name))
                 goto the_end;
             if (sscanf(line, "%x", &class_id) != 1)
                 goto the_end;
 
-            if (!usb_host_read_file(line, sizeof(line), USBSYSBUS_PATH "/devices/%s/idVendor", de->d_name))
+            if (!usb_host_read_file(line, sizeof(line), "idVendor", de->d_name))
                 goto the_end;
             if (sscanf(line, "%x", &vendor_id) != 1)
                 goto the_end;
 
-            if (!usb_host_read_file(line, sizeof(line), USBSYSBUS_PATH "/devices/%s/idProduct", de->d_name))
+            if (!usb_host_read_file(line, sizeof(line), "idProduct",
+                                    de->d_name))
                 goto the_end;
             if (sscanf(line, "%x", &product_id) != 1)
                 goto the_end;
 
-            if (!usb_host_read_file(line, sizeof(line), USBSYSBUS_PATH "/devices/%s/product", de->d_name)) {
+            if (!usb_host_read_file(line, sizeof(line), "product",
+                                    de->d_name)) {
                 *product_name = 0;
             } else {
                 if (strlen(line) > 0)
@@ -1236,7 +1241,7 @@ static int usb_host_scan_sys(void *opaque, USBScanFunc *func)
                 pstrcpy(product_name, sizeof(product_name), line);
             }
 
-            if (!usb_host_read_file(line, sizeof(line), USBSYSBUS_PATH "/devices/%s/speed", de->d_name))
+            if (!usb_host_read_file(line, sizeof(line), "speed", de->d_name))
                 goto the_end;
             if (!strcmp(line, "480\n"))
                 speed = USB_SPEED_HIGH;
@@ -1266,8 +1271,6 @@ static int usb_host_scan(void *opaque, USBScanFunc *func)
     FILE *f = 0;
     DIR *dir = 0;
     int ret = 0;
-    const char *devices = "/devices";
-    const char *opened = "husb: opened %s%s\n";
     const char *fs_type[] = {"unknown", "proc", "dev", "sys"};
     char devpath[PATH_MAX];
 
@@ -1279,7 +1282,7 @@ static int usb_host_scan(void *opaque, USBScanFunc *func)
             strcpy(devpath, USBPROCBUS_PATH);
             usb_fs_type = USB_FS_PROC;
             fclose(f);
-            dprintf(opened, USBPROCBUS_PATH, devices);
+            dprintf(USBDBG_DEVOPENED, USBPROCBUS_PATH);
             goto found_devices;
         }
         /* try additional methods if an access method hasn't been found yet */
@@ -1289,7 +1292,7 @@ static int usb_host_scan(void *opaque, USBScanFunc *func)
             strcpy(devpath, USBDEVBUS_PATH);
             usb_fs_type = USB_FS_DEV;
             fclose(f);
-            dprintf(opened, USBDEVBUS_PATH, devices);
+            dprintf(USBDBG_DEVOPENED, USBDEVBUS_PATH);
             goto found_devices;
         }
         dir = opendir(USBSYSBUS_PATH "/devices");
@@ -1298,7 +1301,7 @@ static int usb_host_scan(void *opaque, USBScanFunc *func)
             strcpy(devpath, USBDEVBUS_PATH);
             usb_fs_type = USB_FS_SYS;
             closedir(dir);
-            dprintf(opened, USBSYSBUS_PATH, devices);
+            dprintf(USBDBG_DEVOPENED, USBSYSBUS_PATH);
             goto found_devices;
         }
     found_devices:
@@ -1701,25 +1704,3 @@ void usb_host_info(void)
     	term_printf("    Device %s.%s ID %s:%s\n", bus, addr, vid, pid);
     }
 }
-
-#else
-
-#include "hw/usb.h"
-
-void usb_host_info(void)
-{
-    term_printf("USB host devices not supported\n");
-}
-
-/* XXX: modify configure to compile the right host driver */
-USBDevice *usb_host_device_open(const char *devname)
-{
-    return NULL;
-}
-
-int usb_host_device_close(const char *devname)
-{
-    return 0;
-}
-
-#endif

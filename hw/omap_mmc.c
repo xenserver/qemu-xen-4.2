@@ -13,17 +13,15 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston,
- * MA 02111-1307 USA
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 #include "hw.h"
 #include "omap.h"
 #include "sd.h"
 
 struct omap_mmc_s {
-    target_phys_addr_t base;
     qemu_irq irq;
     qemu_irq *dma;
     qemu_irq coverswitch;
@@ -581,7 +579,6 @@ struct omap_mmc_s *omap_mmc_init(target_phys_addr_t base,
             qemu_mallocz(sizeof(struct omap_mmc_s));
 
     s->irq = irq;
-    s->base = base;
     s->dma = dma;
     s->clk = clk;
     s->lines = 1;	/* TODO: needs to be settable per-board */
@@ -591,7 +588,7 @@ struct omap_mmc_s *omap_mmc_init(target_phys_addr_t base,
 
     iomemtype = cpu_register_io_memory(0, omap_mmc_readfn,
                     omap_mmc_writefn, s);
-    cpu_register_physical_memory(s->base, 0x800, iomemtype);
+    cpu_register_physical_memory(base, 0x800, iomemtype);
 
     /* Instantiate the storage */
     s->card = sd_init(bd, 0);
@@ -617,7 +614,7 @@ struct omap_mmc_s *omap2_mmc_init(struct omap_target_agent_s *ta,
 
     iomemtype = l4_register_io_memory(0, omap_mmc_readfn,
                     omap_mmc_writefn, s);
-    s->base = omap_l4_attach(ta, 0, iomemtype);
+    omap_l4_attach(ta, 0, iomemtype);
 
     /* Instantiate the storage */
     s->card = sd_init(bd, 0);

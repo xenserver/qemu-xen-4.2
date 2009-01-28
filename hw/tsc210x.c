@@ -15,10 +15,9 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston,
- * MA 02111-1307 USA
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
 #include "hw.h"
@@ -26,6 +25,7 @@
 #include "qemu-timer.h"
 #include "console.h"
 #include "omap.h"	/* For struct i2s_codec_s and struct uwire_slave_s */
+#include "devices.h"
 
 #define TSC_DATA_REGISTERS_PAGE		0x0
 #define TSC_CONTROL_REGISTERS_PAGE	0x1
@@ -326,7 +326,7 @@ static void tsc2102_audio_rate_update(struct tsc210x_state_s *s)
 static void tsc2102_audio_output_update(struct tsc210x_state_s *s)
 {
     int enable;
-    audsettings_t fmt;
+    struct audsettings fmt;
 
     if (s->dac_voice[0]) {
         tsc210x_out_flush(s, s->codec.out.len);

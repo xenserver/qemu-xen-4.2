@@ -13,20 +13,19 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston,
- * MA 02111-1307 USA
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
 #include "hw.h"
+#include "mips.h"
 #include "console.h"
 #include "pixel_ops.h"
 
 //#define DEBUG_G364
 
 typedef struct G364State {
-    target_phys_addr_t vram_base;
     unsigned int vram_size;
     uint8_t *vram_buffer;
     uint32_t ctla;
@@ -72,7 +71,7 @@ typedef struct G364State {
 
 static void g364fb_draw_graphic(G364State *s, int full_update)
 {
-    switch (s->ds->depth) {
+    switch (ds_get_bits_per_pixel(s->ds)) {
         case 8:
             g364fb_draw_graphic8(s, full_update);
             break;
@@ -86,7 +85,7 @@ static void g364fb_draw_graphic(G364State *s, int full_update)
             g364fb_draw_graphic32(s, full_update);
             break;
         default:
-            printf("g364fb: unknown depth %d\n", s->ds->depth);
+            printf("g364fb: unknown depth %d\n", ds_get_bits_per_pixel(s->ds));
             return;
     }
 
@@ -101,11 +100,11 @@ static void g364fb_draw_blank(G364State *s, int full_update)
     if (!full_update)
         return;
 
-    w = s->scr_width * ((s->ds->depth + 7) >> 3);
-    d = s->ds->data;
+    w = s->scr_width * ((ds_get_bits_per_pixel(s->ds) + 7) >> 3);
+    d = ds_get_data(s->ds);
     for(i = 0; i < s->scr_height; i++) {
         memset(d, 0, w);
-        d += s->ds->linesize;
+        d += ds_get_linesize(s->ds);
     }
 
     dpy_update(s->ds, 0, 0, s->scr_width, s->scr_height);
@@ -131,7 +130,7 @@ static void g364fb_update_display(void *opaque)
         s->graphic_mode = graphic_mode;
         full_update = 1;
     }
-    if (s->scr_width != s->ds->width || s->scr_height != s->ds->height) {
+    if (s->scr_width != ds_get_width(s->ds) || s->scr_height != ds_get_height(s->ds)) {
         qemu_console_resize(s->console, s->scr_width, s->scr_height);
         full_update = 1;
     }
@@ -300,9 +299,8 @@ static CPUWriteMemoryFunc *g364fb_ctrl_write[3] = {
 static uint32_t g364fb_mem_readb(void *opaque, target_phys_addr_t addr)
 {
     G364State *s = opaque;
-    target_phys_addr_t relative_addr = addr - s->vram_base;
 
-    return s->vram_buffer[relative_addr];
+    return s->vram_buffer[addr];
 }
 
 static uint32_t g364fb_mem_readw(void *opaque, target_phys_addr_t addr)
@@ -326,9 +324,8 @@ static uint32_t g364fb_mem_readl(void *opaque, target_phys_addr_t addr)
 static void g364fb_mem_writeb(void *opaque, target_phys_addr_t addr, uint32_t val)
 {
     G364State *s = opaque;
-    target_phys_addr_t relative_addr = addr - s->vram_base;
 
-    s->vram_buffer[relative_addr] = val;
+    s->vram_buffer[addr] = val;
 }
 
 static void g364fb_mem_writew(void *opaque, target_phys_addr_t addr, uint32_t val)
@@ -375,14 +372,13 @@ int g364fb_mm_init(DisplayState *ds,
     g364fb_reset(s);
 
     s->ds = ds;
-    s->vram_base = vram_base;
 
     s->console = graphic_console_init(ds, g364fb_update_display,
                                       g364fb_invalidate_display,
                                       g364fb_screen_dump, NULL, s);
 
     io_vram = cpu_register_io_memory(0, g364fb_mem_read, g364fb_mem_write, s);
-    cpu_register_physical_memory(s->vram_base, vram_size, io_vram);
+    cpu_register_physical_memory(vram_base, vram_size, io_vram);
 
     io_ctrl = cpu_register_io_memory(0, g364fb_ctrl_read, g364fb_ctrl_write, s);
     cpu_register_physical_memory(ctrl_base, 0x10000, io_ctrl);

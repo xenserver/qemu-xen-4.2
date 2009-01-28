@@ -248,8 +248,8 @@ int cpu_load(QEMUFile *f, void *opaque, int version_id)
         qemu_get_betls(f, &env->sysenter_esp);
         qemu_get_betls(f, &env->sysenter_eip);
     } else {
-        qemu_get_be32s(f, &env->sysenter_esp);
-        qemu_get_be32s(f, &env->sysenter_eip);
+        env->sysenter_esp = qemu_get_be32(f);
+        env->sysenter_eip = qemu_get_be32(f);
     }
 
     qemu_get_betls(f, &env->cr[0]);
@@ -259,6 +259,10 @@ int cpu_load(QEMUFile *f, void *opaque, int version_id)
 
     for(i = 0; i < 8; i++)
         qemu_get_betls(f, &env->dr[i]);
+    cpu_breakpoint_remove_all(env, BP_CPU);
+    cpu_watchpoint_remove_all(env, BP_CPU);
+    for (i = 0; i < 4; i++)
+        hw_breakpoint_insert(env, i);
 
     /* MMU */
     qemu_get_sbe32s(f, &a20_mask);

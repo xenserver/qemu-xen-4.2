@@ -24,10 +24,6 @@ void irq_info(void)
 {
 }
 
-void DMA_run (void)
-{
-}
-
 /* Board init.  */
 
 static void an5206_init(ram_addr_t ram_size, int vga_ram_size,
@@ -72,7 +68,7 @@ static void an5206_init(ram_addr_t ram_size, int vga_ram_size,
     kernel_size = load_elf(kernel_filename, 0, &elf_entry, NULL, NULL);
     entry = elf_entry;
     if (kernel_size < 0) {
-        kernel_size = load_uboot(kernel_filename, &entry, NULL);
+        kernel_size = load_uimage(kernel_filename, &entry, NULL, NULL);
     }
     if (kernel_size < 0) {
         kernel_size = load_image(kernel_filename,
@@ -92,5 +88,4 @@ QEMUMachine an5206_machine = {
     .desc = "Arnewsh 5206",
     .init = an5206_init,
     .ram_require = 512,
-    .max_cpus = 1,
 };

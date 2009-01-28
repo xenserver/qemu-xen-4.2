@@ -13,10 +13,9 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston,
- * MA 02111-1307 USA
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 #include "hw.h"
 #include "audio/audio.h"
@@ -285,6 +284,6 @@ QEMUMachine palmte_machine = {
     .name = "cheetah",
     .desc = "Palm Tungsten|E aka. Cheetah PDA (OMAP310)",
     .init = palmte_init,
-    .ram_require = (0x02000000 + 0x00800000 + OMAP15XX_SRAM_SIZE) | RAMSIZE_FIXED,
-    .max_cpus = 1,
+    .ram_require = (0x02000000 + 0x00800000 + OMAP15XX_SRAM_SIZE) |
+            RAMSIZE_FIXED,
 };

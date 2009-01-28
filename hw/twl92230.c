@@ -15,10 +15,9 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston,
- * MA 02111-1307 USA
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
 #include "hw.h"
@@ -54,7 +53,7 @@ struct menelaus_s {
     struct {
         uint8_t ctrl;
         uint16_t comp;
-        QEMUTimer *hz;
+        QEMUTimer *hz_tm;
         int64_t next;
         struct tm tm;
         struct tm new;
@@ -77,12 +76,12 @@ static inline void menelaus_update(struct menelaus_s *s)
 static inline void menelaus_rtc_start(struct menelaus_s *s)
 {
     s->rtc.next =+ qemu_get_clock(rt_clock);
-    qemu_mod_timer(s->rtc.hz, s->rtc.next);
+    qemu_mod_timer(s->rtc.hz_tm, s->rtc.next);
 }
 
 static inline void menelaus_rtc_stop(struct menelaus_s *s)
 {
-    qemu_del_timer(s->rtc.hz);
+    qemu_del_timer(s->rtc.hz_tm);
     s->rtc.next =- qemu_get_clock(rt_clock);
     if (s->rtc.next < 1)
         s->rtc.next = 1;
@@ -106,7 +105,7 @@ static void menelaus_rtc_hz(void *opaque)
     s->rtc.next_comp --;
     s->rtc.alm_sec --;
     s->rtc.next += 1000;
-    qemu_mod_timer(s->rtc.hz, s->rtc.next);
+    qemu_mod_timer(s->rtc.hz_tm, s->rtc.next);
     if ((s->rtc.ctrl >> 3) & 3) {				/* EVERY */
         menelaus_rtc_update(s);
         if (((s->rtc.ctrl >> 3) & 3) == 1 && !s->rtc.tm.tm_sec)
@@ -886,7 +885,7 @@ i2c_slave *twl92230_init(i2c_bus *bus, qemu_irq irq)
     s->i2c.send = menelaus_tx;
 
     s->irq = irq;
-    s->rtc.hz = qemu_new_timer(rt_clock, menelaus_rtc_hz, s);
+    s->rtc.hz_tm = qemu_new_timer(rt_clock, menelaus_rtc_hz, s);
     s->in = qemu_allocate_irqs(menelaus_gpio_set, s, 3);
     s->pwrbtn = qemu_allocate_irqs(menelaus_pwrbtn_set, s, 1)[0];
 

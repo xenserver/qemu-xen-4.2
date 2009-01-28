@@ -236,10 +236,9 @@ static i2c_interface *mixer_i2c;
 /* Wolfson 8750 I2C address */
 #define MP_WM_ADDR              0x34
 
-const char audio_name[] = "mv88w8618";
+static const char audio_name[] = "mv88w8618";
 
 typedef struct musicpal_audio_state {
-    uint32_t base;
     qemu_irq irq;
     uint32_t playback_mode;
     uint32_t status;
@@ -334,7 +333,6 @@ static uint32_t musicpal_audio_read(void *opaque, target_phys_addr_t offset)
 {
     musicpal_audio_state *s = opaque;
 
-    offset -= s->base;
     switch (offset) {
     case MP_AUDIO_PLAYBACK_MODE:
         return s->playback_mode;
@@ -361,7 +359,6 @@ static void musicpal_audio_write(void *opaque, target_phys_addr_t offset,
 {
     musicpal_audio_state *s = opaque;
 
-    offset -= s->base;
     switch (offset) {
     case MP_AUDIO_PLAYBACK_MODE:
         if (value & MP_AUDIO_PLAYBACK_EN &&
@@ -448,7 +445,6 @@ static i2c_interface *musicpal_audio_init(uint32_t base, qemu_irq irq)
     s = qemu_mallocz(sizeof(musicpal_audio_state));
     if (!s)
         return NULL;
-    s->base = base;
     s->irq = irq;
 
     i2c = qemu_mallocz(sizeof(i2c_interface));
@@ -549,7 +545,6 @@ typedef struct mv88w8618_rx_desc {
 } mv88w8618_rx_desc;
 
 typedef struct mv88w8618_eth_state {
-    uint32_t base;
     qemu_irq irq;
     uint32_t smir;
     uint32_t icr;
@@ -617,7 +612,6 @@ static uint32_t mv88w8618_eth_read(void *opaque, target_phys_addr_t offset)
 {
     mv88w8618_eth_state *s = opaque;
 
-    offset -= s->base;
     switch (offset) {
     case MP_ETH_SMIR:
         if (s->smir & MP_ETH_SMIR_OPCODE) {
@@ -660,7 +654,6 @@ static void mv88w8618_eth_write(void *opaque, target_phys_addr_t offset,
 {
     mv88w8618_eth_state *s = opaque;
 
-    offset -= s->base;
     switch (offset) {
     case MP_ETH_SMIR:
         s->smir = value;
@@ -721,12 +714,14 @@ static void mv88w8618_eth_init(NICInfo *nd, uint32_t base, qemu_irq irq)
     mv88w8618_eth_state *s;
     int iomemtype;
 
+    qemu_check_nic_model(nd, "mv88w8618");
+
     s = qemu_mallocz(sizeof(mv88w8618_eth_state));
     if (!s)
         return;
-    s->base = base;
     s->irq = irq;
-    s->vc = qemu_new_vlan_client(nd->vlan, eth_receive, eth_can_receive, s);
+    s->vc = qemu_new_vlan_client(nd->vlan, nd->model, nd->name,
+                                 eth_receive, eth_can_receive, s);
     iomemtype = cpu_register_io_memory(0, mv88w8618_eth_readfn,
                                        mv88w8618_eth_writefn, s);
     cpu_register_physical_memory(base, MP_ETH_SIZE, iomemtype);
@@ -752,7 +747,6 @@ static void mv88w8618_eth_init(NICInfo *nd, uint32_t base, qemu_irq irq)
 #define MP_LCD_TEXTCOLOR        0xe0e0ff /* RRGGBB */
 
 typedef struct musicpal_lcd_state {
-    uint32_t base;
     uint32_t mode;
     uint32_t irqctrl;
     int page;
@@ -801,7 +795,7 @@ static inline void glue(set_lcd_pixel, depth) \
         (musicpal_lcd_state *s, int x, int y, type col) \
 { \
     int dx, dy; \
-    type *pixel = &((type *) s->ds->data)[(y * 128 * 3 + x) * 3]; \
+    type *pixel = &((type *) ds_get_data(s->ds))[(y * 128 * 3 + x) * 3]; \
 \
     for (dy = 0; dy < 3; dy++, pixel += 127 * 3) \
         for (dx = 0; dx < 3; dx++, pixel++) \
@@ -818,7 +812,7 @@ static void lcd_refresh(void *opaque)
     musicpal_lcd_state *s = opaque;
     int x, y, col;
 
-    switch (s->ds->depth) {
+    switch (ds_get_bits_per_pixel(s->ds)) {
     case 0:
         return;
 #define LCD_REFRESH(depth, func) \
@@ -838,7 +832,7 @@ static void lcd_refresh(void *opaque)
     LCD_REFRESH(32, (s->ds->bgr ? rgb_to_pixel32bgr : rgb_to_pixel32))
     default:
         cpu_abort(cpu_single_env, "unsupported colour depth %i\n",
-                  s->ds->depth);
+                  ds_get_bits_per_pixel(s->ds));
     }
 
     dpy_update(s->ds, 0, 0, 128*3, 64*3);
@@ -852,7 +846,6 @@ static uint32_t musicpal_lcd_read(void *opaque, target_phys_addr_t offset)
 {
     musicpal_lcd_state *s = opaque;
 
-    offset -= s->base;
     switch (offset) {
     case MP_LCD_IRQCTRL:
         return s->irqctrl;
@@ -867,7 +860,6 @@ static void musicpal_lcd_write(void *opaque, target_phys_addr_t offset,
 {
     musicpal_lcd_state *s = opaque;
 
-    offset -= s->base;
     switch (offset) {
     case MP_LCD_IRQCTRL:
         s->irqctrl = value;
@@ -922,7 +914,6 @@ static void musicpal_lcd_init(DisplayState *ds, uint32_t base)
     s = qemu_mallocz(sizeof(musicpal_lcd_state));
     if (!s)
         return;
-    s->base = base;
     s->ds = ds;
     iomemtype = cpu_register_io_memory(0, musicpal_lcd_readfn,
                                        musicpal_lcd_writefn, s);
@@ -940,7 +931,6 @@ static void musicpal_lcd_init(DisplayState *ds, uint32_t base)
 
 typedef struct mv88w8618_pic_state
 {
-    uint32_t base;
     uint32_t level;
     uint32_t enabled;
     qemu_irq parent_irq;
@@ -966,7 +956,6 @@ static uint32_t mv88w8618_pic_read(void *opaque, target_phys_addr_t offset)
 {
     mv88w8618_pic_state *s = opaque;
 
-    offset -= s->base;
     switch (offset) {
     case MP_PIC_STATUS:
         return s->level & s->enabled;
@@ -981,7 +970,6 @@ static void mv88w8618_pic_write(void *opaque, target_phys_addr_t offset,
 {
     mv88w8618_pic_state *s = opaque;
 
-    offset -= s->base;
     switch (offset) {
     case MP_PIC_ENABLE_SET:
         s->enabled |= value;
@@ -1025,7 +1013,6 @@ static qemu_irq *mv88w8618_pic_init(uint32_t base, qemu_irq parent_irq)
     if (!s)
         return NULL;
     qi = qemu_allocate_irqs(mv88w8618_pic_set_irq, s, 32);
-    s->base = base;
     s->parent_irq = parent_irq;
     iomemtype = cpu_register_io_memory(0, mv88w8618_pic_readfn,
                                        mv88w8618_pic_writefn, s);
@@ -1059,7 +1046,6 @@ typedef struct mv88w8618_timer_state {
 typedef struct mv88w8618_pit_state {
     void *timer[4];
     uint32_t control;
-    uint32_t base;
 } mv88w8618_pit_state;
 
 static void mv88w8618_timer_tick(void *opaque)
@@ -1089,7 +1075,6 @@ static uint32_t mv88w8618_pit_read(void *opaque, target_phys_addr_t offset)
     mv88w8618_pit_state *s = opaque;
     mv88w8618_timer_state *t;
 
-    offset -= s->base;
     switch (offset) {
     case MP_PIT_TIMER1_VALUE ... MP_PIT_TIMER4_VALUE:
         t = s->timer[(offset-MP_PIT_TIMER1_VALUE) >> 2];
@@ -1107,7 +1092,6 @@ static void mv88w8618_pit_write(void *opaque, target_phys_addr_t offset,
     mv88w8618_timer_state *t;
     int i;
 
-    offset -= s->base;
     switch (offset) {
     case MP_PIT_TIMER1_LENGTH ... MP_PIT_TIMER4_LENGTH:
         t = s->timer[offset >> 2];
@@ -1155,7 +1139,6 @@ static void mv88w8618_pit_init(uint32_t base, qemu_irq *pic, int irq)
     if (!s)
         return;
 
-    s->base = base;
     /* Letting them all run at 1 MHz is likely just a pragmatic
      * simplification. */
     s->timer[0] = mv88w8618_timer_init(1000000, pic[irq]);
@@ -1172,7 +1155,6 @@ static void mv88w8618_pit_init(uint32_t base, qemu_irq *pic, int irq)
 #define MP_FLASHCFG_CFGR0    0x04
 
 typedef struct mv88w8618_flashcfg_state {
-    uint32_t base;
     uint32_t cfgr0;
 } mv88w8618_flashcfg_state;
 
@@ -1181,7 +1163,6 @@ static uint32_t mv88w8618_flashcfg_read(void *opaque,
 {
     mv88w8618_flashcfg_state *s = opaque;
 
-    offset -= s->base;
     switch (offset) {
     case MP_FLASHCFG_CFGR0:
         return s->cfgr0;
@@ -1196,7 +1177,6 @@ static void mv88w8618_flashcfg_write(void *opaque, target_phys_addr_t offset,
 {
     mv88w8618_flashcfg_state *s = opaque;
 
-    offset -= s->base;
     switch (offset) {
     case MP_FLASHCFG_CFGR0:
         s->cfgr0 = value;
@@ -1225,7 +1205,6 @@ static void mv88w8618_flashcfg_init(uint32_t base)
     if (!s)
         return;
 
-    s->base = base;
     s->cfgr0 = 0xfffe4285; /* Default as set by U-Boot for 8 MB flash */
     iomemtype = cpu_register_io_memory(0, mv88w8618_flashcfg_readfn,
                        mv88w8618_flashcfg_writefn, s);
@@ -1266,7 +1245,6 @@ static void mv88w8618_flashcfg_init(uint32_t base)
 
 static uint32_t musicpal_read(void *opaque, target_phys_addr_t offset)
 {
-    offset -= 0x80000000;
     switch (offset) {
     case MP_BOARD_REVISION:
         return 0x0031;
@@ -1307,7 +1285,6 @@ static uint32_t musicpal_read(void *opaque, target_phys_addr_t offset)
 static void musicpal_write(void *opaque, target_phys_addr_t offset,
                            uint32_t value)
 {
-    offset -= 0x80000000;
     switch (offset) {
     case MP_GPIO_OE_HI: /* used for LCD brightness control */
         lcd_brightness = (lcd_brightness & MP_GPIO_LCD_BRIGHTNESS) |
@@ -1512,6 +1489,6 @@ QEMUMachine musicpal_machine = {
     .name = "musicpal",
     .desc = "Marvell 88w8618 / MusicPal (ARM926EJ-S)",
     .init = musicpal_init,
-    .ram_require = MP_RAM_DEFAULT_SIZE + MP_SRAM_SIZE + MP_FLASH_SIZE_MAX + RAMSIZE_FIXED,
-    .max_cpus = 1,
+    .ram_require = MP_RAM_DEFAULT_SIZE + MP_SRAM_SIZE +
+            MP_FLASH_SIZE_MAX + RAMSIZE_FIXED,
 };

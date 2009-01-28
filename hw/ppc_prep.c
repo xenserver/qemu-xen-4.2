@@ -84,9 +84,11 @@ static int ne2000_irq[NE2000_NB_MAX] = { 9, 10, 11, 3, 4, 5 };
 /* ISA IO ports bridge */
 #define PPC_IO_BASE 0x80000000
 
+#if 0
 /* Speaker port 0x61 */
-int speaker_data_on;
-int dummy_refresh_clock;
+static int speaker_data_on;
+static int dummy_refresh_clock;
+#endif
 
 static void speaker_ioport_write (void *opaque, uint32_t addr, uint32_t val)
 {
@@ -120,7 +122,7 @@ static always_inline uint32_t _PPC_intack_read (target_phys_addr_t addr)
 {
     uint32_t retval = 0;
 
-    if (addr == 0xBFFFFFF0)
+    if ((addr & 0xf) == 0)
         retval = pic_intack_read(isa_pic);
 //   printf("%s: 0x" PADDRX " <= %08" PRIx32 "\n", __func__, addr, retval);
 
@@ -518,13 +520,13 @@ static uint32_t PPC_prep_io_readl (void *opaque, target_phys_addr_t addr)
     return ret;
 }
 
-CPUWriteMemoryFunc *PPC_prep_io_write[] = {
+static CPUWriteMemoryFunc *PPC_prep_io_write[] = {
     &PPC_prep_io_writeb,
     &PPC_prep_io_writew,
     &PPC_prep_io_writel,
 };
 
-CPUReadMemoryFunc *PPC_prep_io_read[] = {
+static CPUReadMemoryFunc *PPC_prep_io_read[] = {
     &PPC_prep_io_readb,
     &PPC_prep_io_readw,
     &PPC_prep_io_readl,
@@ -669,11 +671,13 @@ static void ppc_prep_init (ram_addr_t ram_size, int vga_ram_size,
     if (nb_nics1 > NE2000_NB_MAX)
         nb_nics1 = NE2000_NB_MAX;
     for(i = 0; i < nb_nics1; i++) {
-        if (nd_table[i].model == NULL
-            || strcmp(nd_table[i].model, "ne2k_isa") == 0) {
+        if (nd_table[i].model == NULL) {
+	    nd_table[i].model = "ne2k_isa";
+        }
+        if (strcmp(nd_table[i].model, "ne2k_isa") == 0) {
             isa_ne2000_init(ne2000_io[i], i8259[ne2000_irq[i]], &nd_table[i]);
         } else {
-            pci_nic_init(pci_bus, &nd_table[i], -1);
+            pci_nic_init(pci_bus, &nd_table[i], -1, "ne2k_pci");
         }
     }
 
@@ -762,5 +766,5 @@ QEMUMachine prep_machine = {
     .desc = "PowerPC PREP platform",
     .init = ppc_prep_init,
     .ram_require = BIOS_SIZE + VGA_RAM_SIZE,
-    .max_cpus = 1,
+    .max_cpus = MAX_CPUS,
 };

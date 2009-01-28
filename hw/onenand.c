@@ -14,10 +14,9 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston,
- * MA 02111-1307 USA
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
 #include "qemu-common.h"
@@ -113,8 +112,8 @@ void onenand_base_update(void *opaque, target_phys_addr_t new)
                     0xbe00 << s->shift,
                     (s->ram +(0x0200 << s->shift)) | IO_MEM_RAM);
     if (s->iomemtype)
-        cpu_register_physical_memory(s->base + (0xc000 << s->shift),
-                        0x4000 << s->shift, s->iomemtype);
+        cpu_register_physical_memory_offset(s->base + (0xc000 << s->shift),
+                    0x4000 << s->shift, s->iomemtype, (0xc000 << s->shift));
 }
 
 void onenand_base_unmap(void *opaque)
@@ -449,11 +448,11 @@ static void onenand_command(struct onenand_s *s, int cmd)
 static uint32_t onenand_read(void *opaque, target_phys_addr_t addr)
 {
     struct onenand_s *s = (struct onenand_s *) opaque;
-    int offset = (addr - s->base) >> s->shift;
+    int offset = addr >> s->shift;
 
     switch (offset) {
     case 0x0000 ... 0xc000:
-        return lduw_le_p(s->boot[0] + (addr - s->base));
+        return lduw_le_p(s->boot[0] + addr);
 
     case 0xf000:	/* Manufacturer ID */
         return (s->id >> 16) & 0xff;
@@ -514,7 +513,7 @@ static void onenand_write(void *opaque, target_phys_addr_t addr,
                 uint32_t value)
 {
     struct onenand_s *s = (struct onenand_s *) opaque;
-    int offset = (addr - s->base) >> s->shift;
+    int offset = addr >> s->shift;
     int sec;
 
     switch (offset) {

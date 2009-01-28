@@ -15,7 +15,7 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston MA  02110-1301 USA
  */
 
 #if !defined (__ALPHA_EXEC_H__)
@@ -47,11 +47,6 @@ static always_inline void env_to_regs(void)
 static always_inline void regs_to_env(void)
 {
 }
-
-int cpu_alpha_handle_mmu_fault (CPUState *env, uint64_t address, int rw,
-                                int mmu_idx, int is_softmmu);
-
-void do_interrupt (CPUState *env);
 
 static always_inline int cpu_halted(CPUState *env) {
     if (!env->halted)

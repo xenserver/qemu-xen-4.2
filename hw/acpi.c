@@ -14,7 +14,7 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston MA  02110-1301 USA
  */
 #include "hw.h"
 #include "pc.h"
@@ -23,6 +23,7 @@
 #include "sysemu.h"
 #include "i2c.h"
 #include "smbus.h"
+#include "kvm.h"
 
 //#define DEBUG
 
@@ -52,6 +53,8 @@ typedef struct PIIX4PMState {
     qemu_irq irq;
 } PIIX4PMState;
 
+#define RSM_STS (1 << 15)
+#define PWRBTN_STS (1 << 8)
 #define RTC_EN (1 << 10)
 #define PWRBTN_EN (1 << 8)
 #define GBL_EN (1 << 5)
@@ -150,6 +153,14 @@ static void pm_ioport_writew(void *opaque, uint32_t addr, uint32_t val)
                 case 0: /* soft power off */
                     qemu_system_shutdown_request();
                     break;
+                case 1:
+                    /* RSM_STS should be set on resume. Pretend that resume
+                       was caused by power button */
+                    s->pmsts |= (RSM_STS | PWRBTN_STS);
+                    qemu_system_reset_request();
+#if defined(TARGET_I386)
+                    cmos_set_s3_resume();
+#endif
                 default:
                     break;
                 }
@@ -470,6 +481,17 @@ static int pm_load(QEMUFile* f,void* opaque,int version_id)
     return 0;
 }
 
+static void piix4_reset(void *opaque)
+{
+	PIIX4PMState *s = opaque;
+	uint8_t *pci_conf = s->dev.config;
+
+	pci_conf[0x58] = 0;
+	pci_conf[0x59] = 0;
+	pci_conf[0x5a] = 0;
+	pci_conf[0x5b] = 0;
+}
+
 i2c_bus *piix4_pm_init(PCIBus *bus, int devfn, uint32_t smb_io_base,
                        qemu_irq sci_irq)
 {
@@ -501,6 +523,12 @@ i2c_bus *piix4_pm_init(PCIBus *bus, int devfn, uint32_t smb_io_base,
 
     register_ioport_write(ACPI_DBG_IO_ADDR, 4, 4, acpi_dbg_writel, s);
 
+    if (kvm_enabled()) {
+        /* Mark SMM as already inited to prevent SMM from running.  KVM does not
+         * support SMM mode. */
+        pci_conf[0x5B] = 0x02;
+    }
+
     /* XXX: which specification is used ? The i82731AB has different
        mappings */
     pci_conf[0x5f] = (parallel_hds[0] != NULL ? 0x80 : 0) | 0x10;
@@ -520,6 +548,8 @@ i2c_bus *piix4_pm_init(PCIBus *bus, int devfn, uint32_t smb_io_base,
 
     s->smbus = i2c_init_bus();
     s->irq = sci_irq;
+    qemu_register_reset(piix4_reset, s);
+
     return s->smbus;
 }
 

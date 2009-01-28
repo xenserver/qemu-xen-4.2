@@ -15,7 +15,7 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston MA  02110-1301 USA
  */
 
 #if !defined (__CPU_ALPHA_H__)
@@ -318,6 +318,7 @@ static inline void cpu_clone_regs(CPUState *env, target_ulong newsp)
 #endif
 
 #include "cpu-all.h"
+#include "exec-all.h"
 
 enum {
     FEATURE_ASN    = 0x00000001,
@@ -406,9 +407,12 @@ int cpu_alpha_exec(CPUAlphaState *s);
    is returned if the signal was handled by the virtual CPU.  */
 int cpu_alpha_signal_handler(int host_signum, void *pinfo,
                              void *puc);
+int cpu_alpha_handle_mmu_fault (CPUState *env, uint64_t address, int rw,
+                                int mmu_idx, int is_softmmu);
+void do_interrupt (CPUState *env);
+
 int cpu_alpha_mfpr (CPUState *env, int iprn, uint64_t *valp);
 int cpu_alpha_mtpr (CPUState *env, int iprn, uint64_t val, uint64_t *oldvalp);
-void cpu_loop_exit (void);
 void pal_init (CPUState *env);
 #if !defined (CONFIG_USER_ONLY)
 void call_pal (CPUState *env);
@@ -416,6 +420,17 @@ void call_pal (CPUState *env);
 void call_pal (CPUState *env, int palcode);
 #endif
 
-#define CPU_PC_FROM_TB(env, tb) env->pc = tb->pc
+static inline void cpu_pc_from_tb(CPUState *env, TranslationBlock *tb)
+{
+    env->pc = tb->pc;
+}
+
+static inline void cpu_get_tb_cpu_state(CPUState *env, target_ulong *pc,
+                                        target_ulong *cs_base, int *flags)
+{
+    *pc = env->pc;
+    *cs_base = 0;
+    *flags = env->ps;
+}
 
 #endif /* !defined (__CPU_ALPHA_H__) */

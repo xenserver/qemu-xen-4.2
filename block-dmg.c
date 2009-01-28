@@ -285,4 +285,3 @@ BlockDriver bdrv_dmg = {
     NULL,
     dmg_close,
 };
-

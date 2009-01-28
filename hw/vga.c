@@ -28,6 +28,7 @@
 #include "vga_int.h"
 #include "pixel_ops.h"
 #include "qemu-timer.h"
+#include "kvm.h"
 
 //#define DEBUG_VGA
 //#define DEBUG_VGA_MEM
@@ -169,7 +170,7 @@ static void vga_precise_update_retrace_info(VGAState *s)
     int div2, sldiv2, dots;
     int clocking_mode;
     int clock_sel;
-    const int hz[] = {25175000, 28322000, 25175000, 25175000};
+    const int clk_hz[] = {25175000, 28322000, 25175000, 25175000};
     int64_t chars_per_sec;
     struct vga_precise_retrace *r = &s->retrace_info.precise;
 
@@ -194,7 +195,7 @@ static void vga_precise_update_retrace_info(VGAState *s)
     clock_sel = (s->msr >> 2) & 3;
     dots = (s->msr & 1) ? 8 : 9;
 
-    chars_per_sec = hz[clock_sel] / dots;
+    chars_per_sec = clk_hz[clock_sel] / dots;
 
     htotal_chars <<= clocking_mode;
 
@@ -239,7 +240,7 @@ static void vga_precise_update_retrace_info(VGAState *s)
         div2, sldiv2,
         clocking_mode,
         clock_sel,
-        hz[clock_sel],
+        clk_hz[clock_sel],
         dots,
         r->ticks_per_char
         );
@@ -1151,7 +1152,7 @@ static int update_basic_params(VGAState *s)
 
 static inline int get_depth_index(DisplayState *s)
 {
-    switch(s->depth) {
+    switch(ds_get_bits_per_pixel(s)) {
     default:
     case 8:
         return 0;
@@ -1222,6 +1223,35 @@ static const uint8_t cursor_glyph[32 * 4] = {
     0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
 };
 
+static void vga_get_text_resolution(VGAState *s, int *pwidth, int *pheight,
+                                    int *pcwidth, int *pcheight)
+{
+    int width, cwidth, height, cheight;
+
+    /* total width & height */
+    cheight = (s->cr[9] & 0x1f) + 1;
+    cwidth = 8;
+    if (!(s->sr[1] & 0x01))
+        cwidth = 9;
+    if (s->sr[1] & 0x08)
+        cwidth = 16; /* NOTE: no 18 pixel wide */
+    width = (s->cr[0x01] + 1);
+    if (s->cr[0x06] == 100) {
+        /* ugly hack for CGA 160x100x16 - explain me the logic */
+        height = 100;
+    } else {
+        height = s->cr[0x12] |
+            ((s->cr[0x07] & 0x02) << 7) |
+            ((s->cr[0x07] & 0x40) << 3);
+        height = (height + 1) / cheight;
+    }
+
+    *pwidth = width;
+    *pheight = height;
+    *pcwidth = cwidth;
+    *pcheight = cheight;
+}
+
 /*
  * Text mode update
  * Missing:
@@ -1242,6 +1272,8 @@ static void vga_draw_text(VGAState *s, int full_update)
     uint32_t *ch_attr_ptr;
     vga_draw_glyph8_func *vga_draw_glyph8;
     vga_draw_glyph9_func *vga_draw_glyph9;
+
+    vga_dirty_log_stop(s);
 
     full_update |= update_palette16(s);
     palette = s->last_palette;
@@ -1272,24 +1304,8 @@ static void vga_draw_text(VGAState *s, int full_update)
     line_offset = s->line_offset;
     s1 = s->vram_ptr + (s->start_addr * 4);
 
-    /* total width & height */
-    cheight = (s->cr[9] & 0x1f) + 1;
-    cw = 8;
-    if (!(s->sr[1] & 0x01))
-        cw = 9;
-    if (s->sr[1] & 0x08)
-        cw = 16; /* NOTE: no 18 pixel wide */
-    x_incr = cw * ((s->ds->depth + 7) >> 3);
-    width = (s->cr[0x01] + 1);
-    if (s->cr[0x06] == 100) {
-        /* ugly hack for CGA 160x100x16 - explain me the logic */
-        height = 100;
-    } else {
-        height = s->cr[0x12] |
-            ((s->cr[0x07] & 0x02) << 7) |
-            ((s->cr[0x07] & 0x40) << 3);
-        height = (height + 1) / cheight;
-    }
+    vga_get_text_resolution(s, &width, &height, &cw, &cheight);
+    x_incr = cw * ((ds_get_bits_per_pixel(s->ds) + 7) >> 3);
     if ((height * width) > CH_ATTR_SIZE) {
         /* better than nothing: exit if transient size is too big */
         return;
@@ -1329,8 +1345,8 @@ static void vga_draw_text(VGAState *s, int full_update)
         vga_draw_glyph8 = vga_draw_glyph8_table[depth_index];
     vga_draw_glyph9 = vga_draw_glyph9_table[depth_index];
 
-    dest = s->ds->data;
-    linesize = s->ds->linesize;
+    dest = ds_get_data(s->ds);
+    linesize = ds_get_linesize(s->ds);
     ch_attr_ptr = s->last_ch_attr;
     for(cy = 0; cy < height; cy++) {
         d1 = dest;
@@ -1556,6 +1572,18 @@ void vga_invalidate_scanlines(VGAState *s, int y1, int y2)
     }
 }
 
+static void vga_sync_dirty_bitmap(VGAState *s)
+{
+    if (s->map_addr)
+        cpu_physical_sync_dirty_bitmap(s->map_addr, s->map_end);
+
+    if (s->lfb_vram_mapped) {
+        cpu_physical_sync_dirty_bitmap(isa_mem_base + 0xa0000, 0xa8000);
+        cpu_physical_sync_dirty_bitmap(isa_mem_base + 0xa8000, 0xb0000);
+    }
+    vga_dirty_log_start(s);
+}
+
 /*
  * graphic modes
  */
@@ -1569,6 +1597,9 @@ static void vga_draw_graphic(VGAState *s, int full_update)
     vga_draw_line_func *vga_draw_line;
 
     full_update |= update_basic_params(s);
+
+    if (!full_update)
+        vga_sync_dirty_bitmap(s);
 
     s->get_resolution(s, &width, &height);
     disp_width = width;
@@ -1663,8 +1694,8 @@ static void vga_draw_graphic(VGAState *s, int full_update)
     y_start = -1;
     page_min = 0x7fffffff;
     page_max = -1;
-    d = s->ds->data;
-    linesize = s->ds->linesize;
+    d = ds_get_data(s->ds);
+    linesize = ds_get_linesize(s->ds);
     y1 = 0;
     for(y = 0; y < height; y++) {
         addr = addr1;
@@ -1743,15 +1774,17 @@ static void vga_draw_blank(VGAState *s, int full_update)
         return;
     if (s->last_scr_width <= 0 || s->last_scr_height <= 0)
         return;
-    if (s->ds->depth == 8)
+    vga_dirty_log_stop(s);
+
+    if (ds_get_bits_per_pixel(s->ds) == 8)
         val = s->rgb_to_pixel(0, 0, 0);
     else
         val = 0;
-    w = s->last_scr_width * ((s->ds->depth + 7) >> 3);
-    d = s->ds->data;
+    w = s->last_scr_width * ((ds_get_bits_per_pixel(s->ds) + 7) >> 3);
+    d = ds_get_data(s->ds);
     for(i = 0; i < s->last_scr_height; i++) {
         memset(d, val, w);
-        d += s->ds->linesize;
+        d += ds_get_linesize(s->ds);
     }
     dpy_update(s->ds, 0, 0,
                s->last_scr_width, s->last_scr_height);
@@ -1766,7 +1799,7 @@ static void vga_update_display(void *opaque)
     VGAState *s = (VGAState *)opaque;
     int full_update, graphic_mode;
 
-    if (s->ds->depth == 0) {
+    if (ds_get_bits_per_pixel(s->ds) == 0) {
         /* nothing to do */
     } else {
         s->rgb_to_pixel =
@@ -1806,10 +1839,73 @@ static void vga_invalidate_display(void *opaque)
     s->last_height = -1;
 }
 
-static void vga_reset(VGAState *s)
+void vga_reset(void *opaque)
 {
-    memset(s, 0, sizeof(VGAState));
+    VGAState *s = (VGAState *) opaque;
+
+    s->lfb_addr = 0;
+    s->lfb_end = 0;
+    s->map_addr = 0;
+    s->map_end = 0;
+    s->lfb_vram_mapped = 0;
+    s->bios_offset = 0;
+    s->bios_size = 0;
+    s->sr_index = 0;
+    memset(s->sr, '\0', sizeof(s->sr));
+    s->gr_index = 0;
+    memset(s->gr, '\0', sizeof(s->gr));
+    s->ar_index = 0;
+    memset(s->ar, '\0', sizeof(s->ar));
+    s->ar_flip_flop = 0;
+    s->cr_index = 0;
+    memset(s->cr, '\0', sizeof(s->cr));
+    s->msr = 0;
+    s->fcr = 0;
+    s->st00 = 0;
+    s->st01 = 0;
+    s->dac_state = 0;
+    s->dac_sub_index = 0;
+    s->dac_read_index = 0;
+    s->dac_write_index = 0;
+    memset(s->dac_cache, '\0', sizeof(s->dac_cache));
+    s->dac_8bit = 0;
+    memset(s->palette, '\0', sizeof(s->palette));
+    s->bank_offset = 0;
+#ifdef CONFIG_BOCHS_VBE
+    s->vbe_index = 0;
+    memset(s->vbe_regs, '\0', sizeof(s->vbe_regs));
+    s->vbe_regs[VBE_DISPI_INDEX_ID] = VBE_DISPI_ID0;
+    s->vbe_start_addr = 0;
+    s->vbe_line_offset = 0;
+    s->vbe_bank_mask = (s->vram_size >> 16) - 1;
+#endif
+    memset(s->font_offsets, '\0', sizeof(s->font_offsets));
     s->graphic_mode = -1; /* force full update */
+    s->shift_control = 0;
+    s->double_scan = 0;
+    s->line_offset = 0;
+    s->line_compare = 0;
+    s->start_addr = 0;
+    s->plane_updated = 0;
+    s->last_cw = 0;
+    s->last_ch = 0;
+    s->last_width = 0;
+    s->last_height = 0;
+    s->last_scr_width = 0;
+    s->last_scr_height = 0;
+    s->cursor_start = 0;
+    s->cursor_end = 0;
+    s->cursor_offset = 0;
+    memset(s->invalidated_y_table, '\0', sizeof(s->invalidated_y_table));
+    memset(s->last_palette, '\0', sizeof(s->last_palette));
+    memset(s->last_ch_attr, '\0', sizeof(s->last_ch_attr));
+    switch (vga_retrace_method) {
+    case VGA_RETRACE_DUMB:
+        break;
+    case VGA_RETRACE_PRECISE:
+        memset(&s->retrace_info, 0, sizeof (s->retrace_info));
+        break;
+    }
 }
 
 #define TEXTMODE_X(x)	((x) % width)
@@ -2092,6 +2188,28 @@ typedef struct PCIVGAState {
     VGAState vga_state;
 } PCIVGAState;
 
+void vga_dirty_log_start(VGAState *s)
+{
+    if (kvm_enabled() && s->map_addr)
+        kvm_log_start(s->map_addr, s->map_end - s->map_addr);
+
+    if (kvm_enabled() && s->lfb_vram_mapped) {
+        kvm_log_start(isa_mem_base + 0xa0000, 0x8000);
+        kvm_log_start(isa_mem_base + 0xa8000, 0x8000);
+    }
+}
+
+void vga_dirty_log_stop(VGAState *s)
+{
+    if (kvm_enabled() && s->map_addr)
+        kvm_log_stop(s->map_addr, s->map_end - s->map_addr);
+
+    if (kvm_enabled() && s->lfb_vram_mapped) {
+        kvm_log_stop(isa_mem_base + 0xa0000, 0x8000);
+        kvm_log_stop(isa_mem_base + 0xa8000, 0x8000);
+    }
+}
+
 static void vga_map(PCIDevice *pci_dev, int region_num,
                     uint32_t addr, uint32_t size, int type)
 {
@@ -2102,10 +2220,15 @@ static void vga_map(PCIDevice *pci_dev, int region_num,
     } else {
         cpu_register_physical_memory(addr, s->vram_size, s->vram_offset);
     }
+
+    s->map_addr = addr;
+    s->map_end = addr + VGA_RAM_SIZE;
+
+    vga_dirty_log_start(s);
 }
 
 void vga_common_init(VGAState *s, DisplayState *ds, uint8_t *vga_ram_base,
-                     unsigned long vga_ram_offset, int vga_ram_size)
+                     ram_addr_t vga_ram_offset, int vga_ram_size)
 {
     int i, j, v, b;
 
@@ -2132,8 +2255,6 @@ void vga_common_init(VGAState *s, DisplayState *ds, uint8_t *vga_ram_base,
         expand4to8[i] = v;
     }
 
-    vga_reset(s);
-
     s->vram_ptr = vga_ram_base;
     s->vram_offset = vga_ram_offset;
     s->vram_size = vga_ram_size;
@@ -2154,9 +2275,9 @@ void vga_common_init(VGAState *s, DisplayState *ds, uint8_t *vga_ram_base,
     case VGA_RETRACE_PRECISE:
         s->retrace = vga_precise_retrace;
         s->update_retrace_info = vga_precise_update_retrace_info;
-        memset(&s->retrace_info, 0, sizeof (s->retrace_info));
         break;
     }
+    vga_reset(s);
 }
 
 /* used by both ISA and PCI */
@@ -2164,6 +2285,7 @@ void vga_init(VGAState *s)
 {
     int vga_io_memory;
 
+    qemu_register_reset(vga_reset, s);
     register_savevm("vga", 0, 2, vga_save, vga_load, s);
 
     register_ioport_write(0x3c0, 16, 1, vga_ioport_write, s);
@@ -2182,8 +2304,6 @@ void vga_init(VGAState *s)
     s->bank_offset = 0;
 
 #ifdef CONFIG_BOCHS_VBE
-    s->vbe_regs[VBE_DISPI_INDEX_ID] = VBE_DISPI_ID0;
-    s->vbe_bank_mask = ((s->vram_size >> 16) - 1);
 #if defined (TARGET_I386)
     register_ioport_read(0x1ce, 1, 2, vbe_ioport_read_index, s);
     register_ioport_read(0x1cf, 1, 2, vbe_ioport_read_data, s);
@@ -2209,6 +2329,7 @@ void vga_init(VGAState *s)
     vga_io_memory = cpu_register_io_memory(0, vga_mem_read, vga_mem_write, s);
     cpu_register_physical_memory(isa_mem_base + 0x000a0000, 0x20000,
                                  vga_io_memory);
+    qemu_register_coalesced_mmio(isa_mem_base + 0x000a0000, 0x20000);
 }
 
 /* Memory mapped interface */
@@ -2216,7 +2337,7 @@ static uint32_t vga_mm_readb (void *opaque, target_phys_addr_t addr)
 {
     VGAState *s = opaque;
 
-    return vga_ioport_read(s, (addr - s->base_ctrl) >> s->it_shift) & 0xff;
+    return vga_ioport_read(s, addr >> s->it_shift) & 0xff;
 }
 
 static void vga_mm_writeb (void *opaque,
@@ -2224,14 +2345,14 @@ static void vga_mm_writeb (void *opaque,
 {
     VGAState *s = opaque;
 
-    vga_ioport_write(s, (addr - s->base_ctrl) >> s->it_shift, value & 0xff);
+    vga_ioport_write(s, addr >> s->it_shift, value & 0xff);
 }
 
 static uint32_t vga_mm_readw (void *opaque, target_phys_addr_t addr)
 {
     VGAState *s = opaque;
 
-    return vga_ioport_read(s, (addr - s->base_ctrl) >> s->it_shift) & 0xffff;
+    return vga_ioport_read(s, addr >> s->it_shift) & 0xffff;
 }
 
 static void vga_mm_writew (void *opaque,
@@ -2239,14 +2360,14 @@ static void vga_mm_writew (void *opaque,
 {
     VGAState *s = opaque;
 
-    vga_ioport_write(s, (addr - s->base_ctrl) >> s->it_shift, value & 0xffff);
+    vga_ioport_write(s, addr >> s->it_shift, value & 0xffff);
 }
 
 static uint32_t vga_mm_readl (void *opaque, target_phys_addr_t addr)
 {
     VGAState *s = opaque;
 
-    return vga_ioport_read(s, (addr - s->base_ctrl) >> s->it_shift);
+    return vga_ioport_read(s, addr >> s->it_shift);
 }
 
 static void vga_mm_writel (void *opaque,
@@ -2254,7 +2375,7 @@ static void vga_mm_writel (void *opaque,
 {
     VGAState *s = opaque;
 
-    vga_ioport_write(s, (addr - s->base_ctrl) >> s->it_shift, value);
+    vga_ioport_write(s, addr >> s->it_shift, value);
 }
 
 static CPUReadMemoryFunc *vga_mm_read_ctrl[] = {
@@ -2274,7 +2395,6 @@ static void vga_mm_init(VGAState *s, target_phys_addr_t vram_base,
 {
     int s_ioport_ctrl, vga_io_memory;
 
-    s->base_ctrl = ctrl_base;
     s->it_shift = it_shift;
     s_ioport_ctrl = cpu_register_io_memory(0, vga_mm_read_ctrl, vga_mm_write_ctrl, s);
     vga_io_memory = cpu_register_io_memory(0, vga_mem_read, vga_mem_write, s);
@@ -2284,6 +2404,7 @@ static void vga_mm_init(VGAState *s, target_phys_addr_t vram_base,
     cpu_register_physical_memory(ctrl_base, 0x100000, s_ioport_ctrl);
     s->bank_offset = 0;
     cpu_register_physical_memory(vram_base + 0x000a0000, 0x20000, vga_io_memory);
+    qemu_register_coalesced_mmio(vram_base + 0x000a0000, 0x20000);
 }
 
 int isa_vga_init(DisplayState *ds, uint8_t *vga_ram_base,
@@ -2396,7 +2517,7 @@ static void vga_save_dpy_update(DisplayState *s,
 static void vga_save_dpy_resize(DisplayState *s, int w, int h)
 {
     s->linesize = w * 4;
-    s->data = qemu_malloc(h * s->linesize);
+    s->data = qemu_mallocz(h * s->linesize);
     vga_save_w = w;
     vga_save_h = h;
 }
@@ -2434,11 +2555,29 @@ int ppm_save(const char *filename, uint8_t *data,
     return 0;
 }
 
-/* save the vga display in a PPM image even if no display is
-   available */
-static void vga_screen_dump(void *opaque, const char *filename)
+static void vga_screen_dump_blank(VGAState *s, const char *filename)
 {
-    VGAState *s = (VGAState *)opaque;
+    FILE *f;
+    unsigned int y, x, w, h;
+
+    w = s->last_scr_width * sizeof(uint32_t);
+    h = s->last_scr_height;
+
+    f = fopen(filename, "wb");
+    if (!f)
+        return;
+    fprintf(f, "P6\n%d %d\n%d\n", w, h, 255);
+    for (y = 0; y < h; y++) {
+        for (x = 0; x < w; x++) {
+            fputc(0, f);
+        }
+    }
+    fclose(f);
+}
+
+static void vga_screen_dump_common(VGAState *s, const char *filename,
+                                   int w, int h)
+{
     DisplayState *saved_ds, ds1, *ds = &ds1;
 
     /* XXX: this is a little hackish */
@@ -2451,14 +2590,42 @@ static void vga_screen_dump(void *opaque, const char *filename)
     ds->dpy_refresh = vga_save_dpy_refresh;
     ds->depth = 32;
 
+    ds->linesize = w * sizeof(uint32_t);
+    ds->data = qemu_mallocz(h * ds->linesize);
     s->ds = ds;
     s->graphic_mode = -1;
     vga_update_display(s);
-
-    if (ds->data) {
-        ppm_save(filename, ds->data, vga_save_w, vga_save_h,
-                 s->ds->linesize);
-        qemu_free(ds->data);
-    }
+    ppm_save(filename, ds->data, w, h, ds->linesize);
+    qemu_free(ds->data);
     s->ds = saved_ds;
+}
+
+static void vga_screen_dump_graphic(VGAState *s, const char *filename)
+{
+    int w, h;
+
+    s->get_resolution(s, &w, &h);
+    vga_screen_dump_common(s, filename, w, h);
+}
+
+static void vga_screen_dump_text(VGAState *s, const char *filename)
+{
+    int w, h, cwidth, cheight;
+
+    vga_get_text_resolution(s, &w, &h, &cwidth, &cheight);
+    vga_screen_dump_common(s, filename, w * cwidth, h * cheight);
+}
+
+/* save the vga display in a PPM image even if no display is
+   available */
+static void vga_screen_dump(void *opaque, const char *filename)
+{
+    VGAState *s = (VGAState *)opaque;
+
+    if (!(s->ar_index & 0x20))
+        vga_screen_dump_blank(s, filename);
+    else if (s->gr[6] & 1)
+        vga_screen_dump_graphic(s, filename);
+    else
+        vga_screen_dump_text(s, filename);
 }

@@ -15,8 +15,13 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston MA  02110-1301 USA
  */
+
+#ifndef _EXEC_ALL_H_
+#define _EXEC_ALL_H_
+
+#include "qemu-common.h"
 
 /* allow to see translation results - the slowdown should be negligible, so we leave it */
 #define DEBUG_DISAS
@@ -80,6 +85,7 @@ TranslationBlock *tb_gen_code(CPUState *env,
                               target_ulong pc, target_ulong cs_base, int flags,
                               int cflags);
 void cpu_exec_init(CPUState *env);
+void noreturn cpu_loop_exit(void);
 int page_unprotect(target_ulong address, unsigned long pc, void *puc);
 void tb_invalidate_phys_page_range(target_phys_addr_t start, target_phys_addr_t end,
                                    int is_cpu_write_access);
@@ -114,7 +120,7 @@ static inline int tlb_set_page(CPUState *env1, target_ulong vaddr,
 #define CODE_GEN_AVG_BLOCK_SIZE 64
 #endif
 
-#if defined(__powerpc__) || defined(__x86_64__) || defined(__arm__)
+#if defined(_ARCH_PPC) || defined(__x86_64__) || defined(__arm__)
 #define USE_DIRECT_JUMP
 #endif
 #if defined(__i386__) && !defined(_WIN32)
@@ -189,7 +195,7 @@ extern int code_gen_max_blocks;
 
 #if defined(USE_DIRECT_JUMP)
 
-#if defined(__powerpc__)
+#if defined(_ARCH_PPC)
 extern void ppc_tb_set_jmp_target(unsigned long jmp_addr, unsigned long addr);
 #define tb_set_jmp_target1 ppc_tb_set_jmp_target
 #elif defined(__i386__) || defined(__x86_64__)
@@ -202,18 +208,26 @@ static inline void tb_set_jmp_target1(unsigned long jmp_addr, unsigned long addr
 #elif defined(__arm__)
 static inline void tb_set_jmp_target1(unsigned long jmp_addr, unsigned long addr)
 {
+#if QEMU_GNUC_PREREQ(4, 1)
+    void __clear_cache(char *beg, char *end);
+#else
     register unsigned long _beg __asm ("a1");
     register unsigned long _end __asm ("a2");
     register unsigned long _flg __asm ("a3");
+#endif
 
     /* we could use a ldr pc, [pc, #-4] kind of branch and avoid the flush */
     *(uint32_t *)jmp_addr |= ((addr - (jmp_addr + 8)) >> 2) & 0xffffff;
 
+#if QEMU_GNUC_PREREQ(4, 1)
+    __clear_cache((char *) jmp_addr, (char *) jmp_addr + 4);
+#else
     /* flush icache */
     _beg = jmp_addr;
     _end = jmp_addr + 4;
     _flg = 0;
     __asm __volatile__ ("swi 0x9f0002" : : "r" (_beg), "r" (_end), "r" (_flg));
+#endif
 }
 #endif
 
@@ -255,20 +269,6 @@ static inline void tb_add_jump(TranslationBlock *tb, int n,
 }
 
 TranslationBlock *tb_find_pc(unsigned long pc_ptr);
-
-#if defined(_WIN32)
-#define ASM_DATA_SECTION ".section \".data\"\n"
-#define ASM_PREVIOUS_SECTION ".section .text\n"
-#elif defined(__APPLE__)
-#define ASM_DATA_SECTION ".data\n"
-#define ASM_PREVIOUS_SECTION ".text\n"
-#else
-#define ASM_DATA_SECTION ".section \".data\"\n"
-#define ASM_PREVIOUS_SECTION ".previous\n"
-#endif
-
-#define ASM_OP_LABEL_NAME(n, opname) \
-    ASM_NAME(__op_label) #n "." ASM_NAME(opname)
 
 extern CPUWriteMemoryFunc *io_mem_write[IO_MEM_NB_ENTRIES][4];
 extern CPUReadMemoryFunc *io_mem_read[IO_MEM_NB_ENTRIES][4];
@@ -384,4 +384,9 @@ static inline int kqemu_is_ok(CPUState *env)
              (env->eflags & IOPL_MASK) != IOPL_MASK)));
 }
 
+#endif
+
+typedef void (CPUDebugExcpHandler)(CPUState *env);
+
+CPUDebugExcpHandler *cpu_set_debug_excp_handler(CPUDebugExcpHandler *handler);
 #endif

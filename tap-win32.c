@@ -24,7 +24,7 @@
  *  You should have received a copy of the GNU General Public License
  *  along with this program (see the file COPYING included with this
  *  distribution); if not, write to the Free Software Foundation, Inc.,
- *  59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 #include "qemu-common.h"
 #include "net.h"
@@ -77,7 +77,7 @@
 // Compile time configuration
 //======================
 
-//#define DEBUG_TAP_WIN32 1
+//#define DEBUG_TAP_WIN32
 
 #define TUN_ASYNCHRONOUS_WRITES 1
 
@@ -509,7 +509,7 @@ static DWORD WINAPI tap_win32_thread_entry(LPVOID param)
                 result = GetOverlappedResult( overlapped->handle, &overlapped->read_overlapped,
                                               &read_size, FALSE);
                 if (!result) {
-#if DEBUG_TAP_WIN32
+#ifdef DEBUG_TAP_WIN32
                     LPVOID lpBuffer;
                     dwError = GetLastError();
                     FormatMessage( FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM,
@@ -520,7 +520,7 @@ static DWORD WINAPI tap_win32_thread_entry(LPVOID param)
 #endif
                 }
             } else {
-#if DEBUG_TAP_WIN32
+#ifdef DEBUG_TAP_WIN32
                 LPVOID lpBuffer;
                 FormatMessage( FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM,
                                NULL, dwError, MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
@@ -660,7 +660,8 @@ static void tap_win32_send(void *opaque)
     }
 }
 
-int tap_win32_init(VLANState *vlan, const char *ifname)
+int tap_win32_init(VLANState *vlan, const char *model,
+                   const char *name, const char *ifname)
 {
     TAPState *s;
 
@@ -672,7 +673,7 @@ int tap_win32_init(VLANState *vlan, const char *ifname)
         return -1;
     }
 
-    s->vc = qemu_new_vlan_client(vlan, tap_receive, NULL, s);
+    s->vc = qemu_new_vlan_client(vlan, model, name, tap_receive, NULL, s);
 
     snprintf(s->vc->info_str, sizeof(s->vc->info_str),
              "tap: ifname=%s", ifname);

@@ -15,10 +15,9 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston,
- * MA 02111-1307 USA
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 #include "hw.h"
 #include "omap.h"
@@ -1101,7 +1100,7 @@ void omap_clk_adduser(struct clk *clk, qemu_irq user)
 
 /* If a clock is allowed to idle, it is disabled automatically when
  * all of clock domains using it are disabled.  */
-int omap_clk_is_idle(struct clk *clk)
+static int omap_clk_is_idle(struct clk *clk)
 {
     struct clk *chld;
 

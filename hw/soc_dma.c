@@ -14,29 +14,28 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston,
- * MA 02111-1307 USA
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 #include "qemu-common.h"
 #include "qemu-timer.h"
 #include "soc_dma.h"
 
-void transfer_mem2mem(struct soc_dma_ch_s *ch)
+static void transfer_mem2mem(struct soc_dma_ch_s *ch)
 {
     memcpy(ch->paddr[0], ch->paddr[1], ch->bytes);
     ch->paddr[0] += ch->bytes;
     ch->paddr[1] += ch->bytes;
 }
 
-void transfer_mem2fifo(struct soc_dma_ch_s *ch)
+static void transfer_mem2fifo(struct soc_dma_ch_s *ch)
 {
     ch->io_fn[1](ch->io_opaque[1], ch->paddr[0], ch->bytes);
     ch->paddr[0] += ch->bytes;
 }
 
-void transfer_fifo2mem(struct soc_dma_ch_s *ch)
+static void transfer_fifo2mem(struct soc_dma_ch_s *ch)
 {
     ch->io_fn[0](ch->io_opaque[0], ch->paddr[1], ch->bytes);
     ch->paddr[1] += ch->bytes;
@@ -47,7 +46,7 @@ void transfer_fifo2mem(struct soc_dma_ch_s *ch)
  * oprating systems may not need to use them.  */
 static void *fifo_buf;
 static int fifo_size;
-void transfer_fifo2fifo(struct soc_dma_ch_s *ch)
+static void transfer_fifo2fifo(struct soc_dma_ch_s *ch)
 {
     if (ch->bytes > fifo_size)
         fifo_buf = qemu_realloc(fifo_buf, fifo_size = ch->bytes);

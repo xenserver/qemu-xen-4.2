@@ -433,9 +433,10 @@ static MaltaFPGAState *malta_fpga_init(target_phys_addr_t base, CPUState *env)
                                    malta_fpga_write, s);
 
     cpu_register_physical_memory(base, 0x900, malta);
+    /* 0xa00 is less than a page, so will still get the right offsets.  */
     cpu_register_physical_memory(base + 0xa00, 0x100000 - 0xa00, malta);
 
-    s->display = qemu_chr_open("vc:320x200");
+    s->display = qemu_chr_open("fpga", "vc:320x200");
     qemu_chr_printf(s->display, "\e[HMalta LEDBAR\r\n");
     qemu_chr_printf(s->display, "+--------+\r\n");
     qemu_chr_printf(s->display, "+        +\r\n");
@@ -446,7 +447,7 @@ static MaltaFPGAState *malta_fpga_init(target_phys_addr_t base, CPUState *env)
     qemu_chr_printf(s->display, "+        +\r\n");
     qemu_chr_printf(s->display, "+--------+\r\n");
 
-    uart_chr = qemu_chr_open("vc:80Cx24C");
+    uart_chr = qemu_chr_open("cbus", "vc:80Cx24C");
     qemu_chr_printf(uart_chr, "CBUS UART\r\n");
     s->uart =
         serial_mm_init(base + 0x900, 3, env->irq[2], 230400, uart_chr, 1);
@@ -486,19 +487,16 @@ static void audio_init (PCIBus *pci_bus)
 static void network_init (PCIBus *pci_bus)
 {
     int i;
-    NICInfo *nd;
 
     for(i = 0; i < nb_nics; i++) {
-        nd = &nd_table[i];
-        if (!nd->model) {
-            nd->model = "pcnet";
-        }
-        if (i == 0  && strcmp(nd->model, "pcnet") == 0) {
+        NICInfo *nd = &nd_table[i];
+        int devfn = -1;
+
+        if (i == 0 && (!nd->model || strcmp(nd->model, "pcnet") == 0))
             /* The malta board has a PCNet card using PCI SLOT 11 */
-            pci_nic_init(pci_bus, nd, 88);
-        } else {
-            pci_nic_init(pci_bus, nd, -1);
-        }
+            devfn = 88;
+
+        pci_nic_init(pci_bus, nd, devfn, "pcnet");
     }
 }
 
@@ -950,5 +948,4 @@ QEMUMachine mips_malta_machine = {
     .init = mips_malta_init,
     .ram_require = VGA_RAM_SIZE + BIOS_SIZE,
     .nodisk_ok = 1,
-    .max_cpus = 1,
 };

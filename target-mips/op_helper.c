@@ -15,13 +15,14 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston MA  02110-1301 USA
  */
 #include <stdlib.h>
 #include "exec.h"
 
 #include "host-utils.h"
 
+#include "helper.h"
 /*****************************************************************************/
 /* Exceptions processing helpers */
 
@@ -53,7 +54,8 @@ void do_interrupt_restart (void)
     }
 }
 
-void do_restore_state (void *pc_ptr)
+#if !defined(CONFIG_USER_ONLY)
+static void do_restore_state (void *pc_ptr)
 {
     TranslationBlock *tb;
     unsigned long pc = (unsigned long) pc_ptr;
@@ -63,6 +65,7 @@ void do_restore_state (void *pc_ptr)
         cpu_restore_state (tb, env, pc, NULL);
     }
 }
+#endif
 
 target_ulong do_clo (target_ulong t0)
 {
@@ -1355,10 +1358,9 @@ void do_mtc0_status_irqraise_debug(void)
 {
     fprintf(logfile, "Raise pending IRQs\n");
 }
-#endif /* !CONFIG_USER_ONLY */
 
 /* MIPS MT functions */
-target_ulong do_mftgpr(target_ulong t0, uint32_t sel)
+target_ulong do_mftgpr(uint32_t sel)
 {
     int other_tc = env->CP0_VPEControl & (0xff << CP0VPECo_TargTC);
 
@@ -1368,7 +1370,7 @@ target_ulong do_mftgpr(target_ulong t0, uint32_t sel)
         return env->tcs[other_tc].gpr[sel];
 }
 
-target_ulong do_mftlo(target_ulong t0, uint32_t sel)
+target_ulong do_mftlo(uint32_t sel)
 {
     int other_tc = env->CP0_VPEControl & (0xff << CP0VPECo_TargTC);
 
@@ -1378,7 +1380,7 @@ target_ulong do_mftlo(target_ulong t0, uint32_t sel)
         return env->tcs[other_tc].LO[sel];
 }
 
-target_ulong do_mfthi(target_ulong t0, uint32_t sel)
+target_ulong do_mfthi(uint32_t sel)
 {
     int other_tc = env->CP0_VPEControl & (0xff << CP0VPECo_TargTC);
 
@@ -1388,7 +1390,7 @@ target_ulong do_mfthi(target_ulong t0, uint32_t sel)
         return env->tcs[other_tc].HI[sel];
 }
 
-target_ulong do_mftacx(target_ulong t0, uint32_t sel)
+target_ulong do_mftacx(uint32_t sel)
 {
     int other_tc = env->CP0_VPEControl & (0xff << CP0VPECo_TargTC);
 
@@ -1398,7 +1400,7 @@ target_ulong do_mftacx(target_ulong t0, uint32_t sel)
         return env->tcs[other_tc].ACX[sel];
 }
 
-target_ulong do_mftdsp(target_ulong t0)
+target_ulong do_mftdsp(void)
 {
     int other_tc = env->CP0_VPEControl & (0xff << CP0VPECo_TargTC);
 
@@ -1494,6 +1496,7 @@ target_ulong do_evpe(target_ulong t0)
 
     return t0;
 }
+#endif /* !CONFIG_USER_ONLY */
 
 void do_fork(target_ulong t0, target_ulong t1)
 {
@@ -1515,7 +1518,7 @@ target_ulong do_yield(target_ulong t0)
             }
         }
     } else if (t0 == 0) {
-	if (0 /* TODO: TC underflow */) {
+        if (0 /* TODO: TC underflow */) {
             env->CP0_VPEControl &= ~(0x7 << CP0VPECo_EXCPT);
             do_raise_exception(EXCP_THREAD);
         } else {
@@ -1619,17 +1622,17 @@ void r4k_do_tlbp (void)
     if (i == env->tlb->nb_tlb) {
         /* No match.  Discard any shadow entries, if any of them match.  */
         for (i = env->tlb->nb_tlb; i < env->tlb->tlb_in_use; i++) {
-	    tlb = &env->tlb->mmu.r4k.tlb[i];
-	    /* 1k pages are not supported. */
-	    mask = tlb->PageMask | ~(TARGET_PAGE_MASK << 1);
-	    tag = env->CP0_EntryHi & ~mask;
-	    VPN = tlb->VPN & ~mask;
-	    /* Check ASID, virtual page number & size */
-	    if ((tlb->G == 1 || tlb->ASID == ASID) && VPN == tag) {
+            tlb = &env->tlb->mmu.r4k.tlb[i];
+            /* 1k pages are not supported. */
+            mask = tlb->PageMask | ~(TARGET_PAGE_MASK << 1);
+            tag = env->CP0_EntryHi & ~mask;
+            VPN = tlb->VPN & ~mask;
+            /* Check ASID, virtual page number & size */
+            if ((tlb->G == 1 || tlb->ASID == ASID) && VPN == tag) {
                 r4k_mips_tlb_flush_extra (env, i);
-	        break;
-	    }
-	}
+                break;
+            }
+        }
 
         env->CP0_Index |= 0x80000000;
     }
@@ -1659,6 +1662,26 @@ void r4k_do_tlbr (void)
                         (tlb->C1 << 3) | (tlb->PFN[1] >> 6);
 }
 
+void do_tlbwi(void)
+{
+    env->tlb->do_tlbwi();
+}
+
+void do_tlbwr(void)
+{
+    env->tlb->do_tlbwr();
+}
+
+void do_tlbp(void)
+{
+    env->tlb->do_tlbp();
+}
+
+void do_tlbr(void)
+{
+    env->tlb->do_tlbr();
+}
+
 /* Specials */
 target_ulong do_di (void)
 {
@@ -1680,7 +1703,7 @@ target_ulong do_ei (void)
     return t0;
 }
 
-void debug_pre_eret (void)
+static void debug_pre_eret (void)
 {
     fprintf(logfile, "ERET: PC " TARGET_FMT_lx " EPC " TARGET_FMT_lx,
             env->active_tc.PC, env->CP0_EPC);
@@ -1691,7 +1714,7 @@ void debug_pre_eret (void)
     fputs("\n", logfile);
 }
 
-void debug_post_eret (void)
+static void debug_post_eret (void)
 {
     fprintf(logfile, "  =>  PC " TARGET_FMT_lx " EPC " TARGET_FMT_lx,
             env->active_tc.PC, env->CP0_EPC);
@@ -1780,49 +1803,6 @@ target_ulong do_rdhwr_ccres(void)
 
     return 0;
 }
-
-/* Bitfield operations. */
-target_ulong do_ext(target_ulong t1, uint32_t pos, uint32_t size)
-{
-    return (int32_t)((t1 >> pos) & ((size < 32) ? ((1 << size) - 1) : ~0));
-}
-
-target_ulong do_ins(target_ulong t0, target_ulong t1, uint32_t pos, uint32_t size)
-{
-    target_ulong mask = ((size < 32) ? ((1 << size) - 1) : ~0) << pos;
-
-    return (int32_t)((t0 & ~mask) | ((t1 << pos) & mask));
-}
-
-target_ulong do_wsbh(target_ulong t1)
-{
-    return (int32_t)(((t1 << 8) & ~0x00FF00FF) | ((t1 >> 8) & 0x00FF00FF));
-}
-
-#if defined(TARGET_MIPS64)
-target_ulong do_dext(target_ulong t1, uint32_t pos, uint32_t size)
-{
-    return (t1 >> pos) & ((size < 64) ? ((1ULL << size) - 1) : ~0ULL);
-}
-
-target_ulong do_dins(target_ulong t0, target_ulong t1, uint32_t pos, uint32_t size)
-{
-    target_ulong mask = ((size < 64) ? ((1ULL << size) - 1) : ~0ULL) << pos;
-
-    return (t0 & ~mask) | ((t1 << pos) & mask);
-}
-
-target_ulong do_dsbh(target_ulong t1)
-{
-    return ((t1 << 8) & ~0x00FF00FF00FF00FFULL) | ((t1 >> 8) & 0x00FF00FF00FF00FFULL);
-}
-
-target_ulong do_dshd(target_ulong t1)
-{
-    t1 = ((t1 << 16) & ~0x0000FFFF0000FFFFULL) | ((t1 >> 16) & 0x0000FFFF0000FFFFULL);
-    return (t1 << 32) | (t1 >> 32);
-}
-#endif
 
 void do_pmon (int function)
 {
@@ -2798,7 +2778,7 @@ void do_cmpabs_d_ ## op (uint64_t fdt0, uint64_t fdt1, int cc) \
         CLEAR_FP_COND(cc, env->active_fpu);                    \
 }
 
-int float64_is_unordered(int sig, float64 a, float64 b STATUS_PARAM)
+static int float64_is_unordered(int sig, float64 a, float64 b STATUS_PARAM)
 {
     if (float64_is_signaling_nan(a) ||
         float64_is_signaling_nan(b) ||
@@ -2856,7 +2836,7 @@ void do_cmpabs_s_ ## op (uint32_t fst0, uint32_t fst1, int cc) \
         CLEAR_FP_COND(cc, env->active_fpu);                    \
 }
 
-flag float32_is_unordered(int sig, float32 a, float32 b STATUS_PARAM)
+static flag float32_is_unordered(int sig, float32 a, float32 b STATUS_PARAM)
 {
     if (float32_is_signaling_nan(a) ||
         float32_is_signaling_nan(b) ||

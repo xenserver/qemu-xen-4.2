@@ -15,7 +15,8 @@
  *
  *  You should have received a copy of the GNU General Public License
  *  along with this program; if not, write to the Free Software
- *  Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+ *  Foundation, Inc., 51 Franklin Street - Fifth Floor, Boston,
+ *  MA 02110-1301, USA.
  */
 #include <stdlib.h>
 #include <stdio.h>
@@ -23,9 +24,11 @@
 #include <string.h>
 #include <errno.h>
 #include <unistd.h>
+#include <sys/mman.h>
 
 #include "qemu.h"
 #include "qemu-common.h"
+#include "cache-utils.h"
 /* For tb_lock */
 #include "exec-all.h"
 
@@ -160,6 +163,7 @@ void fork_end(int child)
         pthread_cond_init(&exclusive_cond, NULL);
         pthread_cond_init(&exclusive_resume, NULL);
         pthread_mutex_init(&tb_lock, NULL);
+        gdbserver_fork(thread_env);
     } else {
         pthread_mutex_unlock(&exclusive_lock);
         pthread_mutex_unlock(&tb_lock);
@@ -252,6 +256,9 @@ void fork_start(void)
 
 void fork_end(int child)
 {
+    if (child) {
+        gdbserver_fork(thread_env);
+    }
 }
 #endif
 
@@ -282,9 +289,8 @@ static void write_dt(void *ptr, unsigned long addr, unsigned long limit,
     p[1] = tswap32(e2);
 }
 
+static uint64_t *idt_table;
 #ifdef TARGET_X86_64
-uint64_t idt_table[512];
-
 static void set_gate64(void *ptr, unsigned int type, unsigned int dpl,
                        uint64_t addr, unsigned int sel)
 {
@@ -303,8 +309,6 @@ static void set_idt(int n, unsigned int dpl)
     set_gate64(idt_table + n * 2, 0, dpl, 0, 0);
 }
 #else
-uint64_t idt_table[256];
-
 static void set_gate(void *ptr, unsigned int type, unsigned int dpl,
                      uint32_t addr, unsigned int sel)
 {
@@ -405,7 +409,7 @@ void cpu_loop(CPUX86State *env)
                 queue_signal(env, info.si_signo, &info);
             }
             break;
-        case EXCP01_SSTP:
+        case EXCP01_DB:
         case EXCP03_INT3:
 #ifndef TARGET_X86_64
             if (env->eflags & VM_MASK) {
@@ -415,7 +419,7 @@ void cpu_loop(CPUX86State *env)
             {
                 info.si_signo = SIGTRAP;
                 info.si_errno = 0;
-                if (trapnr == EXCP01_SSTP) {
+                if (trapnr == EXCP01_DB) {
                     info.si_code = TARGET_TRAP_BRKPT;
                     info._sifields._sigfault._addr = env->eip;
                 } else {
@@ -1285,20 +1289,6 @@ void cpu_loop(CPUPPCState *env)
             cpu_abort(env, "Instruction TLB exception while in user mode. "
                       "Aborting\n");
             break;
-        case POWERPC_EXCP_DEBUG:    /* Debug interrupt                       */
-            /* XXX: check this */
-            {
-                int sig;
-
-                sig = gdb_handlesig(env, TARGET_SIGTRAP);
-                if (sig) {
-                    info.si_signo = sig;
-                    info.si_errno = 0;
-                    info.si_code = TARGET_TRAP_BRKPT;
-                    queue_signal(env, info.si_signo, &info);
-                  }
-            }
-            break;
         case POWERPC_EXCP_SPEU:     /* SPE/embedded floating-point unavail.  */
             EXCP_DUMP(env, "No SPE/floating-point instruction allowed\n");
             info.si_signo = TARGET_SIGILL;
@@ -1454,6 +1444,19 @@ void cpu_loop(CPUPPCState *env)
 #if 0
             printf("syscall returned 0x%08x (%d)\n", ret, ret);
 #endif
+            break;
+        case EXCP_DEBUG:
+            {
+                int sig;
+
+                sig = gdb_handlesig(env, TARGET_SIGTRAP);
+                if (sig) {
+                    info.si_signo = sig;
+                    info.si_errno = 0;
+                    info.si_code = TARGET_TRAP_BRKPT;
+                    queue_signal(env, info.si_signo, &info);
+                  }
+            }
             break;
         case EXCP_INTERRUPT:
             /* just indicate that signals should be handled asap */
@@ -2217,7 +2220,7 @@ void init_task_state(TaskState *ts)
     ts->sigqueue_table[i].next = NULL;
 }
  
-int main(int argc, char **argv)
+int main(int argc, char **argv, char **envp)
 {
     const char *filename;
     const char *cpu_model;
@@ -2233,6 +2236,8 @@ int main(int argc, char **argv)
 
     if (argc <= 1)
         usage();
+
+    qemu_cache_utils_init(envp);
 
     /* init debug */
     cpu_set_log_filename(DEBUG_LOGFILE);
@@ -2416,7 +2421,6 @@ int main(int argc, char **argv)
     init_task_state(ts);
     ts->info = info;
     env->opaque = ts;
-    env->user_mode_only = 1;
 
 #if defined(TARGET_I386)
     cpu_x86_set_cpl(env, 3);
@@ -2465,8 +2469,15 @@ int main(int argc, char **argv)
 #endif
 
     /* linux interrupt setup */
-    env->idt.base = h2g(idt_table);
-    env->idt.limit = sizeof(idt_table) - 1;
+#ifndef TARGET_ABI32
+    env->idt.limit = 511;
+#else
+    env->idt.limit = 255;
+#endif
+    env->idt.base = target_mmap(0, sizeof(uint64_t) * (env->idt.limit + 1),
+                                PROT_READ|PROT_WRITE,
+                                MAP_ANONYMOUS|MAP_PRIVATE, -1, 0);
+    idt_table = g2h(env->idt.base);
     set_idt(0, 0);
     set_idt(1, 0);
     set_idt(2, 0);
@@ -2492,9 +2503,11 @@ int main(int argc, char **argv)
     /* linux segment setup */
     {
         uint64_t *gdt_table;
-        gdt_table = qemu_mallocz(sizeof(uint64_t) * TARGET_GDT_ENTRIES);
-        env->gdt.base = h2g((unsigned long)gdt_table);
+        env->gdt.base = target_mmap(0, sizeof(uint64_t) * TARGET_GDT_ENTRIES,
+                                    PROT_READ|PROT_WRITE,
+                                    MAP_ANONYMOUS|MAP_PRIVATE, -1, 0);
         env->gdt.limit = sizeof(uint64_t) * TARGET_GDT_ENTRIES - 1;
+        gdt_table = g2h(env->gdt.base);
 #ifdef TARGET_ABI32
         write_dt(&gdt_table[__USER_CS >> 3], 0, 0xfffff,
                  DESC_G_MASK | DESC_B_MASK | DESC_P_MASK | DESC_S_MASK |

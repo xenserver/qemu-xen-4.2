@@ -42,7 +42,6 @@ static void main_cpu_reset(void *opaque)
     CPUState *env = opaque;
     cpu_reset(env);
 
-    env->pregs[PR_CCS] &= ~I_FLAG;
     env->pc = bootstrap_pc;
 }
 
@@ -83,7 +82,7 @@ void bareetraxfs_init (ram_addr_t ram_size, int vga_ram_size,
     phys_flash = qemu_ram_alloc(FLASH_SIZE);
     i = drive_get_index(IF_PFLASH, 0, 0);
     pflash_cfi02_register(0x0, phys_flash,
-                          drives_table[i].bdrv, (64 * 1024),
+                          i != -1 ? drives_table[i].bdrv : NULL, (64 * 1024),
                           FLASH_SIZE >> 16,
                           1, 2, 0x0000, 0x0000, 0x0000, 0x0000,
                           0x555, 0x2aa);
@@ -95,9 +94,10 @@ void bareetraxfs_init (ram_addr_t ram_size, int vga_ram_size,
     }
 
     /* Add the two ethernet blocks.  */
-    eth[0] = etraxfs_eth_init(&nd_table[0], env, pic->irq + 25, 0x30034000);
+    eth[0] = etraxfs_eth_init(&nd_table[0], env, pic->irq + 25, 0x30034000, 1);
     if (nb_nics > 1)
-        eth[1] = etraxfs_eth_init(&nd_table[1], env, pic->irq + 26, 0x30036000);
+        eth[1] = etraxfs_eth_init(&nd_table[1], env,
+                                  pic->irq + 26, 0x30036000, 2);
 
     /* The DMA Connector block is missing, hardwire things for now.  */
     etraxfs_dmac_connect_client(etraxfs_dmac, 0, eth[0]);
@@ -119,19 +119,31 @@ void bareetraxfs_init (ram_addr_t ram_size, int vga_ram_size,
     }
 
     if (kernel_filename) {
-        uint64_t entry;
+        uint64_t entry, high;
+        int kcmdline_len;
+
         /* Boots a kernel elf binary, os/linux-2.6/vmlinux from the axis 
            devboard SDK.  */
-        kernel_size = load_elf(kernel_filename, 0,
-                               &entry, NULL, NULL);
+        kernel_size = load_elf(kernel_filename, -0x80000000LL,
+                               &entry, NULL, &high);
         bootstrap_pc = entry;
         if (kernel_size < 0) {
             /* Takes a kimage from the axis devboard SDK.  */
             kernel_size = load_image(kernel_filename, phys_ram_base + 0x4000);
             bootstrap_pc = 0x40004000;
-            /* magic for boot.  */
-            env->regs[8] = 0x56902387;
             env->regs[9] = 0x40004000 + kernel_size;
+        }
+        env->regs[8] = 0x56902387; /* RAM init magic.  */
+
+        if (kernel_cmdline && (kcmdline_len = strlen(kernel_cmdline))) {
+            if (kcmdline_len > 256) {
+                fprintf(stderr, "Too long CRIS kernel cmdline (max 256)\n");
+                exit(1);
+            }
+            pstrcpy_targphys(high, 256, kernel_cmdline);
+            /* Let the kernel know we are modifying the cmdline.  */
+            env->regs[10] = 0x87109563;
+            env->regs[11] = high;
         }
     }
     env->pc = bootstrap_pc;
@@ -145,5 +157,4 @@ QEMUMachine bareetraxfs_machine = {
     .desc = "Bare ETRAX FS board",
     .init = bareetraxfs_init,
     .ram_require = 0x8000000,
-    .max_cpus = 1,
 };

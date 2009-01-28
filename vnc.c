@@ -28,6 +28,7 @@
 #include "sysemu.h"
 #include "qemu_socket.h"
 #include "qemu-timer.h"
+#include "audio/audio.h"
 
 #define VNC_REFRESH_INTERVAL (1000 / 30)
 
@@ -169,6 +170,9 @@ struct VncState
     int client_green_shift, client_green_max, server_green_shift, server_green_max;
     int client_blue_shift, client_blue_max, server_blue_shift, server_blue_max;
 
+    CaptureVoiceOut *audio_cap;
+    struct audsettings as;
+
     VncReadEvent *read_handler;
     size_t read_handler_expect;
     /* input */
@@ -179,7 +183,7 @@ static VncState *vnc_state; /* needed for info vnc */
 
 void do_info_vnc(void)
 {
-    if (vnc_state == NULL)
+    if (vnc_state == NULL || vnc_state->display == NULL)
 	term_printf("VNC server disabled\n");
     else {
 	term_printf("VNC server active on: ");
@@ -321,7 +325,7 @@ static void vnc_dpy_resize(DisplayState *ds, int w, int h)
     }
 
     memset(vs->dirty_row, 0xFF, sizeof(vs->dirty_row));
-    memset(vs->old_data, 42, vs->ds->linesize * vs->ds->height);
+    memset(vs->old_data, 42, ds_get_linesize(vs->ds) * ds_get_height(vs->ds));
 }
 
 /* fastest code */
@@ -414,10 +418,10 @@ static void send_framebuffer_update_raw(VncState *vs, int x, int y, int w, int h
 
     vnc_framebuffer_update(vs, x, y, w, h, 0);
 
-    row = vs->ds->data + y * vs->ds->linesize + x * vs->depth;
+    row = ds_get_data(vs->ds) + y * ds_get_linesize(vs->ds) + x * vs->depth;
     for (i = 0; i < h; i++) {
 	vs->write_pixels(vs, row, w * vs->depth);
-	row += vs->ds->linesize;
+	row += ds_get_linesize(vs->ds);
     }
 }
 
@@ -495,7 +499,7 @@ static void vnc_copy(DisplayState *ds, int src_x, int src_y, int dst_x, int dst_
     uint8_t *dst_row;
     char *old_row;
     int y = 0;
-    int pitch = ds->linesize;
+    int pitch = ds_get_linesize(ds);
     VncState *vs = ds->opaque;
 
     vnc_update_client(vs);
@@ -505,11 +509,11 @@ static void vnc_copy(DisplayState *ds, int src_x, int src_y, int dst_x, int dst_
 	pitch = -pitch;
     }
 
-    src = (ds->linesize * (src_y + y) + vs->depth * src_x);
-    dst = (ds->linesize * (dst_y + y) + vs->depth * dst_x);
+    src = (ds_get_linesize(ds) * (src_y + y) + vs->depth * src_x);
+    dst = (ds_get_linesize(ds) * (dst_y + y) + vs->depth * dst_x);
 
-    src_row = ds->data + src;
-    dst_row = ds->data + dst;
+    src_row = ds_get_data(ds) + src;
+    dst_row = ds_get_data(ds) + dst;
     old_row = vs->old_data + dst;
 
     for (y = 0; y < h; y++) {
@@ -563,7 +567,7 @@ static void vnc_update_client(void *opaque)
 
 	/* Walk through the dirty map and eliminate tiles that
 	   really aren't dirty */
-	row = vs->ds->data;
+	row = ds_get_data(vs->ds);
 	old_row = vs->old_data;
 
 	for (y = 0; y < vs->height; y++) {
@@ -575,7 +579,7 @@ static void vnc_update_client(void *opaque)
 		ptr = row;
 		old_ptr = (char*)old_row;
 
-		for (x = 0; x < vs->ds->width; x += 16) {
+		for (x = 0; x < ds_get_width(vs->ds); x += 16) {
 		    if (memcmp(old_ptr, ptr, 16 * vs->depth) == 0) {
 			vnc_clear_bit(vs->dirty_row[y], (x / 16));
 		    } else {
@@ -588,11 +592,11 @@ static void vnc_update_client(void *opaque)
 		}
 	    }
 
-	    row += vs->ds->linesize;
-	    old_row += vs->ds->linesize;
+	    row += ds_get_linesize(vs->ds);
+	    old_row += ds_get_linesize(vs->ds);
 	}
 
-	if (!has_dirty) {
+	if (!has_dirty && !vs->audio_cap) {
 	    qemu_mod_timer(vs->timer, qemu_get_clock(rt_clock) + VNC_REFRESH_INTERVAL);
 	    return;
 	}
@@ -681,6 +685,71 @@ static void buffer_append(Buffer *buffer, const void *data, size_t len)
     buffer->offset += len;
 }
 
+/* audio */
+static void audio_capture_notify(void *opaque, audcnotification_e cmd)
+{
+    VncState *vs = opaque;
+
+    switch (cmd) {
+    case AUD_CNOTIFY_DISABLE:
+        vnc_write_u8(vs, 255);
+        vnc_write_u8(vs, 1);
+        vnc_write_u16(vs, 0);
+        vnc_flush(vs);
+        break;
+
+    case AUD_CNOTIFY_ENABLE:
+        vnc_write_u8(vs, 255);
+        vnc_write_u8(vs, 1);
+        vnc_write_u16(vs, 1);
+        vnc_flush(vs);
+        break;
+    }
+}
+
+static void audio_capture_destroy(void *opaque)
+{
+}
+
+static void audio_capture(void *opaque, void *buf, int size)
+{
+    VncState *vs = opaque;
+
+    vnc_write_u8(vs, 255);
+    vnc_write_u8(vs, 1);
+    vnc_write_u16(vs, 2);
+    vnc_write_u32(vs, size);
+    vnc_write(vs, buf, size);
+    vnc_flush(vs);
+}
+
+static void audio_add(VncState *vs)
+{
+    struct audio_capture_ops ops;
+
+    if (vs->audio_cap) {
+        term_printf ("audio already running\n");
+        return;
+    }
+
+    ops.notify = audio_capture_notify;
+    ops.destroy = audio_capture_destroy;
+    ops.capture = audio_capture;
+
+    vs->audio_cap = AUD_add_capture(NULL, &vs->as, &ops, vs);
+    if (!vs->audio_cap) {
+        term_printf ("Failed to add audio capture\n");
+    }
+}
+
+static void audio_del(VncState *vs)
+{
+    if (vs->audio_cap) {
+        AUD_del_capture(vs->audio_cap, vs);
+        vs->audio_cap = NULL;
+    }
+}
+
 static int vnc_client_io_error(VncState *vs, int ret, int last_errno)
 {
     if (ret == 0 || ret == -1) {
@@ -712,6 +781,7 @@ static int vnc_client_io_error(VncState *vs, int ret, int last_errno)
 	}
 	vs->wiremode = VNC_WIREMODE_CLEAR;
 #endif /* CONFIG_VNC_TLS */
+        audio_del(vs);
 	return 0;
     }
     return ret;
@@ -918,7 +988,7 @@ static void check_pointer_type_change(VncState *vs, int absolute)
 	vnc_write_u8(vs, 0);
 	vnc_write_u16(vs, 1);
 	vnc_framebuffer_update(vs, absolute, 0,
-			       vs->ds->width, vs->ds->height, -257);
+			       ds_get_width(vs->ds), ds_get_height(vs->ds), -257);
 	vnc_flush(vs);
     }
     vs->absolute = absolute;
@@ -941,8 +1011,8 @@ static void pointer_event(VncState *vs, int button_mask, int x, int y)
 	dz = 1;
 
     if (vs->absolute) {
-	kbd_mouse_event(x * 0x7FFF / (vs->ds->width - 1),
-			y * 0x7FFF / (vs->ds->height - 1),
+	kbd_mouse_event(x * 0x7FFF / (ds_get_width(vs->ds) - 1),
+			y * 0x7FFF / (ds_get_height(vs->ds) - 1),
 			dz, buttons);
     } else if (vs->has_pointer_type_change) {
 	x -= 0x7FFF;
@@ -1106,25 +1176,25 @@ static void framebuffer_update_request(VncState *vs, int incremental,
 				       int x_position, int y_position,
 				       int w, int h)
 {
-    if (x_position > vs->ds->width)
-        x_position = vs->ds->width;
-    if (y_position > vs->ds->height)
-        y_position = vs->ds->height;
-    if (x_position + w >= vs->ds->width)
-        w = vs->ds->width  - x_position;
-    if (y_position + h >= vs->ds->height)
-        h = vs->ds->height - y_position;
+    if (x_position > ds_get_width(vs->ds))
+        x_position = ds_get_width(vs->ds);
+    if (y_position > ds_get_height(vs->ds))
+        y_position = ds_get_height(vs->ds);
+    if (x_position + w >= ds_get_width(vs->ds))
+        w = ds_get_width(vs->ds)  - x_position;
+    if (y_position + h >= ds_get_height(vs->ds))
+        h = ds_get_height(vs->ds) - y_position;
 
     int i;
     vs->need_update = 1;
     if (!incremental) {
-	char *old_row = vs->old_data + y_position * vs->ds->linesize;
+	char *old_row = vs->old_data + y_position * ds_get_linesize(vs->ds);
 
 	for (i = 0; i < h; i++) {
             vnc_set_bits(vs->dirty_row[y_position + i],
-                         (vs->ds->width / 16), VNC_DIRTY_WORDS);
-	    memset(old_row, 42, vs->ds->width * vs->depth);
-	    old_row += vs->ds->linesize;
+                         (ds_get_width(vs->ds) / 16), VNC_DIRTY_WORDS);
+	    memset(old_row, 42, ds_get_width(vs->ds) * vs->depth);
+	    old_row += ds_get_linesize(vs->ds);
 	}
     }
 }
@@ -1134,7 +1204,16 @@ static void send_ext_key_event_ack(VncState *vs)
     vnc_write_u8(vs, 0);
     vnc_write_u8(vs, 0);
     vnc_write_u16(vs, 1);
-    vnc_framebuffer_update(vs, 0, 0, vs->ds->width, vs->ds->height, -258);
+    vnc_framebuffer_update(vs, 0, 0, ds_get_width(vs->ds), ds_get_height(vs->ds), -258);
+    vnc_flush(vs);
+}
+
+static void send_ext_audio_ack(VncState *vs)
+{
+    vnc_write_u8(vs, 0);
+    vnc_write_u8(vs, 0);
+    vnc_write_u16(vs, 1);
+    vnc_framebuffer_update(vs, 0, 0, ds_get_width(vs->ds), ds_get_height(vs->ds), -259);
     vnc_flush(vs);
 }
 
@@ -1168,6 +1247,9 @@ static void set_encodings(VncState *vs, int32_t *encodings, size_t n_encodings)
 	    break;
         case -258:
             send_ext_key_event_ack(vs);
+            break;
+        case -259:
+            send_ext_audio_ack(vs);
             break;
         case 0x574D5669:
             vs->has_WMVi = 1;
@@ -1421,10 +1503,13 @@ static int protocol_client_msg(VncState *vs, uint8_t *data, size_t len)
 	if (len == 1)
 	    return 4;
 
-	if (len == 4)
-	    return 4 + (read_u16(data, 2) * 4);
+	if (len == 4) {
+            limit = read_u16(data, 2);
+            if (limit > 0)
+                return 4 + (limit * 4);
+        } else
+            limit = read_u16(data, 2);
 
-	limit = read_u16(data, 2);
 	for (i = 0; i < limit; i++) {
 	    int32_t val = read_s32(data, 4 + (i * 4));
 	    memcpy(data + 4 + (i * 4), &val, sizeof(val));
@@ -1476,6 +1561,48 @@ static int protocol_client_msg(VncState *vs, uint8_t *data, size_t len)
             ext_key_event(vs, read_u16(data, 2),
                           read_u32(data, 4), read_u32(data, 8));
             break;
+        case 1:
+            if (len == 2)
+                return 4;
+
+            switch (read_u16 (data, 2)) {
+            case 0:
+                audio_add(vs);
+                break;
+            case 1:
+                audio_del(vs);
+                break;
+            case 2:
+                if (len == 4)
+                    return 10;
+                switch (read_u8(data, 4)) {
+                case 0: vs->as.fmt = AUD_FMT_U8; break;
+                case 1: vs->as.fmt = AUD_FMT_S8; break;
+                case 2: vs->as.fmt = AUD_FMT_U16; break;
+                case 3: vs->as.fmt = AUD_FMT_S16; break;
+                case 4: vs->as.fmt = AUD_FMT_U32; break;
+                case 5: vs->as.fmt = AUD_FMT_S32; break;
+                default:
+                    printf("Invalid audio format %d\n", read_u8(data, 4));
+                    vnc_client_error(vs);
+                    break;
+                }
+                vs->as.nchannels = read_u8(data, 5);
+                if (vs->as.nchannels != 1 && vs->as.nchannels != 2) {
+                    printf("Invalid audio channel coount %d\n",
+                           read_u8(data, 5));
+                    vnc_client_error(vs);
+                    break;
+                }
+                vs->as.freq = read_u32(data, 6);
+                break;
+            default:
+                printf ("Invalid audio message %d\n", read_u8(data, 4));
+                vnc_client_error(vs);
+                break;
+            }
+            break;
+
         default:
             printf("Msg: %d\n", read_u16(data, 0));
             vnc_client_error(vs);
@@ -1497,10 +1624,10 @@ static int protocol_client_init(VncState *vs, uint8_t *data, size_t len)
     char buf[1024];
     int size;
 
-    vs->width = vs->ds->width;
-    vs->height = vs->ds->height;
-    vnc_write_u16(vs, vs->ds->width);
-    vnc_write_u16(vs, vs->ds->height);
+    vs->width = ds_get_width(vs->ds);
+    vs->height = ds_get_height(vs->ds);
+    vnc_write_u16(vs, ds_get_width(vs->ds));
+    vnc_write_u16(vs, ds_get_height(vs->ds));
 
     pixel_format_message(vs);
 
@@ -2116,12 +2243,13 @@ static void vnc_connect(VncState *vs)
     vnc_write(vs, "RFB 003.008\n", 12);
     vnc_flush(vs);
     vnc_read_when(vs, protocol_version, 12);
-    memset(vs->old_data, 0, vs->ds->linesize * vs->ds->height);
+    memset(vs->old_data, 0, ds_get_linesize(vs->ds) * ds_get_height(vs->ds));
     memset(vs->dirty_row, 0xFF, sizeof(vs->dirty_row));
     vs->has_resize = 0;
     vs->has_hextile = 0;
     vs->ds->dpy_copy = NULL;
     vnc_update_client(vs);
+    reset_keys(vs);
 }
 
 static void vnc_listen_read(void *opaque)
@@ -2138,8 +2266,6 @@ static void vnc_listen_read(void *opaque)
         vnc_connect(vs);
     }
 }
-
-extern int parse_host_port(struct sockaddr_in *saddr, const char *str);
 
 void vnc_display_init(DisplayState *ds)
 {
@@ -2179,6 +2305,11 @@ void vnc_display_init(DisplayState *ds)
 
     vnc_colordepth(vs->ds, 32);
     vnc_dpy_resize(vs->ds, 640, 400);
+
+    vs->as.freq = 44100;
+    vs->as.nchannels = 2;
+    vs->as.fmt = AUD_FMT_S16;
+    vs->as.endianness = 0;
 }
 
 #ifdef CONFIG_VNC_TLS
@@ -2271,6 +2402,7 @@ void vnc_display_close(DisplayState *ds)
     vs->subauth = VNC_AUTH_INVALID;
     vs->x509verify = 0;
 #endif
+    audio_del(vs);
 }
 
 int vnc_display_password(DisplayState *ds, const char *password)
@@ -2291,18 +2423,11 @@ int vnc_display_password(DisplayState *ds, const char *password)
 
 int vnc_display_open(DisplayState *ds, const char *display)
 {
-    struct sockaddr *addr;
-    struct sockaddr_in iaddr;
-#ifndef _WIN32
-    struct sockaddr_un uaddr;
-    const char *p;
-#endif
-    int reuse_addr, ret;
-    socklen_t addrlen;
     VncState *vs = ds ? (VncState *)ds->opaque : vnc_state;
     const char *options;
     int password = 0;
     int reverse = 0;
+    int to_port = 0;
 #ifdef CONFIG_VNC_TLS
     int tls = 0, x509 = 0;
 #endif
@@ -2321,6 +2446,8 @@ int vnc_display_open(DisplayState *ds, const char *display)
 	    password = 1; /* Require password auth */
 	} else if (strncmp(options, "reverse", 7) == 0) {
 	    reverse = 1;
+	} else if (strncmp(options, "to=", 3) == 0) {
+            to_port = atoi(options+3) + 5900;
 #ifdef CONFIG_VNC_TLS
 	} else if (strncmp(options, "tls", 3) == 0) {
 	    tls = 1; /* Require TLS */
@@ -2336,9 +2463,8 @@ int vnc_display_open(DisplayState *ds, const char *display)
 	    end = strchr(options, ',');
 	    if (start && (!end || (start < end))) {
 		int len = end ? end-(start+1) : strlen(start+1);
-		char *path = qemu_malloc(len+1);
-		strncpy(path, start+1, len);
-		path[len] = '\0';
+		char *path = qemu_strndup(start + 1, len);
+
 		VNC_DEBUG("Trying certificate path '%s'\n", path);
 		if (vnc_set_x509_credential_dir(vs, path) < 0) {
 		    fprintf(stderr, "Failed to find x509 certificates/keys in %s\n", path);
@@ -2397,67 +2523,14 @@ int vnc_display_open(DisplayState *ds, const char *display)
 	}
 #endif
     }
-#ifndef NO_UNIX_SOCKETS
-    if (strstart(display, "unix:", &p)) {
-	addr = (struct sockaddr *)&uaddr;
-	addrlen = sizeof(uaddr);
-
-	vs->lsock = socket(PF_UNIX, SOCK_STREAM, 0);
-	if (vs->lsock == -1) {
-	    fprintf(stderr, "Could not create socket\n");
-	    free(vs->display);
-	    vs->display = NULL;
-	    return -1;
-	}
-
-	uaddr.sun_family = AF_UNIX;
-	memset(uaddr.sun_path, 0, 108);
-	snprintf(uaddr.sun_path, 108, "%s", p);
-
-	if (!reverse) {
-	    unlink(uaddr.sun_path);
-	}
-    } else
-#endif
-    {
-	addr = (struct sockaddr *)&iaddr;
-	addrlen = sizeof(iaddr);
-
-	if (parse_host_port(&iaddr, display) < 0) {
-	    fprintf(stderr, "Could not parse VNC address\n");
-	    free(vs->display);
-	    vs->display = NULL;
-	    return -1;
-	}
-
-	iaddr.sin_port = htons(ntohs(iaddr.sin_port) + (reverse ? 0 : 5900));
-
-	vs->lsock = socket(PF_INET, SOCK_STREAM, 0);
-	if (vs->lsock == -1) {
-	    fprintf(stderr, "Could not create socket\n");
-	    free(vs->display);
-	    vs->display = NULL;
-	    return -1;
-	}
-
-	reuse_addr = 1;
-	ret = setsockopt(vs->lsock, SOL_SOCKET, SO_REUSEADDR,
-			 (const char *)&reuse_addr, sizeof(reuse_addr));
-	if (ret == -1) {
-	    fprintf(stderr, "setsockopt() failed\n");
-	    close(vs->lsock);
-	    vs->lsock = -1;
-	    free(vs->display);
-	    vs->display = NULL;
-	    return -1;
-	}
-    }
 
     if (reverse) {
-        if (connect(vs->lsock, addr, addrlen) == -1) {
-            fprintf(stderr, "Connection to VNC client failed\n");
-            close(vs->lsock);
-            vs->lsock = -1;
+        /* connect to viewer */
+        if (strncmp(display, "unix:", 5) == 0)
+            vs->lsock = unix_connect(display+5);
+        else
+            vs->lsock = inet_connect(display, SOCK_STREAM);
+        if (-1 == vs->lsock) {
             free(vs->display);
             vs->display = NULL;
             return -1;
@@ -2465,26 +2538,26 @@ int vnc_display_open(DisplayState *ds, const char *display)
             vs->csock = vs->lsock;
             vs->lsock = -1;
             vnc_connect(vs);
-            return 0;
         }
-    }
+        return 0;
 
-    if (bind(vs->lsock, addr, addrlen) == -1) {
-	fprintf(stderr, "bind() failed\n");
-	close(vs->lsock);
-	vs->lsock = -1;
-	free(vs->display);
-	vs->display = NULL;
-	return -1;
-    }
-
-    if (listen(vs->lsock, 1) == -1) {
-	fprintf(stderr, "listen() failed\n");
-	close(vs->lsock);
-	vs->lsock = -1;
-	free(vs->display);
-	vs->display = NULL;
-	return -1;
+    } else {
+        /* listen for connects */
+        char *dpy;
+        dpy = qemu_malloc(256);
+        if (strncmp(display, "unix:", 5) == 0) {
+            pstrcpy(dpy, 256, "unix:");
+            vs->lsock = unix_listen(display+5, dpy+5, 256-5);
+        } else {
+            vs->lsock = inet_listen(display, dpy, 256, SOCK_STREAM, 5900);
+        }
+        if (-1 == vs->lsock) {
+            free(dpy);
+            return -1;
+        } else {
+            free(vs->display);
+            vs->display = dpy;
+        }
     }
 
     return qemu_set_fd_handler2(vs->lsock, vnc_listen_poll, vnc_listen_read, NULL, vs);

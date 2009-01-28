@@ -20,7 +20,6 @@
 
 typedef struct vpb_sic_state
 {
-  uint32_t base;
   uint32_t level;
   uint32_t mask;
   uint32_t pic_enable;
@@ -65,7 +64,6 @@ static uint32_t vpb_sic_read(void *opaque, target_phys_addr_t offset)
 {
     vpb_sic_state *s = (vpb_sic_state *)opaque;
 
-    offset -= s->base;
     switch (offset >> 2) {
     case 0: /* STATUS */
         return s->level & s->mask;
@@ -87,7 +85,6 @@ static void vpb_sic_write(void *opaque, target_phys_addr_t offset,
                           uint32_t value)
 {
     vpb_sic_state *s = (vpb_sic_state *)opaque;
-    offset -= s->base;
 
     switch (offset >> 2) {
     case 2: /* ENSET */
@@ -141,7 +138,6 @@ static qemu_irq *vpb_sic_init(uint32_t base, qemu_irq *parent, int irq)
     if (!s)
         return NULL;
     qi = qemu_allocate_irqs(vpb_sic_set_irq, s, 32);
-    s->base = base;
     s->parent = parent;
     s->irq = irq;
     iomemtype = cpu_register_io_memory(0, vpb_sic_readfn,
@@ -198,12 +194,12 @@ static void versatile_init(ram_addr_t ram_size, int vga_ram_size,
        so many of the qemu PCI devices are not useable.  */
     for(n = 0; n < nb_nics; n++) {
         nd = &nd_table[n];
-        if (!nd->model)
-            nd->model = done_smc ? "rtl8139" : "smc91c111";
-        if (strcmp(nd->model, "smc91c111") == 0) {
+
+        if ((!nd->model && !done_smc) || strcmp(nd->model, "smc91c111") == 0) {
             smc91c111_init(nd, 0x10010000, sic[25]);
+            done_smc = 1;
         } else {
-            pci_nic_init(pci_bus, nd, -1);
+            pci_nic_init(pci_bus, nd, -1, "rtl8139");
         }
     }
     if (usb_enabled) {
@@ -320,7 +316,6 @@ QEMUMachine versatilepb_machine = {
     .desc = "ARM Versatile/PB (ARM926EJ-S)",
     .init = vpb_init,
     .use_scsi = 1,
-    .max_cpus = 1,
 };
 
 QEMUMachine versatileab_machine = {
@@ -328,5 +323,4 @@ QEMUMachine versatileab_machine = {
     .desc = "ARM Versatile/AB (ARM926EJ-S)",
     .init = vab_init,
     .use_scsi = 1,
-    .max_cpus = 1,
 };

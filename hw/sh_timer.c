@@ -36,7 +36,7 @@ typedef struct {
     int old_level;
     int feat;
     int enabled;
-    struct intc_source *irq;
+    qemu_irq irq;
 } sh_timer_state;
 
 /* Check all active timers, and schedule the next timer interrupt. */
@@ -46,7 +46,7 @@ static void sh_timer_update(sh_timer_state *s)
     int new_level = s->int_level && (s->tcr & TIMER_TCR_UNIE);
 
     if (new_level != s->old_level)
-      sh_intc_toggle_source(s->irq, 0, new_level ? 1 : -1);
+      qemu_set_irq (s->irq, new_level);
 
     s->old_level = s->int_level;
     s->int_level = new_level;
@@ -185,7 +185,7 @@ static void sh_timer_tick(void *opaque)
     sh_timer_update(s);
 }
 
-static void *sh_timer_init(uint32_t freq, int feat, struct intc_source *irq)
+static void *sh_timer_init(uint32_t freq, int feat, qemu_irq irq)
 {
     sh_timer_state *s;
     QEMUBH *bh;
@@ -211,7 +211,6 @@ typedef struct {
     int level[3];
     uint32_t tocr;
     uint32_t tstr;
-    target_phys_addr_t base;
     int feat;
 } tmu012_state;
 
@@ -222,7 +221,6 @@ static uint32_t tmu012_read(void *opaque, target_phys_addr_t offset)
 #ifdef DEBUG_TIMER
     printf("tmu012_read 0x%lx\n", (unsigned long) offset);
 #endif
-    offset -= s->base;
 
     if (offset >= 0x20) {
         if (!(s->feat & TMU012_FEAT_3CHAN))
@@ -256,7 +254,6 @@ static void tmu012_write(void *opaque, target_phys_addr_t offset,
 #ifdef DEBUG_TIMER
     printf("tmu012_write 0x%lx 0x%08x\n", (unsigned long) offset, value);
 #endif
-    offset -= s->base;
 
     if (offset >= 0x20) {
         if (!(s->feat & TMU012_FEAT_3CHAN))
@@ -307,15 +304,14 @@ static CPUWriteMemoryFunc *tmu012_writefn[] = {
 };
 
 void tmu012_init(target_phys_addr_t base, int feat, uint32_t freq,
-		 struct intc_source *ch0_irq, struct intc_source *ch1_irq,
-		 struct intc_source *ch2_irq0, struct intc_source *ch2_irq1)
+		 qemu_irq ch0_irq, qemu_irq ch1_irq,
+		 qemu_irq ch2_irq0, qemu_irq ch2_irq1)
 {
     int iomemtype;
     tmu012_state *s;
     int timer_feat = (feat & TMU012_FEAT_EXTCLK) ? TIMER_FEAT_EXTCLK : 0;
 
     s = (tmu012_state *)qemu_mallocz(sizeof(tmu012_state));
-    s->base = base;
     s->feat = feat;
     s->timer[0] = sh_timer_init(freq, timer_feat, ch0_irq);
     s->timer[1] = sh_timer_init(freq, timer_feat, ch1_irq);
@@ -324,6 +320,7 @@ void tmu012_init(target_phys_addr_t base, int feat, uint32_t freq,
 				    ch2_irq0); /* ch2_irq1 not supported */
     iomemtype = cpu_register_io_memory(0, tmu012_readfn,
                                        tmu012_writefn, s);
-    cpu_register_physical_memory(base, 0x00001000, iomemtype);
+    cpu_register_physical_memory(P4ADDR(base), 0x00001000, iomemtype);
+    cpu_register_physical_memory(A7ADDR(base), 0x00001000, iomemtype);
     /* ??? Save/restore.  */
 }

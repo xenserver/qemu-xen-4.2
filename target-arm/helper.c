@@ -88,12 +88,17 @@ static void cpu_reset_model_id(CPUARMState *env, uint32_t id)
         set_feature(env, ARM_FEATURE_VFP);
         set_feature(env, ARM_FEATURE_VFP3);
         set_feature(env, ARM_FEATURE_NEON);
+        set_feature(env, ARM_FEATURE_THUMB2EE);
         env->vfp.xregs[ARM_VFP_FPSID] = 0x410330c0;
         env->vfp.xregs[ARM_VFP_MVFR0] = 0x11110222;
         env->vfp.xregs[ARM_VFP_MVFR1] = 0x00011100;
         memcpy(env->cp15.c0_c1, cortexa8_cp15_c0_c1, 8 * sizeof(uint32_t));
         memcpy(env->cp15.c0_c2, cortexa8_cp15_c0_c2, 8 * sizeof(uint32_t));
-        env->cp15.c0_cachetype = 0x1dd20d2;
+        env->cp15.c0_cachetype = 0x82048004;
+        env->cp15.c0_clid = (1 << 27) | (2 << 24) | 3;
+        env->cp15.c0_ccsid[0] = 0xe007e01a; /* 16k L1 dcache. */
+        env->cp15.c0_ccsid[1] = 0x2007e01a; /* 16k L1 icache. */
+        env->cp15.c0_ccsid[2] = 0xf0000000; /* No L2 icache. */
         break;
     case ARM_CPUID_CORTEXM3:
         set_feature(env, ARM_FEATURE_V6);
@@ -110,6 +115,7 @@ static void cpu_reset_model_id(CPUARMState *env, uint32_t id)
         set_feature(env, ARM_FEATURE_VFP);
         set_feature(env, ARM_FEATURE_VFP3);
         set_feature(env, ARM_FEATURE_NEON);
+        set_feature(env, ARM_FEATURE_THUMB2EE);
         set_feature(env, ARM_FEATURE_DIV);
         break;
     case ARM_CPUID_TI915T:
@@ -168,6 +174,7 @@ void cpu_reset(CPUARMState *env)
     if (IS_M(env))
         env->uncached_cpsr &= ~CPSR_I;
     env->vfp.xregs[ARM_VFP_FPEXC] = 0;
+    env->cp15.c2_base_mask = 0xffffc000u;
 #endif
     env->regs[15] = 0;
     tlb_flush(env, 1);
@@ -899,15 +906,32 @@ static inline int check_ap(CPUState *env, int ap, int domain, int access_type,
           return PAGE_READ | PAGE_WRITE;
   case 3:
       return PAGE_READ | PAGE_WRITE;
-  case 4: case 7: /* Reserved.  */
+  case 4: /* Reserved.  */
       return 0;
   case 5:
       return is_user ? 0 : prot_ro;
   case 6:
       return prot_ro;
+  case 7:
+      if (!arm_feature (env, ARM_FEATURE_V7))
+          return 0;
+      return prot_ro;
   default:
       abort();
   }
+}
+
+static uint32_t get_level1_table_address(CPUState *env, uint32_t address)
+{
+    uint32_t table;
+
+    if (address & env->cp15.c2_mask)
+        table = env->cp15.c2_base1 & 0xffffc000;
+    else
+        table = env->cp15.c2_base0 & env->cp15.c2_base_mask;
+
+    table |= (address >> 18) & 0x3ffc;
+    return table;
 }
 
 static int get_phys_addr_v5(CPUState *env, uint32_t address, int access_type,
@@ -923,11 +947,7 @@ static int get_phys_addr_v5(CPUState *env, uint32_t address, int access_type,
 
     /* Pagetable walk.  */
     /* Lookup l1 descriptor.  */
-    if (address & env->cp15.c2_mask)
-        table = env->cp15.c2_base1;
-    else
-        table = env->cp15.c2_base0;
-    table = (table & 0xffffc000) | ((address >> 18) & 0x3ffc);
+    table = get_level1_table_address(env, address);
     desc = ldl_phys(table);
     type = (desc & 3);
     domain = (env->cp15.c3 >> ((desc >> 4) & 0x1e)) & 3;
@@ -1015,11 +1035,7 @@ static int get_phys_addr_v6(CPUState *env, uint32_t address, int access_type,
 
     /* Pagetable walk.  */
     /* Lookup l1 descriptor.  */
-    if (address & env->cp15.c2_mask)
-        table = env->cp15.c2_base1;
-    else
-        table = env->cp15.c2_base0;
-    table = (table & 0xffffc000) | ((address >> 18) & 0x3ffc);
+    table = get_level1_table_address(env, address);
     desc = ldl_phys(table);
     type = (desc & 3);
     if (type == 0) {
@@ -1079,6 +1095,12 @@ static int get_phys_addr_v6(CPUState *env, uint32_t address, int access_type,
     if (xn && access_type == 2)
         goto do_fault;
 
+    /* The simplified model uses AP[0] as an access control bit.  */
+    if ((env->cp15.c1_sys & (1 << 29)) && (ap & 1) == 0) {
+        /* Access flag fault.  */
+        code = (code == 15) ? 6 : 3;
+        goto do_fault;
+    }
     *prot = check_ap(env, ap, domain, access_type, is_user);
     if (!*prot) {
         /* Access permission fault.  */
@@ -1303,15 +1325,16 @@ void HELPER(set_cp15)(CPUState *env, uint32_t insn, uint32_t val)
     crm = insn & 0xf;
     switch ((insn >> 16) & 0xf) {
     case 0:
-        if (((insn >> 21) & 7) == 2) {
-            /* ??? Select cache level.  Ignore.  */
-            return;
-        }
         /* ID codes.  */
         if (arm_feature(env, ARM_FEATURE_XSCALE))
             break;
         if (arm_feature(env, ARM_FEATURE_OMAPCP))
             break;
+        if (arm_feature(env, ARM_FEATURE_V7)
+                && op1 == 2 && crm == 0 && op2 == 0) {
+            env->cp15.c0_cssel = val & 0xf;
+            break;
+        }
         goto bad_reg;
     case 1: /* System configuration.  */
         if (arm_feature(env, ARM_FEATURE_OMAPCP))
@@ -1365,7 +1388,10 @@ void HELPER(set_cp15)(CPUState *env, uint32_t insn, uint32_t val)
 		env->cp15.c2_base1 = val;
 		break;
 	    case 2:
+                val &= 7;
+                env->cp15.c2_control = val;
 		env->cp15.c2_mask = ~(((uint32_t)0xffffffffu) >> val);
+                env->cp15.c2_base_mask = ~((uint32_t)0x3fffu >> val);
 		break;
 	    default:
 		goto bad_reg;
@@ -1627,9 +1653,22 @@ uint32_t HELPER(get_cp15)(CPUState *env, uint32_t insn)
                 goto bad_reg;
             if (crm != 0)
                 goto bad_reg;
-            if (arm_feature(env, ARM_FEATURE_XSCALE))
+            if (!arm_feature(env, ARM_FEATURE_V7))
+                return 0;
+
+            switch (op2) {
+            case 0:
+                return env->cp15.c0_ccsid[env->cp15.c0_cssel];
+            case 1:
+                return env->cp15.c0_clid;
+            case 7:
+                return 0;
+            }
+            goto bad_reg;
+        case 2:
+            if (op2 != 0 || crm != 0)
                 goto bad_reg;
-            return 0;
+            return env->cp15.c0_cssel;
         default:
             goto bad_reg;
         }
@@ -1683,17 +1722,7 @@ uint32_t HELPER(get_cp15)(CPUState *env, uint32_t insn)
 	    case 1:
 		return env->cp15.c2_base1;
 	    case 2:
-		{
-		    int n;
-		    uint32_t mask;
-		    n = 0;
-		    mask = env->cp15.c2_mask;
-		    while (mask) {
-			n++;
-			mask <<= 1;
-		    }
-		    return n;
-		}
+                return env->cp15.c2_control;
 	    default:
 		goto bad_reg;
 	    }
@@ -2305,10 +2334,13 @@ void HELPER(vfp_set_fpscr)(CPUState *env, uint32_t val)
         }
         set_float_rounding_mode(i, &env->vfp.fp_status);
     }
+    if (changed & (1 << 24))
+        set_flush_to_zero((val & (1 << 24)) != 0, &env->vfp.fp_status);
+    if (changed & (1 << 25))
+        set_default_nan_mode((val & (1 << 25)) != 0, &env->vfp.fp_status);
 
     i = vfp_exceptbits_to_host((val >> 8) & 0x1f);
     set_float_exception_flags(i, &env->vfp.fp_status);
-    /* XXX: FZ and DN are not implemented.  */
 }
 
 #define VFP_HELPER(name, p) HELPER(glue(glue(vfp_,name),p))
@@ -2513,7 +2545,7 @@ ftype VFP_HELPER(name##to, p)(ftype x, uint32_t shift, CPUState *env) \
     ftype tmp; \
     tmp = sign##int32_to_##ftype ((itype)vfp_##p##toi(x), \
                                   &env->vfp.fp_status); \
-    return ftype##_scalbn(tmp, shift, &env->vfp.fp_status); \
+    return ftype##_scalbn(tmp, -(int)shift, &env->vfp.fp_status); \
 } \
 ftype VFP_HELPER(to##name, p)(ftype x, uint32_t shift, CPUState *env) \
 { \
@@ -2585,4 +2617,13 @@ uint32_t HELPER(rsqrte_u32)(uint32_t a, CPUState *env)
     tmp = helper_rsqrte_f32(tmp, env);
     tmp = float32_scalbn(tmp, 31, s);
     return float32_to_int32(tmp, s);
+}
+
+void HELPER(set_teecr)(CPUState *env, uint32_t val)
+{
+    val &= 1;
+    if (env->teecr != val) {
+        env->teecr = val;
+        tb_flush(env);
+    }
 }
