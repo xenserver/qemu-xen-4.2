@@ -291,12 +291,6 @@ static void piix3_reset(PCIDevice *d)
     pci_conf[0xab] = 0x00;
     pci_conf[0xac] = 0x00;
     pci_conf[0xae] = 0x00;
-
-#ifdef CONFIG_DM
-    pci_conf[0x61] = 0x80;
-    pci_conf[0x62] = 0x80;
-    pci_conf[0x63] = 0x80;
-#endif /* CONFIG_DM */
 }
 
 #ifndef CONFIG_DM
