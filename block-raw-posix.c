@@ -665,6 +665,25 @@ static void raw_aio_em_cb(void* opaque)
     qemu_aio_release(acb);
 }
 
+static void raw_aio_remove(RawAIOCB *acb)
+{
+    RawAIOCB **pacb;
+
+    /* remove the callback from the queue */
+    pacb = &posix_aio_state->first_aio;
+    for(;;) {
+        if (*pacb == NULL) {
+            break;
+        } else if (*pacb == acb) {
+            *pacb = acb->next;
+            raw_fd_pool_put(acb);
+            qemu_aio_release(acb);
+            break;
+        }
+        pacb = &acb->next;
+    }
+}
+
 static BlockDriverAIOCB *raw_aio_read(BlockDriverState *bs,
         int64_t sector_num, uint8_t *buf, int nb_sectors,
         BlockDriverCompletionFunc *cb, void *opaque)
@@ -690,7 +709,7 @@ static BlockDriverAIOCB *raw_aio_read(BlockDriverState *bs,
     if (!acb)
         return NULL;
     if (aio_read(&acb->aiocb) < 0) {
-        qemu_aio_release(acb);
+        raw_aio_remove(acb);
         return NULL;
     }
     return &acb->common;
@@ -721,7 +740,7 @@ static BlockDriverAIOCB *raw_aio_write(BlockDriverState *bs,
     if (!acb)
         return NULL;
     if (aio_write(&acb->aiocb) < 0) {
-        qemu_aio_release(acb);
+        raw_aio_remove(acb);
         return NULL;
     }
     return &acb->common;
@@ -745,7 +764,6 @@ static void raw_aio_cancel(BlockDriverAIOCB *blockacb)
 {
     int ret;
     RawAIOCB *acb = (RawAIOCB *)blockacb;
-    RawAIOCB **pacb;
 
     ret = aio_cancel(acb->aiocb.aio_fildes, &acb->aiocb);
     if (ret == AIO_NOTCANCELED) {
@@ -754,19 +772,7 @@ static void raw_aio_cancel(BlockDriverAIOCB *blockacb)
         while (aio_error(&acb->aiocb) == EINPROGRESS);
     }
 
-    /* remove the callback from the queue */
-    pacb = &posix_aio_state->first_aio;
-    for(;;) {
-        if (*pacb == NULL) {
-            break;
-        } else if (*pacb == acb) {
-            *pacb = acb->next;
-            raw_fd_pool_put(acb);
-            qemu_aio_release(acb);
-            break;
-        }
-        pacb = &acb->next;
-    }
+    raw_aio_remove(acb);
 }
 #endif
 
