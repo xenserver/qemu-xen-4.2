@@ -1224,6 +1224,8 @@ int xenstore_vm_write(int domid, const char *key, const char *value)
     int rc = -1;
 
     path = xenstore_vm_key_path(domid, key);
+    if (!path)
+        return 0;
 
     rc = xs_write(xsh, XBT_NULL, path, value, strlen(value));
     if (rc == 0) {
