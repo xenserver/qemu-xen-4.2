@@ -22,6 +22,41 @@
 #include "pt-msi.h"
 #include <sys/mman.h>
 
+static void msi_set_enable(struct pt_dev *dev, int en)
+{
+    uint16_t val = 0;
+    uint32_t address = 0;
+    if (!dev->msi)
+        return;
+
+    address = dev->msi->ctrl_offset;
+    if (!address)
+        return;
+
+    val = pci_read_word(dev->pci_dev, address);
+    val &= ~PCI_MSI_FLAGS_ENABLE;
+    val |= en & PCI_MSI_FLAGS_ENABLE;
+    pci_write_word(dev->pci_dev, address, val);
+}
+
+static void msix_set_enable(struct pt_dev *dev, int en)
+{
+    uint16_t val = 0;
+    uint32_t address = 0;
+    if (!dev->msix)
+        return;
+
+    address = dev->msix->ctrl_offset;
+    if (!address)
+        return;
+
+    val = pci_read_word(dev->pci_dev, address);
+    val &= ~PCI_MSIX_ENABLE;
+    if (en)
+        val |= PCI_MSIX_ENABLE;
+    pci_write_word(dev->pci_dev, address, val);
+}
+
 /* MSI virtuailization functions */
 
 /*
@@ -95,6 +130,141 @@ int pt_msi_update(struct pt_dev *d)
                                      d->msi->pirq, gflags);
 }
 
+void pt_msi_disable(struct pt_dev *dev)
+{
+    PCIDevice *d = &dev->dev;
+    uint8_t gvec = 0;
+    uint32_t gflags = 0;
+    uint64_t addr = 0;
+    uint8_t e_device = 0;
+    uint8_t e_intx = 0;
+
+    msi_set_enable(dev, 0);
+
+    e_device = (dev->dev.devfn >> 3) & 0x1f;
+    /* fix virtual interrupt pin to INTA# */
+    e_intx = 0;
+
+    if (dev->msi_trans_en)
+    {
+        if (xc_domain_unbind_pt_irq(xc_handle, domid, dev->msi->pirq,
+                                    PT_IRQ_TYPE_MSI_TRANSLATE, 0,
+                                    e_device, e_intx, 0))
+        {
+            PT_LOG("Error: Unbinding pt irq for MSI-INTx failed!\n");
+            goto out;
+        }
+    }
+    else if (!(dev->msi->flags & MSI_FLAG_UNINIT))
+    {
+        /* get vector, address, flags info, etc. */
+        gvec = dev->msi->data & 0xFF;
+        addr = (uint64_t)dev->msi->addr_hi << 32 | dev->msi->addr_lo;
+        gflags = __get_msi_gflags(dev->msi->data, addr);
+
+        PT_LOG("Unbind msi with pirq %x, gvec %x\n",
+                dev->msi->pirq, gvec);
+
+        if (xc_domain_unbind_msi_irq(xc_handle, domid, gvec,
+                                        dev->msi->pirq, gflags))
+        {
+            PT_LOG("Error: Unbinding of MSI failed. [%02x:%02x.%x]\n", 
+                pci_bus_num(d->bus), 
+                ((d->devfn >> 3) & 0x1F), (d->devfn & 0x7));
+            goto out;
+        }
+    }
+
+    if (dev->msi->pirq != -1)
+    {
+        PT_LOG("Unmap msi with pirq %x\n", dev->msi->pirq);
+
+        if (xc_physdev_unmap_pirq(xc_handle, domid, dev->msi->pirq))
+        {
+            PT_LOG("Error: Unmapping of MSI failed. [%02x:%02x.%x]\n", 
+               pci_bus_num(d->bus), 
+               ((d->devfn >> 3) & 0x1F), (d->devfn & 0x7));
+            goto out;
+        }
+    }
+    /* unbind INTx */
+    if (dev->msi_trans_cap && !dev->msi_trans_en)
+    {
+        if (xc_domain_unbind_pt_irq(xc_handle, domid, dev->machine_irq,
+                        PT_IRQ_TYPE_PCI, 0, e_device, e_intx, 0))
+            PT_LOG("Error: Unbinding of interrupt failed!\n");
+    }
+
+out:
+    /* clear msi info */
+    dev->msi->flags = 0;
+    dev->msi->pirq = -1;
+    dev->msi_trans_en = 0;
+}
+
+/* MSI-INTx translation virtulization functions */
+int pt_enable_msi_translate(struct pt_dev* dev)
+{
+    uint8_t e_device = 0;
+    uint8_t e_intx = 0;
+
+    if (!(dev->msi && dev->msi_trans_cap))
+        return -1;
+
+    msi_set_enable(dev, 0);
+    dev->msi_trans_en = 0;
+
+    if (pt_msi_setup(dev))
+    {
+        PT_LOG("Error: MSI-INTx translation MSI setup failed, fallback\n");
+        return -1;
+    }
+
+    e_device = (dev->dev.devfn >> 3) & 0x1f;
+    /* fix virtual interrupt pin to INTA# */
+    e_intx = 0;
+
+    if (xc_domain_bind_pt_irq(xc_handle, domid, dev->msi->pirq,
+                               PT_IRQ_TYPE_MSI_TRANSLATE, 0,
+                               e_device, e_intx, 0))
+    {
+        PT_LOG("Error: MSI-INTx translation bind failed, fallback\n");
+        return -1;
+    }
+
+    msi_set_enable(dev, 1);
+    dev->msi_trans_en = 1;
+
+    return 0;
+}
+
+void pt_disable_msi_translate(struct pt_dev *dev)
+{
+    uint8_t e_device = 0;
+    uint8_t e_intx = 0;
+
+    /* MSI_ENABLE bit should be disabed until the new handler is set */
+    msi_set_enable(dev, 0);
+
+    e_device = (dev->dev.devfn >> 3) & 0x1f;
+    /* fix virtual interrupt pin to INTA# */
+    e_intx = 0;
+
+    if (xc_domain_unbind_pt_irq(xc_handle, domid, dev->msi->pirq,
+                                 PT_IRQ_TYPE_MSI_TRANSLATE, 0,
+                                 e_device, e_intx, 0))
+        PT_LOG("Error: Unbinding pt irq for MSI-INTx failed!\n");
+
+    if (dev->machine_irq)
+    {
+        if (xc_domain_bind_pt_pci_irq(xc_handle, domid, dev->machine_irq,
+                                       0, e_device, e_intx))
+            PT_LOG("Error: Rebinding of interrupt failed!\n");
+    }
+
+    dev->msi_trans_en = 0;
+}
+
 /* MSI-X virtulization functions */
 static void mask_physical_msix_entry(struct pt_dev *dev, int entry_nr, int mask)
 {
@@ -157,6 +327,52 @@ int pt_msix_update(struct pt_dev *dev)
     }
 
     return 0;
+}
+
+void pt_msix_disable(struct pt_dev *dev)
+{
+    PCIDevice *d = &dev->dev;
+    uint8_t gvec = 0;
+    uint32_t gflags = 0;
+    uint64_t addr = 0;
+    int i = 0;
+    struct msix_entry_info *entry = NULL;
+
+    msix_set_enable(dev, 0);
+
+    for ( i = 0; i < dev->msix->total_entries; i++ )
+    {
+        entry = &dev->msix->msix_entry[i];
+
+        if (entry->pirq == -1)
+            continue;
+
+        gvec = entry->io_mem[2] & 0xff;
+        addr = *(uint64_t *)&entry->io_mem[0];
+        gflags = __get_msi_gflags(entry->io_mem[2], addr);
+
+        PT_LOG("Unbind msix with pirq %x, gvec %x\n",
+                entry->pirq, gvec);
+
+        if (xc_domain_unbind_msi_irq(xc_handle, domid, gvec,
+                                        entry->pirq, gflags))
+            PT_LOG("Error: Unbinding of MSI-X failed. [%02x:%02x.%x]\n", 
+                pci_bus_num(d->bus), 
+                ((d->devfn >> 3) & 0x1F), (d->devfn & 0x7));
+        else
+        {
+            PT_LOG("Unmap msix with pirq %x\n", entry->pirq);
+
+            if (xc_physdev_unmap_pirq(xc_handle,
+                                         domid, entry->pirq))
+                PT_LOG("Error: Unmapping of MSI-X failed. [%02x:%02x.%x]\n",
+                    pci_bus_num(d->bus),
+                    ((d->devfn >> 3) & 0x1F), (d->devfn & 0x7));
+        }
+        /* clear msi-x info */
+        entry->pirq = -1;
+        entry->flags = 0;
+    }
 }
 
 static void pci_msix_invalid_write(void *opaque, target_phys_addr_t addr,

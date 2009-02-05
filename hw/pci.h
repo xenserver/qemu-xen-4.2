@@ -44,7 +44,7 @@ typedef struct PCIIORegion {
 
 struct PCIDevice {
     /* PCI config space */
-    uint8_t config[256];
+    uint8_t config[4096];
 
     /* the following fields are read only */
     PCIBus *bus;

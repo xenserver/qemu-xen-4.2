@@ -27,6 +27,7 @@
 #include "pci/pci.h"
 #include "pt-msi.h"
 #include "qemu-xen.h"
+#include <unistd.h>
 
 struct php_dev {
     struct pt_dev *pt_dev;
@@ -60,6 +61,10 @@ static uint32_t pt_irqpin_reg_init(struct pt_dev *ptdev,
     struct pt_reg_info_tbl *reg, uint32_t real_offset);
 static uint32_t pt_bar_reg_init(struct pt_dev *ptdev,
     struct pt_reg_info_tbl *reg, uint32_t real_offset);
+static uint32_t pt_pmc_reg_init(struct pt_dev *ptdev,
+    struct pt_reg_info_tbl *reg, uint32_t real_offset);
+static uint32_t pt_pmcsr_reg_init(struct pt_dev *ptdev,
+    struct pt_reg_info_tbl *reg, uint32_t real_offset);
 static uint32_t pt_linkctrl_reg_init(struct pt_dev *ptdev,
     struct pt_reg_info_tbl *reg, uint32_t real_offset);
 static uint32_t pt_devctrl2_reg_init(struct pt_dev *ptdev,
@@ -77,6 +82,8 @@ static uint32_t pt_msgdata_reg_init(struct pt_dev *ptdev,
 static uint32_t pt_msixctrl_reg_init(struct pt_dev *ptdev,
     struct pt_reg_info_tbl *reg, uint32_t real_offset);
 static uint8_t pt_reg_grp_size_init(struct pt_dev *ptdev,
+    struct pt_reg_grp_info_tbl *grp_reg, uint32_t base_offset);
+static uint8_t pt_pm_size_init(struct pt_dev *ptdev,
     struct pt_reg_grp_info_tbl *grp_reg, uint32_t base_offset);
 static uint8_t pt_msi_size_init(struct pt_dev *ptdev,
     struct pt_reg_grp_info_tbl *grp_reg, uint32_t base_offset);
@@ -146,6 +153,24 @@ static int pt_msgdata_reg_write(struct pt_dev *ptdev,
 static int pt_msixctrl_reg_write(struct pt_dev *ptdev, 
     struct pt_reg_tbl *cfg_entry, 
     uint16_t *value, uint16_t dev_value, uint16_t valid_mask);
+static int pt_byte_reg_restore(struct pt_dev *ptdev, 
+    struct pt_reg_tbl *cfg_entry, 
+    uint32_t real_offset, uint8_t dev_value, uint8_t *value);
+static int pt_word_reg_restore(struct pt_dev *ptdev, 
+    struct pt_reg_tbl *cfg_entry, 
+    uint32_t real_offset, uint16_t dev_value, uint16_t *value);
+static int pt_long_reg_restore(struct pt_dev *ptdev, 
+    struct pt_reg_tbl *cfg_entry, 
+    uint32_t real_offset, uint32_t dev_value, uint32_t *value);
+static int pt_cmd_reg_restore(struct pt_dev *ptdev, 
+    struct pt_reg_tbl *cfg_entry, 
+    uint32_t real_offset, uint16_t dev_value, uint16_t *value);
+static int pt_pmcsr_reg_restore(struct pt_dev *ptdev, 
+    struct pt_reg_tbl *cfg_entry, 
+    uint32_t real_offset, uint16_t dev_value, uint16_t *value);
+static int pt_bar_reg_restore(struct pt_dev *ptdev, 
+    struct pt_reg_tbl *cfg_entry, 
+    uint32_t real_offset, uint32_t dev_value, uint32_t *value);
 
 /* pt_reg_info_tbl declaration
  * - only for emulated register (either a part or whole bit).
@@ -166,6 +191,7 @@ static struct pt_reg_info_tbl pt_emu_reg_header0_tbl[] = {
         .init       = pt_vendor_reg_init,
         .u.w.read   = pt_word_reg_read,
         .u.w.write  = pt_word_reg_write,
+        .u.w.restore  = NULL,
     },
     /* Device ID reg */
     {
@@ -177,6 +203,7 @@ static struct pt_reg_info_tbl pt_emu_reg_header0_tbl[] = {
         .init       = pt_device_reg_init,
         .u.w.read   = pt_word_reg_read,
         .u.w.write  = pt_word_reg_write,
+        .u.w.restore  = NULL,
     },
     /* Command reg */
     {
@@ -188,6 +215,7 @@ static struct pt_reg_info_tbl pt_emu_reg_header0_tbl[] = {
         .init       = pt_common_reg_init,
         .u.w.read   = pt_word_reg_read,
         .u.w.write  = pt_cmd_reg_write,
+        .u.w.restore  = pt_cmd_reg_restore,
     },
     /* Capabilities Pointer reg */
     {
@@ -199,6 +227,7 @@ static struct pt_reg_info_tbl pt_emu_reg_header0_tbl[] = {
         .init       = pt_ptr_reg_init,
         .u.b.read   = pt_byte_reg_read,
         .u.b.write  = pt_byte_reg_write,
+        .u.b.restore  = NULL,
     },
     /* Status reg */
     /* use emulated Cap Ptr value to initialize, 
@@ -213,6 +242,7 @@ static struct pt_reg_info_tbl pt_emu_reg_header0_tbl[] = {
         .init       = pt_status_reg_init,
         .u.w.read   = pt_word_reg_read,
         .u.w.write  = pt_word_reg_write,
+        .u.w.restore  = NULL,
     },
     /* Cache Line Size reg */
     {
@@ -224,6 +254,7 @@ static struct pt_reg_info_tbl pt_emu_reg_header0_tbl[] = {
         .init       = pt_common_reg_init,
         .u.b.read   = pt_byte_reg_read,
         .u.b.write  = pt_byte_reg_write,
+        .u.b.restore  = pt_byte_reg_restore,
     },
     /* Latency Timer reg */
     {
@@ -235,6 +266,7 @@ static struct pt_reg_info_tbl pt_emu_reg_header0_tbl[] = {
         .init       = pt_common_reg_init,
         .u.b.read   = pt_byte_reg_read,
         .u.b.write  = pt_byte_reg_write,
+        .u.b.restore  = pt_byte_reg_restore,
     },
     /* Header Type reg */
     {
@@ -246,6 +278,7 @@ static struct pt_reg_info_tbl pt_emu_reg_header0_tbl[] = {
         .init       = pt_common_reg_init,
         .u.b.read   = pt_byte_reg_read,
         .u.b.write  = pt_byte_reg_write,
+        .u.b.restore  = NULL,
     },
     /* Interrupt Line reg */
     {
@@ -257,6 +290,7 @@ static struct pt_reg_info_tbl pt_emu_reg_header0_tbl[] = {
         .init       = pt_common_reg_init,
         .u.b.read   = pt_byte_reg_read,
         .u.b.write  = pt_byte_reg_write,
+        .u.b.restore  = NULL,
     },
     /* Interrupt Pin reg */
     {
@@ -268,6 +302,7 @@ static struct pt_reg_info_tbl pt_emu_reg_header0_tbl[] = {
         .init       = pt_irqpin_reg_init,
         .u.b.read   = pt_byte_reg_read,
         .u.b.write  = pt_byte_reg_write,
+        .u.b.restore  = NULL,
     },
     /* BAR 0 reg */
     /* mask of BAR need to be decided later, depends on IO/MEM type */
@@ -278,6 +313,7 @@ static struct pt_reg_info_tbl pt_emu_reg_header0_tbl[] = {
         .init       = pt_bar_reg_init,
         .u.dw.read  = pt_bar_reg_read,
         .u.dw.write = pt_bar_reg_write,
+        .u.dw.restore = pt_bar_reg_restore,
     },
     /* BAR 1 reg */
     {
@@ -287,6 +323,7 @@ static struct pt_reg_info_tbl pt_emu_reg_header0_tbl[] = {
         .init       = pt_bar_reg_init,
         .u.dw.read  = pt_bar_reg_read,
         .u.dw.write = pt_bar_reg_write,
+        .u.dw.restore = pt_bar_reg_restore,
     },
     /* BAR 2 reg */
     {
@@ -296,6 +333,7 @@ static struct pt_reg_info_tbl pt_emu_reg_header0_tbl[] = {
         .init       = pt_bar_reg_init,
         .u.dw.read  = pt_bar_reg_read,
         .u.dw.write = pt_bar_reg_write,
+        .u.dw.restore = pt_bar_reg_restore,
     },
     /* BAR 3 reg */
     {
@@ -305,6 +343,7 @@ static struct pt_reg_info_tbl pt_emu_reg_header0_tbl[] = {
         .init       = pt_bar_reg_init,
         .u.dw.read  = pt_bar_reg_read,
         .u.dw.write = pt_bar_reg_write,
+        .u.dw.restore = pt_bar_reg_restore,
     },
     /* BAR 4 reg */
     {
@@ -314,6 +353,7 @@ static struct pt_reg_info_tbl pt_emu_reg_header0_tbl[] = {
         .init       = pt_bar_reg_init,
         .u.dw.read  = pt_bar_reg_read,
         .u.dw.write = pt_bar_reg_write,
+        .u.dw.restore = pt_bar_reg_restore,
     },
     /* BAR 5 reg */
     {
@@ -323,6 +363,7 @@ static struct pt_reg_info_tbl pt_emu_reg_header0_tbl[] = {
         .init       = pt_bar_reg_init,
         .u.dw.read  = pt_bar_reg_read,
         .u.dw.write = pt_bar_reg_write,
+        .u.dw.restore = pt_bar_reg_restore,
     },
     /* Expansion ROM BAR reg */
     {
@@ -334,6 +375,7 @@ static struct pt_reg_info_tbl pt_emu_reg_header0_tbl[] = {
         .init       = pt_bar_reg_init,
         .u.dw.read  = pt_long_reg_read,
         .u.dw.write = pt_exp_rom_bar_reg_write,
+        .u.dw.restore = pt_long_reg_restore,
     },
     {
         .size = 0,
@@ -352,6 +394,7 @@ static struct pt_reg_info_tbl pt_emu_reg_pm_tbl[] = {
         .init       = pt_ptr_reg_init,
         .u.b.read   = pt_byte_reg_read,
         .u.b.write  = pt_byte_reg_write,
+        .u.b.restore  = NULL,
     },
     /* Power Management Capabilities reg */
     {
@@ -359,10 +402,11 @@ static struct pt_reg_info_tbl pt_emu_reg_pm_tbl[] = {
         .size       = 2,
         .init_val   = 0x0000,
         .ro_mask    = 0xFFFF,
-        .emu_mask   = 0xFFE8,
-        .init       = pt_common_reg_init,
+        .emu_mask   = 0xF9C8,
+        .init       = pt_pmc_reg_init,
         .u.w.read   = pt_word_reg_read,
         .u.w.write  = pt_word_reg_write,
+        .u.w.restore  = NULL,
     },
     /* PCI Power Management Control/Status reg */
     {
@@ -370,21 +414,11 @@ static struct pt_reg_info_tbl pt_emu_reg_pm_tbl[] = {
         .size       = 2,
         .init_val   = 0x0008,
         .ro_mask    = 0x60FC,
-        .emu_mask   = 0xFF0B,
-        .init       = pt_common_reg_init,
+        .emu_mask   = 0x8100,
+        .init       = pt_pmcsr_reg_init,
         .u.w.read   = pt_word_reg_read,
         .u.w.write  = pt_pmcsr_reg_write,
-    },
-    /* Data reg */
-    {
-        .offset     = PCI_PM_DATA_REGISTER,
-        .size       = 1,
-        .init_val   = 0x00,
-        .ro_mask    = 0xFF,
-        .emu_mask   = 0xFF,
-        .init       = pt_common_reg_init,
-        .u.b.read   = pt_byte_reg_read,
-        .u.b.write  = pt_byte_reg_write,
+        .u.w.restore  = pt_pmcsr_reg_restore,
     },
     {
         .size = 0,
@@ -403,6 +437,7 @@ static struct pt_reg_info_tbl pt_emu_reg_vpd_tbl[] = {
         .init       = pt_ptr_reg_init,
         .u.b.read   = pt_byte_reg_read,
         .u.b.write  = pt_byte_reg_write,
+        .u.b.restore  = NULL,
     },
     {
         .size = 0,
@@ -421,6 +456,7 @@ static struct pt_reg_info_tbl pt_emu_reg_vendor_tbl[] = {
         .init       = pt_ptr_reg_init,
         .u.b.read   = pt_byte_reg_read,
         .u.b.write  = pt_byte_reg_write,
+        .u.b.restore  = NULL,
     },
     {
         .size = 0,
@@ -439,6 +475,7 @@ static struct pt_reg_info_tbl pt_emu_reg_pcie_tbl[] = {
         .init       = pt_ptr_reg_init,
         .u.b.read   = pt_byte_reg_read,
         .u.b.write  = pt_byte_reg_write,
+        .u.b.restore  = NULL,
     },
     /* Device Capabilities reg */
     {
@@ -450,6 +487,7 @@ static struct pt_reg_info_tbl pt_emu_reg_pcie_tbl[] = {
         .init       = pt_common_reg_init,
         .u.dw.read  = pt_long_reg_read,
         .u.dw.write = pt_long_reg_write,
+        .u.dw.restore = NULL,
     },
     /* Device Control reg */
     {
@@ -461,6 +499,7 @@ static struct pt_reg_info_tbl pt_emu_reg_pcie_tbl[] = {
         .init       = pt_common_reg_init,
         .u.w.read   = pt_word_reg_read,
         .u.w.write  = pt_devctrl_reg_write,
+        .u.w.restore  = pt_word_reg_restore,
     },
     /* Link Control reg */
     {
@@ -472,6 +511,7 @@ static struct pt_reg_info_tbl pt_emu_reg_pcie_tbl[] = {
         .init       = pt_linkctrl_reg_init,
         .u.w.read   = pt_word_reg_read,
         .u.w.write  = pt_linkctrl_reg_write,
+        .u.w.restore  = pt_word_reg_restore,
     },
     /* Device Control 2 reg */
     {
@@ -483,6 +523,7 @@ static struct pt_reg_info_tbl pt_emu_reg_pcie_tbl[] = {
         .init       = pt_devctrl2_reg_init,
         .u.w.read   = pt_word_reg_read,
         .u.w.write  = pt_devctrl2_reg_write,
+        .u.w.restore  = pt_word_reg_restore,
     },
     /* Link Control 2 reg */
     {
@@ -494,6 +535,7 @@ static struct pt_reg_info_tbl pt_emu_reg_pcie_tbl[] = {
         .init       = pt_linkctrl2_reg_init,
         .u.w.read   = pt_word_reg_read,
         .u.w.write  = pt_linkctrl2_reg_write,
+        .u.w.restore  = pt_word_reg_restore,
     },
     {
         .size = 0,
@@ -512,6 +554,7 @@ static struct pt_reg_info_tbl pt_emu_reg_msi_tbl[] = {
         .init       = pt_ptr_reg_init,
         .u.b.read   = pt_byte_reg_read,
         .u.b.write  = pt_byte_reg_write,
+        .u.b.restore  = NULL,
     },
     /* Message Control reg */
     {
@@ -523,6 +566,7 @@ static struct pt_reg_info_tbl pt_emu_reg_msi_tbl[] = {
         .init       = pt_msgctrl_reg_init,
         .u.w.read   = pt_word_reg_read,
         .u.w.write  = pt_msgctrl_reg_write,
+        .u.w.restore  = NULL,
     },
     /* Message Address reg */
     {
@@ -534,6 +578,7 @@ static struct pt_reg_info_tbl pt_emu_reg_msi_tbl[] = {
         .init       = pt_msgaddr32_reg_init,
         .u.dw.read  = pt_long_reg_read,
         .u.dw.write = pt_msgaddr32_reg_write,
+        .u.dw.restore = NULL,
     },
     /* Message Upper Address reg (if PCI_MSI_FLAGS_64BIT set) */
     {
@@ -545,6 +590,7 @@ static struct pt_reg_info_tbl pt_emu_reg_msi_tbl[] = {
         .init       = pt_msgaddr64_reg_init,
         .u.dw.read  = pt_long_reg_read,
         .u.dw.write = pt_msgaddr64_reg_write,
+        .u.dw.restore = NULL,
     },
     /* Message Data reg (16 bits of data for 32-bit devices) */
     {
@@ -556,6 +602,7 @@ static struct pt_reg_info_tbl pt_emu_reg_msi_tbl[] = {
         .init       = pt_msgdata_reg_init,
         .u.w.read   = pt_word_reg_read,
         .u.w.write  = pt_msgdata_reg_write,
+        .u.w.restore  = NULL,
     },
     /* Message Data reg (16 bits of data for 64-bit devices) */
     {
@@ -567,6 +614,7 @@ static struct pt_reg_info_tbl pt_emu_reg_msi_tbl[] = {
         .init       = pt_msgdata_reg_init,
         .u.w.read   = pt_word_reg_read,
         .u.w.write  = pt_msgdata_reg_write,
+        .u.w.restore  = NULL,
     },
     {
         .size = 0,
@@ -585,6 +633,7 @@ static struct pt_reg_info_tbl pt_emu_reg_msix_tbl[] = {
         .init       = pt_ptr_reg_init,
         .u.b.read   = pt_byte_reg_read,
         .u.b.write  = pt_byte_reg_write,
+        .u.b.restore  = NULL,
     },
     /* Message Control reg */
     {
@@ -596,6 +645,7 @@ static struct pt_reg_info_tbl pt_emu_reg_msix_tbl[] = {
         .init       = pt_msixctrl_reg_init,
         .u.w.read   = pt_word_reg_read,
         .u.w.write  = pt_msixctrl_reg_write,
+        .u.w.restore  = NULL,
     },
     {
         .size = 0,
@@ -624,7 +674,7 @@ static const struct pt_reg_grp_info_tbl pt_emu_reg_grp_tbl[] = {
         .grp_id     = PCI_CAP_ID_PM,
         .grp_type   = GRP_TYPE_EMU,
         .grp_size   = PCI_PM_SIZEOF,
-        .size_init  = pt_reg_grp_size_init,
+        .size_init  = pt_pm_size_init,
         .emu_reg_tbl= pt_emu_reg_pm_tbl,
     },
     /* AGP Capability Structure reg group */
@@ -775,23 +825,6 @@ static int get_next_keyval(char **option, char **key, char **val)
     *option = opt;
 
     return 0;
-}
-
-static void msi_set_enable(struct pt_dev *ptdev, int en)
-{
-    uint16_t val;
-    uint32_t address;
-    if (!ptdev->msi)
-        return;
-
-    address = ptdev->msi->ctrl_offset;
-    if (!address)
-        return;
-
-    val = pci_read_word(ptdev->pci_dev, address);
-    val &= ~PCI_MSI_FLAGS_ENABLE;
-    val |= en & PCI_MSI_FLAGS_ENABLE;
-    pci_write_word(ptdev->pci_dev, address, val);
 }
 
 /* Insert a new pass-through device into a specific pci slot.
@@ -1084,6 +1117,7 @@ static void pt_pci_write_config(PCIDevice *d, uint32_t address, uint32_t val,
 {
     struct pt_dev *assigned_device = (struct pt_dev *)d;
     struct pci_dev *pci_dev = assigned_device->pci_dev;
+    struct pt_pm_info *pm_state = assigned_device->pm_state;
     struct pt_reg_grp_tbl *reg_grp_entry = NULL;
     struct pt_reg_grp_info_tbl *reg_grp = NULL;
     struct pt_reg_tbl *reg_entry = NULL;
@@ -1143,6 +1177,13 @@ static void pt_pci_write_config(PCIDevice *d, uint32_t address, uint32_t val,
             pci_bus_num(d->bus), ((d->devfn >> 3) & 0x1F), 
             (d->devfn & 0x7), address, len);
     }
+
+    /* check power state transition flags */
+    if (pm_state->flags & PT_FLAG_TRANSITING)
+        /* can't accept untill previous power state transition is completed.
+         * so finished previous request here.
+         */
+        qemu_run_one_timer(pm_state->pm_timer);
 
     /* find register group entry */
     reg_grp_entry = pt_find_reg_grp(assigned_device, address);
@@ -1274,6 +1315,11 @@ out:
         break;
     }
 
+    if (pm_state->flags & PT_FLAG_TRANSITING)
+        /* set QEMUTimer */
+        qemu_mod_timer(pm_state->pm_timer,
+            (qemu_get_clock(rt_clock) + pm_state->pm_delay));
+
 exit:
     return;
 }
@@ -1282,6 +1328,7 @@ static uint32_t pt_pci_read_config(PCIDevice *d, uint32_t address, int len)
 {
     struct pt_dev *assigned_device = (struct pt_dev *)d;
     struct pci_dev *pci_dev = assigned_device->pci_dev;
+    struct pt_pm_info *pm_state = assigned_device->pm_state;
     uint32_t val = 0xFFFFFFFF;
     struct pt_reg_grp_tbl *reg_grp_entry = NULL;
     struct pt_reg_grp_info_tbl *reg_grp = NULL;
@@ -1323,6 +1370,13 @@ static uint32_t pt_pci_read_config(PCIDevice *d, uint32_t address, int len)
             address, len);
         goto exit;
     }
+
+    /* check power state transition flags */
+    if (pm_state->flags & PT_FLAG_TRANSITING)
+        /* can't accept untill previous power state transition is completed.
+         * so finished previous request here.
+         */
+        qemu_run_one_timer(pm_state->pm_timer);
 
     /* find register group entry */
     reg_grp_entry = pt_find_reg_grp(assigned_device, address);
@@ -1626,6 +1680,35 @@ uint8_t find_cap_offset(struct pci_dev *pci_dev, uint8_t cap)
     return 0;
 }
 
+uint32_t find_ext_cap_offset(struct pci_dev *pci_dev, uint32_t cap)
+{
+    uint32_t header = 0;
+    int max_cap = 480;
+    int pos = 0x100;
+
+    do
+    {
+        header = pci_read_long(pci_dev, pos);
+        /*
+         * If we have no capabilities, this is indicated by cap ID,
+         * cap version and next pointer all being 0.
+         */
+        if (header == 0)
+            break;
+
+        if (PCI_EXT_CAP_ID(header) == cap)
+            return pos;
+
+        pos = PCI_EXT_CAP_NEXT(header);
+        if (pos < 0x100)
+            break;
+
+        max_cap--;
+    }while (max_cap > 0);
+
+    return 0;
+}
+
 /* parse BAR */
 static int pt_bar_reg_parse(
         struct pt_dev *ptdev, struct pt_reg_info_tbl *reg)
@@ -1732,6 +1815,287 @@ static void pt_bar_mapping(struct pt_dev *ptdev, int io_enable, int mem_enable)
     }
 
     return;
+}
+
+/* check power state transition */
+int check_power_state(struct pt_dev *ptdev)
+{
+    struct pt_pm_info *pm_state = ptdev->pm_state;
+    PCIDevice *d = &ptdev->dev;
+    uint16_t read_val = 0;
+    uint16_t cur_state = 0;
+
+    /* get current power state */
+    read_val = pci_read_word(ptdev->pci_dev,
+                                (pm_state->pm_base + PCI_PM_CTRL));
+    cur_state = read_val & PCI_PM_CTRL_STATE_MASK;
+
+    if (pm_state->req_state != cur_state)
+    {
+        PT_LOG("Error: Failed to change power state. " 
+            "[%02x:%02x.%x][requested state:%d][current state:%d]\n", 
+            pci_bus_num(d->bus), ((d->devfn >> 3) & 0x1F), (d->devfn & 0x7), 
+            pm_state->req_state, cur_state);
+        return -1;
+    }
+    return 0;
+}
+
+/* save AER register */
+static void pt_aer_reg_save(struct pt_dev *ptdev)
+{
+    PCIDevice *d = &ptdev->dev;
+    uint32_t aer_base = ptdev->pm_state->aer_base;
+    int i = 0;
+    /* Root Port and Root Complex Event Collector need size expansion */
+    int aer_size = 0x2c;
+
+    for (i=0; i < aer_size; i+=4)
+    {
+        switch (i) {
+        /* after reset, following register values should be restored.
+         * So, save them.
+         */
+        case PCI_ERR_UNCOR_MASK:
+        case PCI_ERR_UNCOR_SEVER:
+        case PCI_ERR_COR_MASK:
+        case PCI_ERR_CAP:
+            *(uint32_t*)(d->config + (aer_base + i))
+                 = pci_read_long(ptdev->pci_dev, (aer_base + i));
+            break;
+        default:
+            break;
+        }
+    }
+}
+
+/* restore AER register */
+static void pt_aer_reg_restore(struct pt_dev *ptdev)
+{
+    PCIDevice *d = &ptdev->dev;
+    uint32_t aer_base = ptdev->pm_state->aer_base;
+    int i = 0;
+    uint32_t config = 0;
+    /* Root Port and Root Complex Event Collector need size expansion */
+    int aer_size = 0x2c;
+
+    for (i=0; i < aer_size; i+=4)
+    {
+        switch (i) {
+        /* the following registers should be reconfigured to correct values
+         * after reset. restore them.
+         */
+        case PCI_ERR_UNCOR_MASK:
+        case PCI_ERR_UNCOR_SEVER:
+        case PCI_ERR_COR_MASK:
+        case PCI_ERR_CAP:
+            config = *(uint32_t*)(d->config + (aer_base + i));
+            pci_write_long(ptdev->pci_dev, (aer_base + i), config);
+            break;
+        /* other registers should not be reconfigured after reset 
+         * if there is no reason
+         */
+        default:
+            break;
+        }
+    }
+}
+
+/* reset Interrupt and I/O resource  */
+void pt_reset_interrupt_and_io_mapping(struct pt_dev *ptdev)
+{
+    PCIDevice *d = &ptdev->dev;
+    PCIIORegion *r;
+    int i = 0;
+
+    /* disable MSI/MSI-X and MSI-INTx translation */
+    if (ptdev->msi)
+        pt_msi_disable(ptdev);
+    if (ptdev->msix)
+        pt_msix_disable(ptdev);
+
+    /* clear all virtual region address */
+    for (i=0; i<PCI_NUM_REGIONS; i++)
+    {
+        r = &d->io_regions[i];
+        r->addr = -1;
+    }
+
+    /* unmapping BAR */
+    pt_bar_mapping(ptdev, 0, 0);
+}
+
+/* restore a part of I/O device register */
+static void pt_config_restore(struct pt_dev *ptdev)
+{
+    struct pt_reg_grp_tbl *reg_grp_entry = NULL;
+    struct pt_reg_grp_info_tbl *reg_grp = NULL;
+    struct pt_reg_tbl *reg_entry = NULL;
+    struct pt_reg_info_tbl *reg = NULL;
+    uint32_t real_offset = 0;
+    uint32_t read_val = 0;
+    uint32_t val = 0;
+    int ret = 0;
+    PCIDevice *d = &ptdev->dev;
+
+    /* find emulate register group entry */
+    LIST_FOREACH(reg_grp_entry, &ptdev->reg_grp_tbl_head, entries)
+    {
+        /* find emulate register entry */
+        LIST_FOREACH(reg_entry, &reg_grp_entry->reg_tbl_head, entries)
+        {
+            reg = reg_entry->reg;
+
+            /* check whether restoring is needed */
+            if (!reg->u.b.restore)
+                continue;
+
+            real_offset = (reg_grp_entry->base_offset + reg->offset);
+
+            /* read I/O device register value */
+            ret = pci_read_block(ptdev->pci_dev, real_offset,
+                        (uint8_t *)&read_val, reg->size);
+
+            if (!ret)
+            {
+                PT_LOG("Error: pci_read_block failed. "
+                    "return value[%d].\n", ret);
+                memset((uint8_t *)&read_val, 0xff, reg->size);
+            }
+
+            val = 0;
+
+            /* restore based on register size */
+            switch (reg->size) {
+            case 1:
+                /* byte register */
+                ret = reg->u.b.restore(ptdev, reg_entry, real_offset,
+                           (uint8_t)read_val, (uint8_t *)&val);
+                break;
+            case 2:
+                /* word register */
+                ret = reg->u.w.restore(ptdev, reg_entry, real_offset,
+                           (uint16_t)read_val, (uint16_t *)&val);
+                break;
+            case 4:
+                /* double word register */
+                ret = reg->u.dw.restore(ptdev, reg_entry, real_offset,
+                           (uint32_t)read_val, (uint32_t *)&val);
+                break;
+            }
+
+            /* restoring error */
+            if (ret < 0)
+            {
+                /* exit I/O emulator */
+                PT_LOG("Internal error: Invalid restoring " 
+                    "return value[%d]. I/O emulator exit.\n", ret);
+                exit(1);
+            }
+
+#ifdef PT_DEBUG_PCI_CONFIG_ACCESS
+            PT_LOG("[%02x:%02x.%x]: address=%04x val=0x%08x len=%d\n", 
+                pci_bus_num(d->bus), (d->devfn >> 3) & 0x1F, (d->devfn & 0x7), 
+                real_offset, val, reg->size);
+#endif
+
+            ret = pci_write_block(ptdev->pci_dev, real_offset,
+                            (uint8_t *)&val, reg->size);
+
+            if (!ret)
+                PT_LOG("Error: pci_write_block failed. "
+                    "return value[%d].\n", ret);
+        }
+    }
+
+    /* if AER supported, restore it */
+    if (ptdev->pm_state->aer_base)
+        pt_aer_reg_restore(ptdev);
+}
+
+/* reinitialize all emulate registers */
+static void pt_config_reinit(struct pt_dev *ptdev)
+{
+    struct pt_reg_grp_tbl *reg_grp_entry = NULL;
+    struct pt_reg_grp_info_tbl *reg_grp = NULL;
+    struct pt_reg_tbl *reg_entry = NULL;
+    struct pt_reg_info_tbl *reg = NULL;
+
+    /* find emulate register group entry */
+    LIST_FOREACH(reg_grp_entry, &ptdev->reg_grp_tbl_head, entries)
+    {
+        /* find emulate register entry */
+        LIST_FOREACH(reg_entry, &reg_grp_entry->reg_tbl_head, entries)
+        {
+            reg = reg_entry->reg;
+            if (reg->init)
+                /* initialize emulate register */
+                reg_entry->data = reg->init(ptdev, reg_entry->reg,
+                                   (reg_grp_entry->base_offset + reg->offset));
+        }
+    }
+}
+
+void pt_from_d3hot_to_d0_with_reset(void *opaque)
+{
+    struct pt_dev *ptdev = opaque;
+    PCIDevice *d = &ptdev->dev;
+    struct pt_pm_info *pm_state = ptdev->pm_state;
+    uint8_t e_device = 0;
+    uint8_t e_intx = 0;
+    int ret = 0;
+
+    /* check power state */
+    ret = check_power_state(ptdev);
+
+    if (ret < 0)
+        goto out;
+
+    PT_LOG("Reinitialize PCI configuration registers " 
+        "due to power state transition with internal reset. [%02x:%02x.%x]\n", 
+        pci_bus_num(d->bus), ((d->devfn >> 3) & 0x1F), (d->devfn & 0x7));
+
+    /* restore a part of I/O device register */
+    pt_config_restore(ptdev);
+
+    /* reinitialize all emulate register */
+    pt_config_reinit(ptdev);
+
+    /* setup MSI-INTx translation if support */
+    ret = pt_enable_msi_translate(ptdev);
+
+    /* rebind machine_irq to device */
+    if (ret < 0 && ptdev->machine_irq != 0)
+    {
+        e_device = (ptdev->dev.devfn >> 3) & 0x1f;
+        /* fix virtual interrupt pin to INTA# */
+        e_intx = 0;
+
+        ret = xc_domain_bind_pt_pci_irq(xc_handle, domid, ptdev->machine_irq,
+                                       0, e_device, e_intx);
+        if (ret < 0)
+            PT_LOG("Error: Rebinding of interrupt failed! ret=%d\n", ret);
+    }
+
+out:
+    /* power state transition flags off */
+    pm_state->flags &= ~PT_FLAG_TRANSITING;
+
+    qemu_free_timer(pm_state->pm_timer);
+}
+
+void pt_default_power_transition(void *opaque)
+{
+    struct pt_dev *ptdev = opaque;
+    struct pt_pm_info *pm_state = ptdev->pm_state;
+
+    /* check power state */
+    check_power_state(ptdev);
+
+    /* power state transition flags off */
+    pm_state->flags &= ~PT_FLAG_TRANSITING;
+
+    qemu_free_timer(pm_state->pm_timer);
 }
 
 /* initialize emulate register */
@@ -1860,6 +2224,15 @@ static void pt_config_delete(struct pt_dev *ptdev)
         pt_msix_delete(ptdev);
     if (ptdev->msi)
         free(ptdev->msi);
+
+    /* free Power Management info table */
+    if (ptdev->pm_state)
+    {
+        if (ptdev->pm_state->pm_timer)
+            qemu_free_timer(ptdev->pm_state->pm_timer);
+
+        free(ptdev->pm_state);
+    }
 
     /* free all register group entry */
     while ((reg_grp_entry = ptdev->reg_grp_tbl_head.lh_first) != NULL)
@@ -2010,6 +2383,36 @@ static uint32_t pt_bar_reg_init(struct pt_dev *ptdev,
     return reg_field;
 }
 
+/* initialize Power Management Capabilities register */
+static uint32_t pt_pmc_reg_init(struct pt_dev *ptdev,
+        struct pt_reg_info_tbl *reg, uint32_t real_offset)
+{
+    PCIDevice *d = &ptdev->dev;
+
+    /* set Power Management Capabilities register */
+    ptdev->pm_state->pmc_field = *(uint16_t *)(d->config + real_offset);
+
+    return reg->init_val;
+}
+
+/* initialize PCI Power Management Control/Status register */
+static uint32_t pt_pmcsr_reg_init(struct pt_dev *ptdev,
+        struct pt_reg_info_tbl *reg, uint32_t real_offset)
+{
+    PCIDevice *d = &ptdev->dev;
+    uint16_t cap_ver  = 0;
+
+    /* check PCI Power Management support version */
+    cap_ver = ptdev->pm_state->pmc_field & PCI_PM_CAP_VER_MASK;
+
+    if (cap_ver > 2)
+        /* set No Soft Reset */
+        ptdev->pm_state->no_soft_reset = (*(uint8_t *)(d->config + real_offset)
+            & (uint8_t)PCI_PM_CTRL_NO_SOFT_RESET);
+
+    return reg->init_val;
+}
+
 /* initialize Link Control register */
 static uint32_t pt_linkctrl_reg_init(struct pt_dev *ptdev,
         struct pt_reg_info_tbl *reg, uint32_t real_offset)
@@ -2091,11 +2494,6 @@ static uint32_t pt_msgctrl_reg_init(struct pt_dev *ptdev,
     /* All register is 0 after reset, except first 4 byte */
     reg_field &= reg->ro_mask;
 
-    if (ptdev->msi_trans_cap) {
-        PT_LOG("Turning on MSI-INTx translation\n");
-        ptdev->msi_trans_en = 1;
-    }
-    
     return reg_field;
 }
 
@@ -2163,7 +2561,9 @@ static uint32_t pt_msixctrl_reg_init(struct pt_dev *ptdev,
         pci_write_word(pdev, real_offset, reg_field & ~PCI_MSIX_ENABLE);
         reg_field &= ~(PCI_MSIX_ENABLE | PCI_MSIX_MASK);
     }
-    
+
+    ptdev->msix->ctrl_offset = real_offset;
+
     return reg_field;
 }
 
@@ -2171,6 +2571,32 @@ static uint32_t pt_msixctrl_reg_init(struct pt_dev *ptdev,
 static uint8_t pt_reg_grp_size_init(struct pt_dev *ptdev,
         struct pt_reg_grp_info_tbl *grp_reg, uint32_t base_offset)
 {
+    return grp_reg->grp_size;
+}
+
+/* get Power Management Capability Structure register group size */
+static uint8_t pt_pm_size_init(struct pt_dev *ptdev,
+        struct pt_reg_grp_info_tbl *grp_reg, uint32_t base_offset)
+{
+    ptdev->pm_state = qemu_mallocz(sizeof(struct pt_pm_info));
+    if (!ptdev->pm_state)
+    {
+        /* exit I/O emulator */
+        PT_LOG("Error: Allocating pt_pm_info failed. I/O emulator exit.\n");
+        exit(1);
+    }
+
+    /* set Power Management Capability base offset */
+    ptdev->pm_state->pm_base = base_offset;
+
+    /* find AER register and set AER Capability base offset */
+    ptdev->pm_state->aer_base = find_ext_cap_offset(ptdev->pci_dev,
+        (uint32_t)PCI_EXT_CAP_ID_AER);
+
+    /* save AER register */
+    if (ptdev->pm_state->aer_base)
+        pt_aer_reg_save(ptdev);
+
     return grp_reg->grp_size;
 }
 
@@ -2198,7 +2624,8 @@ static uint8_t pt_msi_size_init(struct pt_dev *ptdev,
         exit(1);
     }
     memset(ptdev->msi, 0, sizeof(struct pt_msi_info));
-    
+    ptdev->msi->pirq = -1;
+
     return msi_size;
 }
 
@@ -2688,18 +3115,17 @@ static int pt_pmcsr_reg_write(struct pt_dev *ptdev,
         uint16_t *value, uint16_t dev_value, uint16_t valid_mask)
 {
     struct pt_reg_info_tbl *reg = cfg_entry->reg;
+    PCIDevice *d = &ptdev->dev;
     uint16_t writable_mask = 0;
     uint16_t throughable_mask = 0;
     uint16_t pmcsr_mask = (PCI_PM_CTRL_PME_ENABLE | 
                            PCI_PM_CTRL_DATA_SEL_MASK |
                            PCI_PM_CTRL_PME_STATUS);
+    struct pt_pm_info *pm_state = ptdev->pm_state;
+    uint16_t read_val = 0;
 
     /* modify emulate register */
     writable_mask = reg->emu_mask & ~reg->ro_mask & valid_mask & ~pmcsr_mask;
-    /* ignore it when the requested state neither D3 nor D0 */
-    if (((*value & PCI_PM_CTRL_STATE_MASK) != PCI_PM_CTRL_STATE_MASK) &&
-        ((*value & PCI_PM_CTRL_STATE_MASK) != 0))
-        writable_mask &= ~PCI_PM_CTRL_STATE_MASK;
 
     cfg_entry->data = ((*value & writable_mask) |
                        (cfg_entry->data & ~writable_mask));
@@ -2708,6 +3134,100 @@ static int pt_pmcsr_reg_write(struct pt_dev *ptdev,
     throughable_mask = ~reg->emu_mask & valid_mask;
     *value = ((*value & throughable_mask) |
               (dev_value & ~throughable_mask));
+
+    /* set I/O device power state */
+    pm_state->cur_state = (dev_value & PCI_PM_CTRL_STATE_MASK);
+
+    /* set Guest requested PowerState */
+    pm_state->req_state = (*value & PCI_PM_CTRL_STATE_MASK);
+
+    /* check power state transition or not */
+    if (pm_state->cur_state == pm_state->req_state)
+        /* not power state transition */
+        return 0;
+
+    /* check enable power state transition */
+    if ((pm_state->req_state != 0) &&
+        (pm_state->cur_state > pm_state->req_state))
+    {
+        PT_LOG("Error: Invalid power transition. "
+            "[%02x:%02x.%x][requested state:%d][current state:%d]\n",
+            pci_bus_num(d->bus), ((d->devfn >> 3) & 0x1F), (d->devfn & 0x7),
+            pm_state->req_state, pm_state->cur_state);
+
+        return 0;
+    }
+
+    /* check if this device supports the requested power state */
+    if (((pm_state->req_state == 1) && !(pm_state->pmc_field & PCI_PM_CAP_D1))
+        || ((pm_state->req_state == 2) &&
+        !(pm_state->pmc_field & PCI_PM_CAP_D2)))
+    {
+        PT_LOG("Error: Invalid power transition. "
+            "[%02x:%02x.%x][requested state:%d][current state:%d]\n",
+            pci_bus_num(d->bus), ((d->devfn >> 3) & 0x1F), (d->devfn & 0x7),
+            pm_state->req_state, pm_state->cur_state);
+
+        return 0;
+    }
+
+    /* in case of transition related to D3hot, it's necessary to wait 10 ms.
+     * But because writing to register will be performed later on actually,
+     * don't start QEMUTimer right now, just alloc and init QEMUTimer here.
+     */
+    if ((pm_state->cur_state == 3) || (pm_state->req_state == 3))
+    {
+        if (pm_state->req_state == 0)
+        {
+            /* alloc and init QEMUTimer */
+            if (!pm_state->no_soft_reset)
+            {
+                pm_state->pm_timer = qemu_new_timer(rt_clock,
+                    pt_from_d3hot_to_d0_with_reset, ptdev);
+
+                /* reset Interrupt and I/O resource mapping */
+                pt_reset_interrupt_and_io_mapping(ptdev);
+            }
+            else
+                pm_state->pm_timer = qemu_new_timer(rt_clock,
+                    pt_default_power_transition, ptdev);
+        }
+        else
+            /* alloc and init QEMUTimer */
+            pm_state->pm_timer = qemu_new_timer(rt_clock,
+                pt_default_power_transition, ptdev);
+
+        /* set power state transition delay */
+        pm_state->pm_delay = 10;
+
+        /* power state transition flags on */
+        pm_state->flags |= PT_FLAG_TRANSITING;
+    }
+    /* in case of transition related to D0, D1 and D2,
+     * no need to use QEMUTimer.
+     * So, we perfom writing to register here and then read it back.
+     */
+    else
+    {
+        /* write power state to I/O device register */
+        pci_write_word(ptdev->pci_dev,
+                        (pm_state->pm_base + PCI_PM_CTRL), *value);
+
+        /* in case of transition related to D2,
+         * it's necessary to wait 200 usec.
+         * But because QEMUTimer do not support microsec unit right now,
+         * so we do wait ourself here.
+         */
+        if ((pm_state->cur_state == 2) || (pm_state->req_state == 2))
+            usleep(200);
+
+        /* check power state */
+        check_power_state(ptdev);
+
+        /* recreate value for writing to I/O device register */
+        *value = pci_read_word(ptdev->pci_dev,
+                                (pm_state->pm_base + PCI_PM_CTRL));
+    }
 
     return 0;
 }
@@ -2743,8 +3263,7 @@ static int pt_linkctrl_reg_write(struct pt_dev *ptdev,
     struct pt_reg_info_tbl *reg = cfg_entry->reg;
     uint16_t writable_mask = 0;
     uint16_t throughable_mask = 0;
-    uint16_t linkctrl_mask = (PCI_EXP_LNKCTL_ASPM | 0x04 |
-                              PCI_EXP_LNKCTL_DISABLE |
+    uint16_t linkctrl_mask = (0x04 | PCI_EXP_LNKCTL_DISABLE |
                               PCI_EXP_LNKCTL_RETRAIN | 
                               0x0400 | 0x0800 | 0xF000);
 
@@ -2808,34 +3327,6 @@ static int pt_linkctrl2_reg_write(struct pt_dev *ptdev,
     return 0;
 }
 
-static void pt_unmap_msi_translate(struct pt_dev *ptdev)
-{
-    uint16_t e_device, e_intx;
-    int rc;
-
-    /* MSI_ENABLE bit should be disabed until the new handler is set */
-    msi_set_enable(ptdev, 0);
-
-    e_device = (ptdev->dev.devfn >> 3) & 0x1f;
-    /* fix virtual interrupt pin to INTA# */
-    e_intx = 0;
-    rc = xc_domain_unbind_pt_irq(xc_handle, domid, ptdev->msi->pirq,
-                                 PT_IRQ_TYPE_MSI_TRANSLATE, 0,
-                                 e_device, e_intx, 0);
-    if (rc < 0)
-        PT_LOG("Error: Unbinding pt irq for MSI-INTx failed! rc=%d\n", rc);
-
-    if (ptdev->machine_irq)
-    {
-        rc = xc_domain_bind_pt_pci_irq(xc_handle, domid, ptdev->machine_irq,
-                                       0, e_device, e_intx);
-        if ( rc < 0 )
-            PT_LOG("Error: Rebinding of interrupt failed! rc=%d\n", rc);
-    }
-
-    ptdev->msi_trans_en = 0;
-}
-
 /* write Message Control register */
 static int pt_msgctrl_reg_write(struct pt_dev *ptdev, 
     struct pt_reg_tbl *cfg_entry, 
@@ -2876,7 +3367,7 @@ static int pt_msgctrl_reg_write(struct pt_dev *ptdev,
         {
             if (ptdev->msi_trans_en) {
                 PT_LOG("guest enabling MSI, disable MSI-INTx translation\n");
-                pt_unmap_msi_translate(ptdev);
+                pt_disable_msi_translate(ptdev);
             }
             else
             {
@@ -3058,12 +3549,147 @@ static int pt_msixctrl_reg_write(struct pt_dev *ptdev,
     {
         if (ptdev->msi_trans_en) {
             PT_LOG("guest enabling MSI-X, disable MSI-INTx translation\n");
-            pt_unmap_msi_translate(ptdev);
+            pt_disable_msi_translate(ptdev);
         }
         pt_msix_update(ptdev);
     }
 
     ptdev->msix->enabled = !!(*value & PCI_MSIX_ENABLE);
+
+    return 0;
+}
+
+/* restore byte size emulate register */
+static int pt_byte_reg_restore(struct pt_dev *ptdev, 
+        struct pt_reg_tbl *cfg_entry, 
+        uint32_t real_offset, uint8_t dev_value, uint8_t *value)
+{
+    struct pt_reg_info_tbl *reg = cfg_entry->reg;
+    PCIDevice *d = &ptdev->dev;
+
+    /* use I/O device register's value as restore value */
+    *value = *(uint8_t *)(d->config + real_offset);
+
+    /* create value for restoring to I/O device register */
+    *value = PT_MERGE_VALUE(*value, dev_value, reg->emu_mask);
+
+    return 0;
+}
+
+/* restore word size emulate register */
+static int pt_word_reg_restore(struct pt_dev *ptdev, 
+    struct pt_reg_tbl *cfg_entry, 
+    uint32_t real_offset, uint16_t dev_value, uint16_t *value)
+{
+    struct pt_reg_info_tbl *reg = cfg_entry->reg;
+    PCIDevice *d = &ptdev->dev;
+
+    /* use I/O device register's value as restore value */
+    *value = *(uint16_t *)(d->config + real_offset);
+
+    /* create value for restoring to I/O device register */
+    *value = PT_MERGE_VALUE(*value, dev_value, reg->emu_mask);
+
+    return 0;
+}
+
+/* restore long size emulate register */
+static int pt_long_reg_restore(struct pt_dev *ptdev, 
+    struct pt_reg_tbl *cfg_entry, 
+    uint32_t real_offset, uint32_t dev_value, uint32_t *value)
+{
+    struct pt_reg_info_tbl *reg = cfg_entry->reg;
+    PCIDevice *d = &ptdev->dev;
+
+    /* use I/O device register's value as restore value */
+    *value = *(uint32_t *)(d->config + real_offset);
+
+    /* create value for restoring to I/O device register */
+    *value = PT_MERGE_VALUE(*value, dev_value, reg->emu_mask);
+
+    return 0;
+}
+
+/* restore Command register */
+static int pt_cmd_reg_restore(struct pt_dev *ptdev, 
+    struct pt_reg_tbl *cfg_entry, 
+    uint32_t real_offset, uint16_t dev_value, uint16_t *value)
+{
+    struct pt_reg_info_tbl *reg = cfg_entry->reg;
+    PCIDevice *d = &ptdev->dev;
+    uint16_t restorable_mask = 0;
+
+    /* use I/O device register's value as restore value */
+    *value = *(uint16_t *)(d->config + real_offset);
+
+    /* create value for restoring to I/O device register
+     * but do not include Fast Back-to-Back Enable bit.
+     */
+    restorable_mask = reg->emu_mask & ~PCI_COMMAND_FAST_BACK;
+    *value = PT_MERGE_VALUE(*value, dev_value, restorable_mask);
+
+    return 0;
+}
+
+/* restore BAR */
+static int pt_bar_reg_restore(struct pt_dev *ptdev, 
+    struct pt_reg_tbl *cfg_entry, 
+    uint32_t real_offset, uint32_t dev_value, uint32_t *value)
+{
+    struct pt_reg_info_tbl *reg = cfg_entry->reg;
+    uint32_t bar_emu_mask = 0;
+    int index = 0;
+
+    /* get BAR index */
+    index = pt_bar_offset_to_index(reg->offset);
+    if (index < 0)
+    {
+        /* exit I/O emulator */
+        PT_LOG("Internal error: Invalid BAR index[%d]. "
+            "I/O emulator exit.\n", index);
+        exit(1);
+    }
+
+    /* use value from kernel sysfs */
+    if (ptdev->bases[index].bar_flag == PT_BAR_FLAG_UPPER)
+        *value = ptdev->pci_dev->base_addr[index-1] >> 32;
+    else
+        *value = ptdev->pci_dev->base_addr[index];
+
+    /* set emulate mask depend on BAR flag */
+    switch (ptdev->bases[index].bar_flag)
+    {
+    case PT_BAR_FLAG_MEM:
+        bar_emu_mask = PT_BAR_MEM_EMU_MASK;
+        break;
+    case PT_BAR_FLAG_IO:
+        bar_emu_mask = PT_BAR_IO_EMU_MASK;
+        break;
+    case PT_BAR_FLAG_UPPER:
+        bar_emu_mask = PT_BAR_ALLF;
+        break;
+    default:
+        break;
+    }
+
+    /* create value for restoring to I/O device register */
+    *value = PT_MERGE_VALUE(*value, dev_value, bar_emu_mask);
+
+    return 0;
+}
+
+/* restore Power Management Control/Status register */
+static int pt_pmcsr_reg_restore(struct pt_dev *ptdev, 
+    struct pt_reg_tbl *cfg_entry, 
+    uint32_t real_offset, uint16_t dev_value, uint16_t *value)
+{
+    struct pt_reg_info_tbl *reg = cfg_entry->reg;
+
+    /* create value for restoring to I/O device register
+     * No need to restore, just clear PME Enable and PME Status bit
+     * Note: register type of PME Status bit is RW1C, so clear by writing 1b
+     */
+    *value = (dev_value & ~PCI_PM_CTRL_PME_ENABLE) | PCI_PM_CTRL_PME_STATUS;
 
     return 0;
 }
@@ -3180,32 +3806,6 @@ struct pt_dev * register_real_device(PCIBus *e_bus,
     if (!assigned_device->dev.config[0x3d])
         goto out;
 
-    e_device = (assigned_device->dev.devfn >> 3) & 0x1f;
-    /* fix virtual interrupt pin to INTA# */
-    e_intx = 0;
-
-    while (assigned_device->msi_trans_en)
-    {
-        if (pt_msi_setup(assigned_device))
-        {
-            PT_LOG("Error: MSI-INTx translation MSI setup failed, fallback\n");
-            assigned_device->msi_trans_en = 0;
-            break;
-        }
-
-        rc = xc_domain_bind_pt_irq(xc_handle, domid, assigned_device->msi->pirq,
-                                   PT_IRQ_TYPE_MSI_TRANSLATE, 0,
-                                   e_device, e_intx, 0);
-        if ( rc < 0)
-        {
-            PT_LOG("Error: MSI-INTx translation bind failed, fallback\n");
-            assigned_device->msi_trans_en = 0;
-            break;
-        }
-        msi_set_enable(assigned_device, 1);
-        break;
-    }
-
     if ( PT_MACHINE_IRQ_AUTO == machine_irq )
     {
         int pirq = pci_dev->irq;
@@ -3225,12 +3825,16 @@ struct pt_dev * register_real_device(PCIBus *e_bus,
         }
     }
 
-    if (assigned_device->msi_trans_en)
-        goto out;
+    /* setup MSI-INTx translation if support */
+    rc = pt_enable_msi_translate(assigned_device);
 
     /* bind machine_irq to device */
-    if ( 0 != machine_irq )
+    if (rc < 0 && machine_irq != 0)
     {
+        e_device = (assigned_device->dev.devfn >> 3) & 0x1f;
+        /* fix virtual interrupt pin to INTA# */
+        e_intx = 0;
+
         rc = xc_domain_bind_pt_pci_irq(xc_handle, domid, machine_irq, 0,
                                        e_device, e_intx);
         if ( rc < 0 )
