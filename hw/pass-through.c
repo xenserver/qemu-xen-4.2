@@ -1447,27 +1447,6 @@ exit:
     return val;
 }
 
-static int pt_pci_enable_rom(struct pci_dev *dev)
-{
-    FILE *fp;
-    char path[PATH_MAX];
-
-    sprintf(path, "/sys/bus/pci/devices/%04x:%02x:%02x.%x/rom",
-            dev->domain, dev->bus, dev->dev, dev->func);
-
-    fp = fopen(path, "w");
-    if ( !fp )
-    {
-        PT_LOG("Can't open %s: %s\n", path, strerror(errno));
-        return -1;
-    }
-
-    fprintf(fp, "1");
-    fclose(fp);
-
-    return 0;
-}
-
 static void pt_libpci_fixup(struct pci_dev *dev)
 {
 #if PCI_LIB_VERSION < 0x030100
@@ -1508,6 +1487,7 @@ static void pt_libpci_fixup(struct pci_dev *dev)
 static int pt_register_regions(struct pt_dev *assigned_device)
 {
     int i = 0;
+    uint32_t bar_data = 0;
     struct pci_dev *pci_dev = assigned_device->pci_dev;
     PCIDevice *d = &assigned_device->dev;
 
@@ -1542,18 +1522,21 @@ static int pt_register_regions(struct pt_dev *assigned_device)
     }
 
     /* Register expansion ROM address */
-    if ( pt_pci_base_addr(pci_dev->rom_base_addr) && pci_dev->rom_size )
+    if ( (pci_dev->rom_base_addr & PCI_ROM_ADDRESS_MASK) && pci_dev->rom_size )
     {
 
         /* Re-set BAR reported by OS, otherwise ROM can't be read. */
-        if ( (pci_dev->rom_base_addr & PCI_ROM_ADDRESS_MASK) == 0 )
-            if ( pt_pci_enable_rom(pci_dev) )
-                return -1;
+        bar_data = pci_read_long(pci_dev, PCI_ROM_ADDRESS);
+        if ( (bar_data & PCI_ROM_ADDRESS_MASK) == 0 )
+        {
+            bar_data |= (pci_dev->rom_base_addr & PCI_ROM_ADDRESS_MASK);
+            pci_write_long(pci_dev, PCI_ROM_ADDRESS, bar_data);
+        }
 
         assigned_device->bases[PCI_ROM_SLOT].e_physbase =
-            pci_dev->rom_base_addr;
+            pci_dev->rom_base_addr & PCI_ROM_ADDRESS_MASK;
         assigned_device->bases[PCI_ROM_SLOT].access.maddr =
-            pci_dev->rom_base_addr;
+            pci_dev->rom_base_addr & PCI_ROM_ADDRESS_MASK;
         pci_register_io_region((PCIDevice *)assigned_device, PCI_ROM_SLOT,
             pci_dev->rom_size, PCI_ADDRESS_SPACE_MEM_PREFETCH,
             pt_iomem_map);
