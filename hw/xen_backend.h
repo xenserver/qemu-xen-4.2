@@ -86,5 +86,9 @@ void xen_be_printf(struct XenDevice *xendev, int msg_level, const char *fmt, ...
 
 /* actual backend drivers */
 extern struct XenDevOps xen_console_ops;      /* xen_console.c     */
+extern struct XenDevOps xen_kbdmouse_ops;     /* xen_framebuffer.c */
+extern struct XenDevOps xen_framebuffer_ops;  /* xen_framebuffer.c */
+
+void xen_set_display(int domid, DisplayState *ds);
 
 #endif /* QEMU_HW_XEN_BACKEND_H */

@@ -297,5 +297,13 @@ struct pt_reg_info_tbl {
     } u;
 };
 
+static inline pciaddr_t pt_pci_base_addr(pciaddr_t base)
+{
+    if ( base & PCI_ADDRESS_SPACE_IO )
+        return base & PCI_ADDR_IO_MASK;
+
+    return base & PCI_ADDR_MEM_MASK;
+}
+
 #endif /* __PASSTHROUGH_H__ */
 
