@@ -1503,7 +1503,7 @@ exit:
 
 static void pt_libpci_fixup(struct pci_dev *dev)
 {
-#if PCI_LIB_VERSION < 0x030100
+#if !defined(PCI_LIB_VERSION) || PCI_LIB_VERSION < 0x030100
     int i;
     FILE *fp;
     char path[PATH_MAX], buf[256];
@@ -1850,6 +1850,7 @@ static void pt_aer_reg_save(struct pt_dev *ptdev)
     /* Root Port and Root Complex Event Collector need size expansion */
     int aer_size = 0x2c;
 
+#ifdef PCI_ERR_UNCOR_MASK
     for (i=0; i < aer_size; i+=4)
     {
         switch (i) {
@@ -1867,6 +1868,7 @@ static void pt_aer_reg_save(struct pt_dev *ptdev)
             break;
         }
     }
+#endif
 }
 
 /* restore AER register */
@@ -1879,6 +1881,7 @@ static void pt_aer_reg_restore(struct pt_dev *ptdev)
     /* Root Port and Root Complex Event Collector need size expansion */
     int aer_size = 0x2c;
 
+#ifdef PCI_ERR_UNCOR_MASK
     for (i=0; i < aer_size; i+=4)
     {
         switch (i) {
@@ -1899,6 +1902,7 @@ static void pt_aer_reg_restore(struct pt_dev *ptdev)
             break;
         }
     }
+#endif
 }
 
 /* reset Interrupt and I/O resource  */
