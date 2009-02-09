@@ -165,7 +165,6 @@ struct pt_msix_info {
     uint32_t table_off;
     uint64_t mmio_base_addr;
     int mmio_index;
-    int fd;
     void *phys_iomem_base;
     struct msix_entry_info msix_entry[0];
 };

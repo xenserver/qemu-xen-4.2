@@ -498,6 +498,7 @@ int pt_msix_init(struct pt_dev *dev, int pos)
     uint16_t control;
     int i, total_entries, table_off, bar_index;
     struct pci_dev *pd = dev->pci_dev;
+    int fd;
 
     id = pci_read_byte(pd, pos + PCI_CAP_LIST_ID);
 
@@ -534,19 +535,31 @@ int pt_msix_init(struct pt_dev *dev, int pos)
     PT_LOG("get MSI-X table bar base %llx\n",
            (unsigned long long)dev->msix->table_base);
 
-    dev->msix->fd = open("/dev/mem", O_RDWR);
+    fd = open("/dev/mem", O_RDWR);
+    if ( fd == -1 )
+    {
+        PT_LOG("Can't open /dev/mem: %s\n", strerror(errno));
+        goto error_out;
+    }
     dev->msix->phys_iomem_base = mmap(0, total_entries * 16,
                           PROT_WRITE | PROT_READ, MAP_SHARED | MAP_LOCKED,
-                          dev->msix->fd, dev->msix->table_base + table_off);
+                          fd, dev->msix->table_base + table_off);
     if ( dev->msix->phys_iomem_base == MAP_FAILED )
     {
         PT_LOG("Can't map physical MSI-X table: %s\n", strerror(errno));
-        return -1;
+        close(fd);
+        goto error_out;
     }
+    close(fd);
 
     PT_LOG("mapping physical MSI-X table to %lx\n",
            (unsigned long)dev->msix->phys_iomem_base);
     return 0;
+
+error_out:
+    free(dev->msix);
+    dev->msix = NULL;
+    return -1;
 }
 
 void pt_msix_delete(struct pt_dev *dev)
