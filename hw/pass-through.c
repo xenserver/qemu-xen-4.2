@@ -3736,8 +3736,10 @@ struct pt_dev * register_real_device(PCIBus *e_bus,
         free_pci_slot = __insert_to_pci_slot(r_bus, r_dev, r_func, 0, NULL);
         if ( free_pci_slot > 0 )
             e_devfn = free_pci_slot  << 3;
-        else
+        else {
             PT_LOG("Error: no free virtual PCI hot plug slot, thus no live migration.\n");
+            return NULL;
+        }
     }
 
     msi_translate = direct_pci_msitranslate;
