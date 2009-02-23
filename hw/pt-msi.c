@@ -68,7 +68,7 @@ int pt_msi_setup(struct pt_dev *dev)
 
     if ( !(dev->msi->flags & MSI_FLAG_UNINIT) )
     {
-        PT_LOG("setup physical after initialized?? \n");
+        PT_LOG("Error: setup physical after initialized?? \n");
         return -1;
     }
 
@@ -76,13 +76,13 @@ int pt_msi_setup(struct pt_dev *dev)
                                  dev->pci_dev->dev << 3 | dev->pci_dev->func,
                                  dev->pci_dev->bus, 0, 0) )
     {
-        PT_LOG("error map msi\n");
+        PT_LOG("Error: Mapping of MSI failed.\n");
         return -1;
     }
 
     if ( pirq < 0 )
     {
-        PT_LOG("invalid pirq number\n");
+        PT_LOG("Error: Invalid pirq number\n");
         return -1;
     }
 
@@ -125,7 +125,7 @@ int pt_msi_update(struct pt_dev *d)
     addr = (uint64_t)d->msi->addr_hi << 32 | d->msi->addr_lo;
     gflags = __get_msi_gflags(d->msi->data, addr);
 
-    PT_LOG("now update msi with pirq %x gvec %x\n", d->msi->pirq, gvec);
+    PT_LOG("Update msi with pirq %x gvec %x\n", d->msi->pirq, gvec);
     return xc_domain_update_msi_irq(xc_handle, domid, gvec,
                                      d->msi->pirq, gflags);
 }
@@ -295,19 +295,19 @@ static int pt_msix_update_one(struct pt_dev *dev, int entry_nr)
                                 dev->msix->table_base);
         if ( ret )
         {
-            PT_LOG("error map msix entry %x\n", entry_nr);
+            PT_LOG("Error: Mapping msix entry %x\n", entry_nr);
             return ret;
         }
         entry->pirq = pirq;
     }
 
-    PT_LOG("now update msix entry %x with pirq %x gvec %x\n",
+    PT_LOG("Update msix entry %x with pirq %x gvec %x\n",
             entry_nr, pirq, gvec);
 
     ret = xc_domain_update_msi_irq(xc_handle, domid, gvec, pirq, gflags);
     if ( ret )
     {
-        PT_LOG("error update msix irq info for entry %d\n", entry_nr);
+        PT_LOG("Error: Updating msix irq info for entry %d\n", entry_nr);
         return ret;
     }
 
@@ -378,7 +378,7 @@ void pt_msix_disable(struct pt_dev *dev)
 static void pci_msix_invalid_write(void *opaque, target_phys_addr_t addr,
                                    uint32_t val)
 {
-    PT_LOG("invalid write to MSI-X table, \
+    PT_LOG("Error: Invalid write to MSI-X table, \
             only dword access is allowed.\n");
 }
 
@@ -391,8 +391,8 @@ static void pci_msix_writel(void *opaque, target_phys_addr_t addr, uint32_t val)
 
     if ( addr % 4 )
     {
-        PT_LOG("unaligned dword access to MSI-X table, addr %016"PRIx64"\n",
-                addr);
+        PT_LOG("Error: Unaligned dword access to MSI-X table, \
+                addr %016"PRIx64"\n", addr);
         return;
     }
 
@@ -402,8 +402,8 @@ static void pci_msix_writel(void *opaque, target_phys_addr_t addr, uint32_t val)
 
     if ( offset != 3 && msix->enabled && !(entry->io_mem[3] & 0x1) )
     {
-        PT_LOG("can not update msix entry %d since MSI-X is already \
-                function now.\n", entry_nr);
+        PT_LOG("Error: Can't update msix entry %d since MSI-X is already \
+                function.\n", entry_nr);
         return;
     }
 
@@ -427,7 +427,7 @@ static CPUWriteMemoryFunc *pci_msix_write[] = {
 
 static uint32_t pci_msix_invalid_read(void *opaque, target_phys_addr_t addr)
 {
-    PT_LOG("invalid read to MSI-X table, \
+    PT_LOG("Error: Invalid read to MSI-X table, \
             only dword access is allowed.\n");
     return 0;
 }
@@ -440,8 +440,8 @@ static uint32_t pci_msix_readl(void *opaque, target_phys_addr_t addr)
 
     if ( addr % 4 )
     {
-        PT_LOG("unaligned dword access to MSI-X table, addr %016"PRIx64"\n",
-                addr);
+        PT_LOG("Error: Unaligned dword access to MSI-X table, \
+                addr %016"PRIx64"\n", addr);
         return 0;
     }
 
@@ -504,7 +504,7 @@ int pt_msix_init(struct pt_dev *dev, int pos)
 
     if ( id != PCI_CAP_ID_MSIX )
     {
-        PT_LOG("error id %x pos %x\n", id, pos);
+        PT_LOG("Error: Invalid id %x pos %x\n", id, pos);
         return -1;
     }
 
@@ -516,7 +516,7 @@ int pt_msix_init(struct pt_dev *dev, int pos)
                        + total_entries*sizeof(struct msix_entry_info));
     if ( !dev->msix )
     {
-        PT_LOG("error allocation pt_msix_info\n");
+        PT_LOG("Error: Allocating pt_msix_info failed.\n");
         return -1;
     }
     memset(dev->msix, 0, sizeof(struct pt_msix_info)
@@ -538,7 +538,7 @@ int pt_msix_init(struct pt_dev *dev, int pos)
     fd = open("/dev/mem", O_RDWR);
     if ( fd == -1 )
     {
-        PT_LOG("Can't open /dev/mem: %s\n", strerror(errno));
+        PT_LOG("Error: Can't open /dev/mem: %s\n", strerror(errno));
         goto error_out;
     }
     dev->msix->phys_iomem_base = mmap(0, total_entries * 16,
@@ -546,7 +546,7 @@ int pt_msix_init(struct pt_dev *dev, int pos)
                           fd, dev->msix->table_base + table_off);
     if ( dev->msix->phys_iomem_base == MAP_FAILED )
     {
-        PT_LOG("Can't map physical MSI-X table: %s\n", strerror(errno));
+        PT_LOG("Error: Can't map physical MSI-X table: %s\n", strerror(errno));
         close(fd);
         goto error_out;
     }

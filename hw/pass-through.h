@@ -86,6 +86,26 @@
 #define PCI_EXP_TYPE_ROOT_EC     0xa
 #endif
 
+#ifndef PCI_ERR_UNCOR_MASK
+/* Uncorrectable Error Mask */
+#define PCI_ERR_UNCOR_MASK      8
+#endif
+
+#ifndef PCI_ERR_UNCOR_SEVER
+/* Uncorrectable Error Severity */
+#define PCI_ERR_UNCOR_SEVER     12
+#endif
+
+#ifndef PCI_ERR_COR_MASK
+/* Correctable Error Mask */
+#define PCI_ERR_COR_MASK        20
+#endif
+
+#ifndef PCI_ERR_CAP
+/* Advanced Error Capabilities */
+#define PCI_ERR_CAP             24
+#endif
+
 #ifndef PCI_EXT_CAP_ID
 /* Extended Capabilities (PCI-X 2.0 and PCI Express) */
 #define PCI_EXT_CAP_ID(header)   (header & 0x0000ffff)
