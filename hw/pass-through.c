@@ -1165,7 +1165,7 @@ static void pt_pci_write_config(PCIDevice *d, uint32_t address, uint32_t val,
     }
 
     /* check power state transition flags */
-    if (pm_state->flags & PT_FLAG_TRANSITING)
+    if (pm_state != NULL && pm_state->flags & PT_FLAG_TRANSITING)
         /* can't accept untill previous power state transition is completed.
          * so finished previous request here.
          */
@@ -1280,7 +1280,7 @@ out:
     if (!ret)
         PT_LOG("Error: pci_write_block failed. return value[%d].\n", ret);
 
-    if (pm_state->flags & PT_FLAG_TRANSITING)
+    if (pm_state != NULL && pm_state->flags & PT_FLAG_TRANSITING)
         /* set QEMUTimer */
         qemu_mod_timer(pm_state->pm_timer,
             (qemu_get_clock(rt_clock) + pm_state->pm_delay));
@@ -1337,7 +1337,7 @@ static uint32_t pt_pci_read_config(PCIDevice *d, uint32_t address, int len)
     }
 
     /* check power state transition flags */
-    if (pm_state->flags & PT_FLAG_TRANSITING)
+    if (pm_state != NULL && pm_state->flags & PT_FLAG_TRANSITING)
         /* can't accept untill previous power state transition is completed.
          * so finished previous request here.
          */
