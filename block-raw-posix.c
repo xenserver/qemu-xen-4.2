@@ -681,7 +681,7 @@ static void raw_aio_remove(RawAIOCB *acb)
             qemu_aio_release(acb);
             break;
         }
-        pacb = &(*acb)->next;
+        pacb = &(*pacb)->next;
     }
 }
 
