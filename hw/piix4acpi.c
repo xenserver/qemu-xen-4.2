@@ -279,24 +279,24 @@ static void acpi_php_writeb(void *opaque, uint32_t addr, uint32_t val)
 
 static void pcislots_save(QEMUFile* f, void* opaque)
 {
-    PHPSlots *s = (PHPSlots*)opaque;
+    PHPSlots *hotplug_slots = opaque;
     int i;
     for ( i = 0; i < ACPI_PHP_SLOT_NUM; i++ ) {
-        qemu_put_8s( f, &s->status[i]);
+        qemu_put_8s( f, &hotplug_slots->status[i]);
     }
-    qemu_put_8s(f, &s->plug_evt);
+    qemu_put_8s(f, &hotplug_slots->plug_evt);
 }
 
 static int pcislots_load(QEMUFile* f, void* opaque, int version_id)
 {
-    PHPSlots *s = (PHPSlots*)opaque;
+    PHPSlots *hotplug_slots = opaque;
     int i;
     if (version_id != 1)
         return -EINVAL;
     for ( i = 0; i < ACPI_PHP_SLOT_NUM; i++ ) {
-        qemu_get_8s( f, &s->status[i]);
+        qemu_get_8s( f, &hotplug_slots->status[i]);
     }
-    qemu_get_8s(f, &s->plug_evt);
+    qemu_get_8s(f, &hotplug_slots->plug_evt);
     return 0;
 }
 
