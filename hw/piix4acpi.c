@@ -302,21 +302,23 @@ static int pcislots_load(QEMUFile* f, void* opaque, int version_id)
 
 static void php_slots_init(void)
 {
-    PHPSlots *slots = &php_slots;
     int i;
-    memset(slots, 0, sizeof(PHPSlots));
+    memset(&php_slots, 0, sizeof(PHPSlots));
 
     /* update the pci slot status */
     for ( i = 0; i < PHP_SLOT_LEN; i++ ) {
         if ( test_pci_slot( PHP_TO_PCI_SLOT(i) ) == 1 )
-            slots->status[i] = 0xf;
+            php_slots.status[i] = 0xf;
     }
 
 
     /* ACPI PCI hotplug controller */
-    register_ioport_read(ACPI_PHP_IO_ADDR, ACPI_PHP_SLOT_NUM + 1, 1, acpi_php_readb, slots);
-    register_ioport_write(ACPI_PHP_IO_ADDR, ACPI_PHP_SLOT_NUM + 1, 1, acpi_php_writeb, slots);
-    register_savevm("pcislots", 0, 1, pcislots_save, pcislots_load, slots);
+    register_ioport_read(ACPI_PHP_IO_ADDR, ACPI_PHP_SLOT_NUM + 1, 1,
+                         acpi_php_readb, &php_slots);
+    register_ioport_write(ACPI_PHP_IO_ADDR, ACPI_PHP_SLOT_NUM + 1, 1,
+                          acpi_php_writeb, &php_slots);
+    register_savevm("pcislots", 0, 1, pcislots_save, pcislots_load,
+                    &php_slots);
 }
 
 /* GPEx_STS occupy 1st half of the block, while GPEx_EN 2nd half */
@@ -452,7 +454,6 @@ static void acpi_sci_intr(GPEState *s)
 void acpi_php_del(int pci_slot)
 {
     GPEState *s = &gpe_state;
-    PHPSlots *hotplug_slots = &php_slots;
     int php_slot = PCI_TO_PHP_SLOT(pci_slot);
 
     if ( pci_slot < PHP_SLOT_START || pci_slot >= PHP_SLOT_END ) {
@@ -462,7 +463,7 @@ void acpi_php_del(int pci_slot)
     }
 
     /* update the php controller status */
-    hotplug_slots->plug_evt = (((php_slot+1) << 4) | PHP_EVT_REMOVE);
+    php_slots.plug_evt = (((php_slot+1) << 4) | PHP_EVT_REMOVE);
 
     /* generate a SCI interrupt */
     acpi_sci_intr(s);
@@ -471,7 +472,6 @@ void acpi_php_del(int pci_slot)
 void acpi_php_add(int pci_slot)
 {
     GPEState *s = &gpe_state;
-    PHPSlots *hotplug_slots = &php_slots;
     int php_slot = PCI_TO_PHP_SLOT(pci_slot);
     char ret_str[30];
 
@@ -490,10 +490,10 @@ void acpi_php_add(int pci_slot)
     }
 
     /* update the php controller status */
-    hotplug_slots->plug_evt = (((php_slot+1) << 4) | PHP_EVT_ADD);
+    php_slots.plug_evt = (((php_slot+1) << 4) | PHP_EVT_ADD);
 
     /* update the slot status as present */
-    hotplug_slots->status[php_slot]= 0xf;
+    php_slots.status[php_slot]= 0xf;
 
     /* power on the slot */
     power_on_php_slot(php_slot);
