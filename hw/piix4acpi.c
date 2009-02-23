@@ -77,9 +77,7 @@ typedef struct GPEState {
 GPEState gpe_state;
 
 typedef struct PHPSlots {
-    struct {
-        uint8_t status;    /* Apaptor stats */
-    } slot[ACPI_PHP_SLOT_NUM];
+    uint8_t status[ACPI_PHP_SLOT_NUM]; /* Apaptor stats */
     uint8_t plug_evt;      /* slot|event slot:0-no event;1-1st. event:0-remove;1-add */
 } PHPSlots;
 
@@ -240,7 +238,7 @@ static uint32_t acpi_php_readb(void *opaque, uint32_t addr)
         break;
     default:
         num = addr - ACPI_PHP_IO_ADDR - 1;
-        val = hotplug_slots->slot[num].status;
+        val = hotplug_slots->status[num];
     }
 
     fprintf(logfile, "ACPI PCI hotplug: read addr=0x%x, val=0x%x.\n",
@@ -265,7 +263,7 @@ static void acpi_php_writeb(void *opaque, uint32_t addr, uint32_t val)
         php_slot = addr - ACPI_PHP_IO_ADDR - 1;
         if ( val == 0x1 ) { /* Eject command */
             /* make _STA of the slot 0 */
-            hotplug_slots->slot[php_slot].status = 0;
+            hotplug_slots->status[php_slot] = 0;
 
             /* clear the hotplug event */
             hotplug_slots->plug_evt = 0;
@@ -284,7 +282,7 @@ static void pcislots_save(QEMUFile* f, void* opaque)
     PHPSlots *s = (PHPSlots*)opaque;
     int i;
     for ( i = 0; i < ACPI_PHP_SLOT_NUM; i++ ) {
-        qemu_put_8s( f, &s->slot[i].status);
+        qemu_put_8s( f, &s->status[i]);
     }
     qemu_put_8s(f, &s->plug_evt);
 }
@@ -296,7 +294,7 @@ static int pcislots_load(QEMUFile* f, void* opaque, int version_id)
     if (version_id != 1)
         return -EINVAL;
     for ( i = 0; i < ACPI_PHP_SLOT_NUM; i++ ) {
-        qemu_get_8s( f, &s->slot[i].status);
+        qemu_get_8s( f, &s->status[i]);
     }
     qemu_get_8s(f, &s->plug_evt);
     return 0;
@@ -311,7 +309,7 @@ static void php_slots_init(void)
     /* update the pci slot status */
     for ( i = 0; i < PHP_SLOT_LEN; i++ ) {
         if ( test_pci_slot( PHP_TO_PCI_SLOT(i) ) == 1 )
-            slots->slot[i].status = 0xf;
+            slots->status[i] = 0xf;
     }
 
 
@@ -495,7 +493,7 @@ void acpi_php_add(int pci_slot)
     hotplug_slots->plug_evt = (((php_slot+1) << 4) | PHP_EVT_ADD);
 
     /* update the slot status as present */
-    hotplug_slots->slot[php_slot].status = 0xf;
+    hotplug_slots->status[php_slot]= 0xf;
 
     /* power on the slot */
     power_on_php_slot(php_slot);
