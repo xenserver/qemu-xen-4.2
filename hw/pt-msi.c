@@ -119,12 +119,12 @@ int pt_msi_update(struct pt_dev *d)
     uint8_t gvec = 0;
     uint32_t gflags = 0;
     uint64_t addr = 0;
-    
+
     /* get vector, address, flags info, etc. */
     gvec = d->msi->data & 0xFF;
     addr = (uint64_t)d->msi->addr_hi << 32 | d->msi->addr_lo;
     gflags = __get_msi_gflags(d->msi->data, addr);
-    
+
     PT_LOG("now update msi with pirq %x gvec %x\n", d->msi->pirq, gvec);
     return xc_domain_update_msi_irq(xc_handle, domid, gvec,
                                      d->msi->pirq, gflags);
@@ -168,8 +168,8 @@ void pt_msi_disable(struct pt_dev *dev)
         if (xc_domain_unbind_msi_irq(xc_handle, domid, gvec,
                                         dev->msi->pirq, gflags))
         {
-            PT_LOG("Error: Unbinding of MSI failed. [%02x:%02x.%x]\n", 
-                pci_bus_num(d->bus), 
+            PT_LOG("Error: Unbinding of MSI failed. [%02x:%02x.%x]\n",
+                pci_bus_num(d->bus),
                 ((d->devfn >> 3) & 0x1F), (d->devfn & 0x7));
             goto out;
         }
@@ -181,8 +181,8 @@ void pt_msi_disable(struct pt_dev *dev)
 
         if (xc_physdev_unmap_pirq(xc_handle, domid, dev->msi->pirq))
         {
-            PT_LOG("Error: Unmapping of MSI failed. [%02x:%02x.%x]\n", 
-               pci_bus_num(d->bus), 
+            PT_LOG("Error: Unmapping of MSI failed. [%02x:%02x.%x]\n",
+               pci_bus_num(d->bus),
                ((d->devfn >> 3) & 0x1F), (d->devfn & 0x7));
             goto out;
         }
@@ -356,8 +356,8 @@ void pt_msix_disable(struct pt_dev *dev)
 
         if (xc_domain_unbind_msi_irq(xc_handle, domid, gvec,
                                         entry->pirq, gflags))
-            PT_LOG("Error: Unbinding of MSI-X failed. [%02x:%02x.%x]\n", 
-                pci_bus_num(d->bus), 
+            PT_LOG("Error: Unbinding of MSI-X failed. [%02x:%02x.%x]\n",
+                pci_bus_num(d->bus),
                 ((d->devfn >> 3) & 0x1F), (d->devfn & 0x7));
         else
         {

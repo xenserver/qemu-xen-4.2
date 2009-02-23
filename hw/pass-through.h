@@ -231,8 +231,8 @@ struct pt_reg_grp_tbl {
 };
 
 /* emul reg group size initialize method */
-typedef uint8_t (*pt_reg_size_init) (struct pt_dev *ptdev, 
-                                     struct pt_reg_grp_info_tbl *grp_reg, 
+typedef uint8_t (*pt_reg_size_init) (struct pt_dev *ptdev,
+                                     struct pt_reg_grp_info_tbl *grp_reg,
                                      uint32_t base_offset);
 /* emul reg group infomation table */
 struct pt_reg_grp_info_tbl {
@@ -259,57 +259,57 @@ struct pt_reg_tbl {
 };
 
 /* emul reg initialize method */
-typedef uint32_t (*conf_reg_init) (struct pt_dev *ptdev, 
-                                   struct pt_reg_info_tbl *reg, 
+typedef uint32_t (*conf_reg_init) (struct pt_dev *ptdev,
+                                   struct pt_reg_info_tbl *reg,
                                    uint32_t real_offset);
 /* emul reg long write method */
 typedef int (*conf_dword_write) (struct pt_dev *ptdev,
-                                 struct pt_reg_tbl *cfg_entry, 
-                                 uint32_t *value, 
+                                 struct pt_reg_tbl *cfg_entry,
+                                 uint32_t *value,
                                  uint32_t dev_value,
                                  uint32_t valid_mask);
 /* emul reg word write method */
 typedef int (*conf_word_write) (struct pt_dev *ptdev,
-                                struct pt_reg_tbl *cfg_entry, 
-                                uint16_t *value, 
+                                struct pt_reg_tbl *cfg_entry,
+                                uint16_t *value,
                                 uint16_t dev_value,
                                 uint16_t valid_mask);
 /* emul reg byte write method */
 typedef int (*conf_byte_write) (struct pt_dev *ptdev,
-                                struct pt_reg_tbl *cfg_entry, 
-                                uint8_t *value, 
+                                struct pt_reg_tbl *cfg_entry,
+                                uint8_t *value,
                                 uint8_t dev_value,
                                 uint8_t valid_mask);
 /* emul reg long read methods */
 typedef int (*conf_dword_read) (struct pt_dev *ptdev,
-                                struct pt_reg_tbl *cfg_entry, 
+                                struct pt_reg_tbl *cfg_entry,
                                 uint32_t *value,
                                 uint32_t valid_mask);
 /* emul reg word read method */
 typedef int (*conf_word_read) (struct pt_dev *ptdev,
-                               struct pt_reg_tbl *cfg_entry, 
+                               struct pt_reg_tbl *cfg_entry,
                                uint16_t *value,
                                uint16_t valid_mask);
 /* emul reg byte read method */
 typedef int (*conf_byte_read) (struct pt_dev *ptdev,
-                               struct pt_reg_tbl *cfg_entry, 
+                               struct pt_reg_tbl *cfg_entry,
                                uint8_t *value,
                                uint8_t valid_mask);
 /* emul reg long restore method */
 typedef int (*conf_dword_restore) (struct pt_dev *ptdev,
-                                   struct pt_reg_tbl *cfg_entry, 
+                                   struct pt_reg_tbl *cfg_entry,
                                    uint32_t real_offset,
                                    uint32_t dev_value,
                                    uint32_t *value);
 /* emul reg word restore method */
 typedef int (*conf_word_restore) (struct pt_dev *ptdev,
-                                  struct pt_reg_tbl *cfg_entry, 
+                                  struct pt_reg_tbl *cfg_entry,
                                   uint32_t real_offset,
                                   uint16_t dev_value,
                                   uint16_t *value);
 /* emul reg byte restore method */
 typedef int (*conf_byte_restore) (struct pt_dev *ptdev,
-                                  struct pt_reg_tbl *cfg_entry, 
+                                  struct pt_reg_tbl *cfg_entry,
                                   uint32_t real_offset,
                                   uint8_t dev_value,
                                   uint8_t *value);
