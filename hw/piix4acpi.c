@@ -54,8 +54,6 @@
 /* The bit in GPE0_STS/EN to notify the pci hotplug event */
 #define ACPI_PHP_GPE_BIT 3
 
-#define ACPI_PHP_SLOT_NUM PHP_SLOT_LEN
-
 typedef struct AcpiDeviceState AcpiDeviceState;
 AcpiDeviceState *acpi_device_table;
 
@@ -77,7 +75,7 @@ typedef struct GPEState {
 GPEState gpe_state;
 
 typedef struct PHPSlots {
-    uint8_t status[ACPI_PHP_SLOT_NUM]; /* Apaptor stats */
+    uint8_t status[PHP_SLOT_LEN]; /* Apaptor stats */
     uint8_t plug_evt;      /* slot|event slot:0-no event;1-1st. event:0-remove;1-add */
 } PHPSlots;
 
@@ -281,7 +279,7 @@ static void pcislots_save(QEMUFile* f, void* opaque)
 {
     PHPSlots *hotplug_slots = opaque;
     int i;
-    for ( i = 0; i < ACPI_PHP_SLOT_NUM; i++ ) {
+    for ( i = 0; i < PHP_SLOT_LEN; i++ ) {
         qemu_put_8s( f, &hotplug_slots->status[i]);
     }
     qemu_put_8s(f, &hotplug_slots->plug_evt);
@@ -293,7 +291,7 @@ static int pcislots_load(QEMUFile* f, void* opaque, int version_id)
     int i;
     if (version_id != 1)
         return -EINVAL;
-    for ( i = 0; i < ACPI_PHP_SLOT_NUM; i++ ) {
+    for ( i = 0; i < PHP_SLOT_LEN; i++ ) {
         qemu_get_8s( f, &hotplug_slots->status[i]);
     }
     qemu_get_8s(f, &hotplug_slots->plug_evt);
@@ -313,9 +311,9 @@ static void php_slots_init(void)
 
 
     /* ACPI PCI hotplug controller */
-    register_ioport_read(ACPI_PHP_IO_ADDR, ACPI_PHP_SLOT_NUM + 1, 1,
+    register_ioport_read(ACPI_PHP_IO_ADDR, PHP_SLOT_LEN + 1, 1,
                          acpi_php_readb, &php_slots);
-    register_ioport_write(ACPI_PHP_IO_ADDR, ACPI_PHP_SLOT_NUM + 1, 1,
+    register_ioport_write(ACPI_PHP_IO_ADDR, PHP_SLOT_LEN + 1, 1,
                           acpi_php_writeb, &php_slots);
     register_savevm("pcislots", 0, 1, pcislots_save, pcislots_load,
                     &php_slots);
