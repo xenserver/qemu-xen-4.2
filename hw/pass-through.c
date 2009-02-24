@@ -3770,7 +3770,7 @@ int power_off_php_slot(int php_slot)
 
 int pt_init(PCIBus *e_bus, const char *direct_pci)
 {
-    int seg, b, d, f, php_slot = 0;
+    int seg, b, d, f, php_slot = 0, status = -1;
     struct pt_dev *pt_dev;
     struct pci_access *pci_access;
     char *vslots;
@@ -3814,8 +3814,7 @@ int pt_init(PCIBus *e_bus, const char *direct_pci)
         if ( pt_dev == NULL )
         {
             PT_LOG("Error: Registration failed (%02x:%02x.%x)\n", b, d, f);
-            free(direct_pci_head);
-            return -1;
+            goto err;
         }
 
         /* Record the virtual slot info */
@@ -3834,10 +3833,11 @@ int pt_init(PCIBus *e_bus, const char *direct_pci)
     /* Write virtual slots info to xenstore for Control panel use */
     xenstore_write_vslots(vslots);
 
+    status = 0;
+err:
     qemu_free(vslots);
     free(direct_pci_head);
 
-    /* Success */
-    return 0;
+    return status;
 }
 
