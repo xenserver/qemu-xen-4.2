@@ -211,7 +211,7 @@ target_phys_addr_t cpu_get_phys_page_debug(CPUState *env, target_ulong addr)
 }
 
 //some functions to handle the io req packet
-void sp_info(void)
+static void sp_info(void)
 {
     ioreq_t *req;
     int i;
@@ -281,7 +281,8 @@ static ioreq_t *cpu_get_ioreq(void)
     return NULL;
 }
 
-unsigned long do_inp(CPUState *env, unsigned long addr, unsigned long size)
+static unsigned long do_inp(CPUState *env, unsigned long addr,
+                            unsigned long size)
 {
     switch(size) {
     case 1:
@@ -296,8 +297,8 @@ unsigned long do_inp(CPUState *env, unsigned long addr, unsigned long size)
     }
 }
 
-void do_outp(CPUState *env, unsigned long addr,
-             unsigned long size, unsigned long val)
+static void do_outp(CPUState *env, unsigned long addr,
+                    unsigned long size, unsigned long val)
 {
     switch(size) {
     case 1:
@@ -325,7 +326,7 @@ static inline void write_physical(uint64_t addr, unsigned long size, void *val)
     return cpu_physical_memory_rw((target_phys_addr_t)addr, val, size, 1);
 }
 
-void cpu_ioreq_pio(CPUState *env, ioreq_t *req)
+static void cpu_ioreq_pio(CPUState *env, ioreq_t *req)
 {
     int i, sign;
 
@@ -360,7 +361,7 @@ void cpu_ioreq_pio(CPUState *env, ioreq_t *req)
     }
 }
 
-void cpu_ioreq_move(CPUState *env, ioreq_t *req)
+static void cpu_ioreq_move(CPUState *env, ioreq_t *req)
 {
     int i, sign;
 
@@ -421,7 +422,7 @@ void timeoffset_get(void)
     free(p);
 }
 
-void cpu_ioreq_timeoffset(CPUState *env, ioreq_t *req)
+static void cpu_ioreq_timeoffset(CPUState *env, ioreq_t *req)
 {
     char b[64];
 
@@ -433,7 +434,7 @@ void cpu_ioreq_timeoffset(CPUState *env, ioreq_t *req)
     xenstore_vm_write(domid, "rtc/timeoffset", b);
 }
 
-void __handle_ioreq(CPUState *env, ioreq_t *req)
+static void __handle_ioreq(CPUState *env, ioreq_t *req)
 {
     if (!req->data_is_ptr && (req->dir == IOREQ_WRITE) &&
         (req->size < sizeof(target_ulong)))
@@ -457,7 +458,7 @@ void __handle_ioreq(CPUState *env, ioreq_t *req)
     }
 }
 
-void __handle_buffered_iopage(CPUState *env)
+static void __handle_buffered_iopage(CPUState *env)
 {
     buf_ioreq_t *buf_req = NULL;
     ioreq_t req;
@@ -493,7 +494,7 @@ void __handle_buffered_iopage(CPUState *env)
     }
 }
 
-void handle_buffered_io(void *opaque)
+static void handle_buffered_io(void *opaque)
 {
     CPUState *env = opaque;
 
@@ -502,7 +503,7 @@ void handle_buffered_io(void *opaque)
 		   qemu_get_clock(rt_clock));
 }
 
-void cpu_handle_ioreq(void *opaque)
+static void cpu_handle_ioreq(void *opaque)
 {
     extern int vm_running;
     extern int shutdown_requested;
