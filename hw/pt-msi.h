@@ -95,6 +95,9 @@ void
 pt_disable_msi_translate(struct pt_dev *dev);
 
 int
+pt_msix_update_remap(struct pt_dev *d, int bar_index);
+
+int
 pt_msix_update(struct pt_dev *dev);
 
 void

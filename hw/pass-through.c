@@ -983,6 +983,9 @@ void pt_iomem_map(PCIDevice *d, int i, uint32_t e_phys, uint32_t e_size,
         ret = remove_msix_mapping(assigned_device, i);
         if ( ret != 0 )
             PT_LOG("Error: remove MSI-X mmio mapping failed!\n");
+
+        if ( old_ebase != e_phys && old_ebase != -1 )
+            pt_msix_update_remap(assigned_device, i);
     }
 }
 

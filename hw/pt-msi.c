@@ -127,7 +127,7 @@ int pt_msi_update(struct pt_dev *d)
 
     PT_LOG("Update msi with pirq %x gvec %x\n", d->msi->pirq, gvec);
     return xc_domain_update_msi_irq(xc_handle, domid, gvec,
-                                     d->msi->pirq, gflags);
+                                     d->msi->pirq, gflags, 0);
 }
 
 void pt_msi_disable(struct pt_dev *dev)
@@ -304,7 +304,8 @@ static int pt_msix_update_one(struct pt_dev *dev, int entry_nr)
     PT_LOG("Update msix entry %x with pirq %x gvec %x\n",
             entry_nr, pirq, gvec);
 
-    ret = xc_domain_update_msi_irq(xc_handle, domid, gvec, pirq, gflags);
+    ret = xc_domain_update_msi_irq(xc_handle, domid, gvec, pirq, gflags,
+                                   dev->msix->mmio_base_addr);
     if ( ret )
     {
         PT_LOG("Error: Updating msix irq info for entry %d\n", entry_nr);
@@ -375,6 +376,31 @@ void pt_msix_disable(struct pt_dev *dev)
     }
 }
 
+int pt_msix_update_remap(struct pt_dev *dev, int bar_index)
+{
+    struct msix_entry_info *entry;
+    int i, ret;
+
+    if ( !(dev->msix && dev->msix->bar_index == bar_index) )
+        return 0;
+
+    for ( i = 0; i < dev->msix->total_entries; i++ )
+    {
+        entry = &dev->msix->msix_entry[i];
+        if ( entry->pirq != -1 )
+        {
+            ret = xc_domain_unbind_pt_irq(xc_handle, domid, entry->pirq,
+                                          PT_IRQ_TYPE_MSI, 0, 0, 0, 0);
+            if ( ret )
+                PT_LOG("Error: unbind MSI-X entry %d failed\n", entry->pirq);
+            entry->flags = 1;
+        }
+    }
+    pt_msix_update(dev);
+
+    return 0;
+}
+
 static void pci_msix_invalid_write(void *opaque, target_phys_addr_t addr,
                                    uint32_t val)
 {
@@ -388,6 +414,8 @@ static void pci_msix_writel(void *opaque, target_phys_addr_t addr, uint32_t val)
     struct pt_msix_info *msix = dev->msix;
     struct msix_entry_info *entry;
     int entry_nr, offset;
+    void *phys_off;
+    uint32_t vec_ctrl;
 
     if ( addr % 4 )
     {
@@ -400,7 +428,14 @@ static void pci_msix_writel(void *opaque, target_phys_addr_t addr, uint32_t val)
     entry = &msix->msix_entry[entry_nr];
     offset = ((addr - msix->mmio_base_addr) % 16) / 4;
 
-    if ( offset != 3 && msix->enabled && !(entry->io_mem[3] & 0x1) )
+    /*
+     * If Xen intercepts the mask bit access, io_mem[3] may not be
+     * up-to-date. Read from hardware directly.
+     */
+    phys_off = dev->msix->phys_iomem_base + 16 * entry_nr + 12;
+    vec_ctrl = *(uint32_t *)phys_off;
+
+    if ( offset != 3 && msix->enabled && !(vec_ctrl & 0x1) )
     {
         PT_LOG("Error: Can't update msix entry %d since MSI-X is already \
                 function.\n", entry_nr);
