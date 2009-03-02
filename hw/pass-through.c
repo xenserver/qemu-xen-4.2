@@ -159,6 +159,9 @@ static int pt_pmcsr_reg_restore(struct pt_dev *ptdev,
 static int pt_bar_reg_restore(struct pt_dev *ptdev,
     struct pt_reg_tbl *cfg_entry,
     uint32_t real_offset, uint32_t dev_value, uint32_t *value);
+static int pt_exp_rom_bar_reg_restore(struct pt_dev *ptdev,
+    struct pt_reg_tbl *cfg_entry,
+    uint32_t real_offset, uint32_t dev_value, uint32_t *value);
 
 /* pt_reg_info_tbl declaration
  * - only for emulated register (either a part or whole bit).
@@ -363,7 +366,7 @@ static struct pt_reg_info_tbl pt_emu_reg_header0_tbl[] = {
         .init       = pt_bar_reg_init,
         .u.dw.read  = pt_long_reg_read,
         .u.dw.write = pt_exp_rom_bar_reg_write,
-        .u.dw.restore = pt_long_reg_restore,
+        .u.dw.restore = pt_exp_rom_bar_reg_restore,
     },
     {
         .size = 0,
@@ -1977,20 +1980,10 @@ static void pt_config_reinit(struct pt_dev *ptdev)
     }
 }
 
-void pt_from_d3hot_to_d0_with_reset(void *opaque)
+static int pt_init_pci_config(struct pt_dev *ptdev)
 {
-    struct pt_dev *ptdev = opaque;
     PCIDevice *d = &ptdev->dev;
-    struct pt_pm_info *pm_state = ptdev->pm_state;
-    uint8_t e_device = 0;
-    uint8_t e_intx = 0;
     int ret = 0;
-
-    /* check power state */
-    ret = check_power_state(ptdev);
-
-    if (ret < 0)
-        goto out;
 
     PT_LOG("Reinitialize PCI configuration registers "
         "due to power state transition with internal reset. [%02x:%02x.%x]\n",
@@ -2008,15 +2001,33 @@ void pt_from_d3hot_to_d0_with_reset(void *opaque)
     /* rebind machine_irq to device */
     if (ret < 0 && ptdev->machine_irq != 0)
     {
-        e_device = (ptdev->dev.devfn >> 3) & 0x1f;
+        uint8_t e_device = (ptdev->dev.devfn >> 3) & 0x1f;
         /* fix virtual interrupt pin to INTA# */
-        e_intx = 0;
+        uint8_t e_intx = 0;
 
         ret = xc_domain_bind_pt_pci_irq(xc_handle, domid, ptdev->machine_irq,
                                        0, e_device, e_intx);
         if (ret < 0)
             PT_LOG("Error: Rebinding of interrupt failed! ret=%d\n", ret);
     }
+
+    return ret;
+}
+
+static void pt_from_d3hot_to_d0_with_reset(void *opaque)
+{
+    struct pt_dev *ptdev = opaque;
+    PCIDevice *d = &ptdev->dev;
+    struct pt_pm_info *pm_state = ptdev->pm_state;
+    int ret = 0;
+
+    /* check power state */
+    ret = check_power_state(ptdev);
+
+    if (ret < 0)
+        goto out;
+
+    pt_init_pci_config(ptdev);
 
 out:
     /* power state transition flags off */
@@ -2350,6 +2361,29 @@ static uint32_t pt_pmcsr_reg_init(struct pt_dev *ptdev,
         /* set No Soft Reset */
         ptdev->pm_state->no_soft_reset = (*(uint8_t *)(d->config + real_offset)
             & (uint8_t)PCI_PM_CTRL_NO_SOFT_RESET);
+
+    /* wake up real physical device */
+    switch ( pci_read_word(ptdev->pci_dev, real_offset) 
+             & PCI_PM_CTRL_STATE_MASK )
+    {
+    case 0:
+        break;
+    case 1:
+        PT_LOG("Power state transition D1 -> D0active\n");
+        pci_write_word(ptdev->pci_dev, real_offset, 0);
+        break;
+    case 2:
+        PT_LOG("Power state transition D2 -> D0active\n");
+        pci_write_word(ptdev->pci_dev, real_offset, 0);
+        usleep(200);
+        break;
+    case 3:
+        PT_LOG("Power state transition D3hot -> D0active\n");
+        pci_write_word(ptdev->pci_dev, real_offset, 0);
+        usleep(10 * 1000);
+        pt_init_pci_config(ptdev);
+        break;
+    }
 
     return reg->init_val;
 }
@@ -3486,6 +3520,19 @@ static int pt_bar_reg_restore(struct pt_dev *ptdev,
     /* create value for restoring to I/O device register */
     *value = PT_MERGE_VALUE(*value, dev_value, bar_emu_mask);
 
+    return 0;
+}
+
+/* restore ROM BAR */
+static int pt_exp_rom_bar_reg_restore(struct pt_dev *ptdev,
+    struct pt_reg_tbl *cfg_entry,
+    uint32_t real_offset, uint32_t dev_value, uint32_t *value)
+{
+    struct pt_reg_info_tbl *reg = cfg_entry->reg;
+
+    /* use value from kernel sysfs */
+    *value = PT_MERGE_VALUE(ptdev->pci_dev->rom_base_addr, dev_value, 
+                            reg->emu_mask);
     return 0;
 }
 
