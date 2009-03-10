@@ -1628,7 +1628,7 @@ static void vga_draw_graphic(VGAState *s, int full_update)
         if (depth == 32) {
 #endif
             if (is_graphic_console()) {
-                qemu_free_displaysurface(s->ds->surface);
+                qemu_free_displaysurface(s->ds);
                 s->ds->surface = qemu_create_displaysurface_from(disp_width, height, depth,
                                                                s->line_offset,
                                                                s->vram_ptr + (s->start_addr * 4));
@@ -2769,7 +2769,7 @@ static void vga_screen_dump(void *opaque, const char *filename)
     dcl.dpy_resize = vga_save_dpy_resize;
     dcl.dpy_refresh = vga_save_dpy_refresh;
     register_displaychangelistener(ds, &dcl);
-    ds->surface = qemu_create_displaysurface(w, h, 32, 4 * w);
+    ds->surface = qemu_create_displaysurface(ds, w, h, 32, 4 * w);
  
     s->ds = ds;
     s->graphic_mode = -1;
@@ -2777,6 +2777,6 @@ static void vga_screen_dump(void *opaque, const char *filename)
 
     ppm_save(filename, ds->surface);
 
-    qemu_free_displaysurface(ds->surface);
+    qemu_free_displaysurface(ds);
     s->ds = saved_ds;
 }

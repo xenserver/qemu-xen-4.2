@@ -1033,7 +1033,7 @@ void console_select(unsigned int index)
         DisplayState *ds = s->ds;
         active_console = s;
         if (ds_get_bits_per_pixel(s->ds)) {
-            ds->surface = qemu_resize_displaysurface(ds->surface, s->g_width,
+            ds->surface = qemu_resize_displaysurface(ds, s->g_width,
                     s->g_height, 32, 4 * s->g_width);
         } else {
             s->ds->surface->width = s->width;
@@ -1247,11 +1247,12 @@ DisplayState *graphic_console_init(vga_hw_update_ptr update,
     ds = (DisplayState *) qemu_mallocz(sizeof(DisplayState));
     if (ds == NULL)
         return NULL;
-    ds->surface = qemu_create_displaysurface(640, 480, 32, 640 * 4);
+    ds->allocator = &default_allocator; 
+    ds->surface = qemu_create_displaysurface(ds, 640, 480, 32, 640 * 4);
 
     s = new_console(ds, GRAPHIC_CONSOLE);
     if (s == NULL) {
-        qemu_free_displaysurface(ds->surface);
+        qemu_free_displaysurface(ds);
         qemu_free(ds);
         return NULL;
     }
@@ -1401,7 +1402,7 @@ void qemu_console_resize(DisplayState *ds, int width, int height)
     s->g_width = width;
     s->g_height = height;
     if (is_graphic_console()) {
-        ds->surface = qemu_resize_displaysurface(ds->surface, width, height, 32, 4 * width);
+        ds->surface = qemu_resize_displaysurface(ds, width, height, 32, 4 * width);
         dpy_resize(ds);
     }
 }
@@ -1524,11 +1525,11 @@ PixelFormat qemu_default_pixelformat(int bpp)
     return pf;
 }
 
-DisplaySurface* qemu_create_displaysurface(int width, int height, int bpp, int linesize)
+DisplaySurface* defaultallocator_create_displaysurface(int width, int height, int bpp, int linesize)
 {
     DisplaySurface *surface = (DisplaySurface*) qemu_mallocz(sizeof(DisplaySurface));
     if (surface == NULL) {
-        fprintf(stderr, "qemu_create_displaysurface: malloc failed\n");
+        fprintf(stderr, "defaultallocator_create_displaysurface: malloc failed\n");
         exit(1);
     }
 
@@ -1543,14 +1544,14 @@ DisplaySurface* qemu_create_displaysurface(int width, int height, int bpp, int l
 #endif
     surface->data = (uint8_t*) qemu_mallocz(surface->linesize * surface->height);
     if (surface->data == NULL) {
-        fprintf(stderr, "qemu_create_displaysurface: malloc failed\n");
+        fprintf(stderr, "defaultallocator_create_displaysurface: malloc failed\n");
         exit(1);
     }
 
     return surface;
 }
 
-DisplaySurface* qemu_resize_displaysurface(DisplaySurface *surface,
+DisplaySurface* defaultallocator_resize_displaysurface(DisplaySurface *surface,
                                           int width, int height, int bpp, int linesize)
 {
     surface->width = width;
@@ -1562,7 +1563,7 @@ DisplaySurface* qemu_resize_displaysurface(DisplaySurface *surface,
     else
         surface->data = (uint8_t*) qemu_malloc(surface->linesize * surface->height);
     if (surface->data == NULL) {
-        fprintf(stderr, "qemu_resize_displaysurface: malloc failed\n");
+        fprintf(stderr, "defaultallocator_resize_displaysurface: malloc failed\n");
         exit(1);
     }
 #ifdef WORDS_BIGENDIAN
@@ -1595,7 +1596,7 @@ DisplaySurface* qemu_create_displaysurface_from(int width, int height, int bpp,
     return surface;
 }
 
-void qemu_free_displaysurface(DisplaySurface *surface)
+void defaultallocator_free_displaysurface(DisplaySurface *surface)
 {
     if (surface == NULL)
         return;

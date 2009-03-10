@@ -6243,6 +6243,12 @@ void pcmcia_info(void)
 /***********************************************************/
 /* register display */
 
+struct DisplayAllocator default_allocator = {
+    defaultallocator_create_displaysurface,
+    defaultallocator_resize_displaysurface,
+    defaultallocator_free_displaysurface
+};
+
 void register_displaystate(DisplayState *ds)
 {
     DisplayState **s;
@@ -6258,6 +6264,12 @@ DisplayState *get_displaystate(void)
     return display_state;
 }
 
+DisplayAllocator *register_displayallocator(DisplayState *ds, DisplayAllocator *da)
+{
+    if(ds->allocator ==  &default_allocator) ds->allocator = da;
+    return ds->allocator;
+}
+
 /* dumb display */
 
 static void dumb_display_init(void)
@@ -6267,7 +6279,8 @@ static void dumb_display_init(void)
         fprintf(stderr, "dumb_display_init: DisplayState allocation failed\n");
         exit(1);
     }
-    ds->surface = qemu_create_displaysurface(640, 480, 32, 640 * 4);
+    ds->allocator = &default_allocator;
+    ds->surface = qemu_create_displaysurface(ds, 640, 480, 32, 640 * 4);
     register_displaystate(ds);
 }
 
@@ -10107,6 +10120,9 @@ int main(int argc, char **argv)
                   kernel_filename, kernel_cmdline, initrd_filename, cpu_model,
 		  direct_pci);
 
+    if (loadvm)
+        do_loadvm(loadvm);
+
     /* init USB devices */
     if (usb_enabled) {
         for(i = 0; i < usb_devices_index; i++) {
@@ -10218,9 +10234,6 @@ int main(int argc, char **argv)
         }
     }
 #endif
-
-    if (loadvm)
-        do_loadvm(loadvm);
 
     if (incoming) {
         autostart = 0; /* fixme how to deal with -daemonize */

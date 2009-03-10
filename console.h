@@ -107,11 +107,19 @@ struct DisplayChangeListener {
     struct DisplayChangeListener *next;
 };
 
+struct DisplayAllocator {
+    DisplaySurface* (*create_displaysurface)(int width, int height, int bpp, int linesize);
+    DisplaySurface* (*resize_displaysurface)(DisplaySurface *surface,
+            int width, int height, int bpp, int linesize);
+    void (*free_displaysurface)(DisplaySurface *surface);
+};
+
 struct DisplayState {
     struct DisplaySurface *surface;
     void *opaque;
     struct QEMUTimer *gui_timer;
 
+    struct DisplayAllocator* allocator;
     struct DisplayChangeListener* listeners;
 
     void (*mouse_set)(int x, int y, int on);
@@ -123,14 +131,32 @@ struct DisplayState {
 
 void register_displaystate(DisplayState *ds);
 DisplayState *get_displaystate(void);
-DisplaySurface* qemu_create_displaysurface(int width, int height, int bpp, int linesize);
-DisplaySurface* qemu_resize_displaysurface(DisplaySurface *surface,
-                                           int width, int height, int bpp, int linesize);
 DisplaySurface* qemu_create_displaysurface_from(int width, int height, int bpp,
                                                 int linesize, uint8_t *data);
-void qemu_free_displaysurface(DisplaySurface *surface);
 PixelFormat qemu_different_endianness_pixelformat(int bpp);
 PixelFormat qemu_default_pixelformat(int bpp);
+
+extern struct DisplayAllocator default_allocator;
+DisplayAllocator *register_displayallocator(DisplayState *ds, DisplayAllocator *da);
+DisplaySurface* defaultallocator_create_displaysurface(int width, int height, int bpp, int linesize);
+DisplaySurface* defaultallocator_resize_displaysurface(DisplaySurface *surface,
+        int width, int height, int bpp, int linesize);
+void defaultallocator_free_displaysurface(DisplaySurface *surface);
+
+static inline DisplaySurface* qemu_create_displaysurface(DisplayState *ds, int width, int height, int bpp, int linesize)
+{
+    return ds->allocator->create_displaysurface(width, height, bpp, linesize);    
+}
+
+static inline DisplaySurface* qemu_resize_displaysurface(DisplayState *ds, int width, int height, int bpp, int linesize)
+{
+    return ds->allocator->resize_displaysurface(ds->surface, width, height, bpp, linesize);
+}
+
+static inline void qemu_free_displaysurface(DisplayState *ds)
+{
+    ds->allocator->free_displaysurface(ds->surface);
+}
 
 static inline int is_buffer_shared(DisplaySurface *surface)
 {

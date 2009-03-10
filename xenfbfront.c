@@ -215,6 +215,76 @@ static void kbdfront_thread(void *p)
     }
 }
 
+
+static DisplaySurface* xenfb_create_displaysurface(int width, int height, int bpp, int linesize)
+{
+    DisplaySurface *surface = (DisplaySurface*) qemu_mallocz(sizeof(DisplaySurface));
+    if (surface == NULL) {
+        fprintf(stderr, "xenfb_create_displaysurface: malloc failed\n");
+        exit(1);
+    }
+
+    surface->width = width;
+    surface->height = height;
+    surface->linesize = linesize;
+    surface->pf = qemu_default_pixelformat(bpp);
+#ifdef WORDS_BIGENDIAN
+    surface->flags = QEMU_ALLOCATED_FLAG | QEMU_BIG_ENDIAN_FLAG;
+#else
+    surface->flags = QEMU_ALLOCATED_FLAG;
+#endif
+    surface->data = xs->nonshared_vram;
+
+    return surface;
+}
+
+static DisplaySurface* xenfb_resize_displaysurface(DisplaySurface *surface,
+                                          int width, int height, int bpp, int linesize)
+{
+    surface->width = width;
+    surface->height = height;
+    surface->linesize = linesize;
+    surface->pf = qemu_default_pixelformat(bpp);
+#ifdef WORDS_BIGENDIAN
+    surface->flags = QEMU_ALLOCATED_FLAG | QEMU_BIG_ENDIAN_FLAG;
+#else
+    surface->flags = QEMU_ALLOCATED_FLAG;
+#endif
+    surface->data = xs->nonshared_vram;
+
+    return surface;
+}
+
+static void xenfb_free_displaysurface(DisplaySurface *surface)
+{
+    if (surface == NULL)
+        return;
+    qemu_free(surface);
+}
+
+static void xenfb_pv_display_allocator(void)
+{
+    DisplaySurface *ds;
+    DisplayAllocator *da = qemu_mallocz(sizeof(DisplayAllocator));
+    da->create_displaysurface = xenfb_create_displaysurface;
+    da->resize_displaysurface = xenfb_resize_displaysurface;
+    da->free_displaysurface = xenfb_free_displaysurface;
+    if (register_displayallocator(xs->ds, da) != da) {
+        fprintf(stderr, "xenfb_pv_display_allocator: could not register DisplayAllocator\n");
+        exit(1);
+    }
+
+    xs->nonshared_vram = qemu_memalign(PAGE_SIZE, vga_ram_size);
+    if (!xs->nonshared_vram) {
+        fprintf(stderr, "xenfb_pv_display_allocator: could not allocate nonshared_vram\n");
+        exit(1);
+    }
+
+    ds = xenfb_create_displaysurface(ds_get_width(xs->ds), ds_get_height(xs->ds), ds_get_bits_per_pixel(xs->ds), ds_get_linesize(xs->ds));
+    qemu_free_displaysurface(xs->ds);
+    xs->ds->surface = ds;
+}
+
 int xenfb_pv_display_init(DisplayState *ds)
 {
     struct fbfront_dev *fb_dev;
@@ -233,7 +303,8 @@ int xenfb_pv_display_init(DisplayState *ds)
 
     init_SEMAPHORE(&xs->kbd_sem, 0);
     xs->ds = ds;
-    xs->nonshared_vram = ds_get_data(ds);
+
+    xenfb_pv_display_allocator();
 
     create_thread("kbdfront", kbdfront_thread, (void*) xs);
 
