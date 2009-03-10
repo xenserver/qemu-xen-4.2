@@ -52,6 +52,7 @@ static SDL_Cursor *sdl_cursor_normal;
 static SDL_Cursor *sdl_cursor_hidden;
 static int absolute_enabled = 0;
 static int opengl_enabled;
+static uint8_t bgr;
 
 static void sdl_colourdepth(DisplayState *ds, int depth);
 
@@ -119,7 +120,7 @@ static void opengl_setdata(DisplayState *ds, void *pixels)
             tex_type = GL_UNSIGNED_BYTE;
             break;
         case 32:
-            if (!ds->bgr) {
+            if (!bgr) {
                 tex_format = GL_BGRA;
                 tex_type = GL_UNSIGNED_BYTE;
             } else {
@@ -275,9 +276,9 @@ static void sdl_resize_shared(DisplayState *ds, int w, int h, int depth, int lin
     if (!ds->shared_buf) {
         ds->depth = screen->format->BitsPerPixel;
 	if (screen->format->Bshift > screen->format->Rshift) {
-            ds->bgr = 1;
+            bgr = 1;
         } else {
-            ds->bgr = 0;
+            bgr = 0;
         }
         shared = NULL;
         ds->data = screen->pixels;

@@ -1173,10 +1173,7 @@ static inline int get_depth_index(DisplayState *s)
     case 16:
         return 2;
     case 32:
-        if (s->bgr)
-            return 4;
-        else
-            return 3;
+        return 3;
     }
 }
 
