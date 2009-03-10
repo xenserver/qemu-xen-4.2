@@ -1190,7 +1190,7 @@ static TextConsole *new_console(DisplayState *ds, console_type_t console_type)
     } else {
         /* HACK: Put graphical consoles before text consoles.  */
         for (i = nb_consoles; i > 0; i--) {
-            if (!consoles[i - 1]->console_type == GRAPHIC_CONSOLE)
+            if (consoles[i - 1]->console_type == GRAPHIC_CONSOLE)
                 break;
             consoles[i] = consoles[i - 1];
         }
@@ -1258,6 +1258,8 @@ static char *text_console_strs[128];
 static void text_console_do_init(CharDriverState *chr, DisplayState *ds, const char *p)
 {
     TextConsole *s;
+    unsigned width;
+    unsigned height;
     static int color_inited;
 
     s = new_console(ds, (p == 0) ? TEXT_CONSOLE : TEXT_CONSOLE_FIXED_SIZE);
@@ -1277,15 +1279,36 @@ static void text_console_do_init(CharDriverState *chr, DisplayState *ds, const c
 
     if (!color_inited) {
         color_inited = 1;
-        console_color_init(ds);
+        console_color_init(s->ds);
     }
     s->y_displayed = 0;
     s->y_base = 0;
     s->total_height = DEFAULT_BACKSCROLL;
     s->x = 0;
     s->y = 0;
-    s->g_width = ds_get_width(s->ds);
-    s->g_height = ds_get_height(s->ds);
+    width = ds_get_width(s->ds);
+    height = ds_get_height(s->ds);
+    if (p != 0) {
+        width = strtoul(p, (char **)&p, 10);
+        if (*p == 'C') {
+            p++;
+            width *= FONT_WIDTH;
+        }
+        if (*p == 'x') {
+            p++;
+            height = strtoul(p, (char **)&p, 10);
+            if (*p == 'C') {
+                p++;
+                height *= FONT_HEIGHT;
+            }
+        }
+    }
+    s->g_width = width;
+    s->g_height = height;
+
+    s->hw_invalidate = text_console_invalidate;
+    s->hw_text_update = text_console_update;
+    s->hw = s;
 
     /* Set text attribute defaults */
     s->t_attrib_default.bold = 0;
