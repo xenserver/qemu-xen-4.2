@@ -73,10 +73,10 @@ static void xenfb_pv_resize_shared(DisplayState *ds, int w, int h, int depth, in
     if (ds->shared_buf) {
         offset = pixels - xs->vga_vram;
         ds->data = pixels;
-        fbfront_resize(fb_dev, ds->width, ds->height, ds->linesize, ds->depth, offset);
+        fbfront_resize(fb_dev, ds_get_width(ds), ds_get_height(ds), ds_get_linesize(ds), ds_get_bits_per_pixel(ds), offset);
     } else {
         ds->data = xs->nonshared_vram;
-        fbfront_resize(fb_dev, w, h, linesize, ds->depth, vga_ram_size);
+        fbfront_resize(fb_dev, w, h, linesize, ds_get_bits_per_pixel(ds), vga_ram_size);
     }
 }
 
@@ -93,7 +93,7 @@ static void xenfb_pv_setdata(DisplayState *ds, void *pixels)
     ds->data = pixels;
     if (!fb_dev)
         return;
-    fbfront_resize(fb_dev, ds->width, ds->height, ds->linesize, ds->depth, offset);
+    fbfront_resize(fb_dev, ds_get_width(ds), ds_get_height(ds), ds_get_linesize(ds), ds_get_bits_per_pixel(ds), offset);
 }
 
 static void xenfb_pv_refresh(DisplayState *ds)
@@ -151,14 +151,14 @@ static void xenfb_kbd_handler(void *opaque)
             {
                 int new_x = buf[i].pos.abs_x;
                 int new_y = buf[i].pos.abs_y;
-                if (new_x >= s->width)
-                    new_x = s->width - 1;
-                if (new_y >= s->height)
-                    new_y = s->height - 1;
+                if (new_x >= ds_get_width(s))
+                    new_x = ds_get_width(s) - 1;
+                if (new_y >= ds_get_height(s))
+                    new_y = ds_get_height(s) - 1;
                 if (kbd_mouse_is_absolute()) {
                     kbd_mouse_event(
-                            new_x * 0x7FFF / (s->width - 1),
-                            new_y * 0x7FFF / (s->height - 1),
+                            new_x * 0x7FFF / (ds_get_width(s) - 1),
+                            new_y * 0x7FFF / (ds_get_height(s) - 1),
                             buf[i].pos.rel_z,
                             buttons);
                 } else {
@@ -192,8 +192,8 @@ static void xenfb_kbd_handler(void *opaque)
                         buttons &= ~button;
                     if (kbd_mouse_is_absolute())
                         kbd_mouse_event(
-                                x * 0x7FFF / (s->width - 1),
-                                y * 0x7FFF / (s->height - 1),
+                                x * 0x7FFF / (ds_get_width(s) - 1),
+                                y * 0x7FFF / (ds_get_height(s) - 1),
                                 0,
                                 buttons);
                     else
@@ -287,7 +287,7 @@ int xenfb_pv_display_start(void *data)
     for (i = 0; i < n; i++)
         mfns[n + i] = virtual_to_mfn(xs->nonshared_vram + i * PAGE_SIZE);
 
-    fb_dev = init_fbfront(fb_path, mfns, ds->width, ds->height, ds->depth, ds->linesize, 2 * n);
+    fb_dev = init_fbfront(fb_path, mfns, ds_get_width(ds), ds_get_height(ds), ds_get_bits_per_pixel(ds), ds_get_linesize(ds), 2 * n);
     free(mfns);
     if (!fb_dev) {
         fprintf(stderr,"can't open frame buffer\n");
@@ -302,7 +302,7 @@ int xenfb_pv_display_start(void *data)
         ds->data = xs->nonshared_vram;
     }
     if (offset)
-        fbfront_resize(fb_dev, ds->width, ds->height, ds->linesize, ds->depth, offset);
+        fbfront_resize(fb_dev, ds_get_width(ds), ds_get_height(ds), ds_get_linesize(ds), ds_get_bits_per_pixel(ds), offset);
 
     down(&xs->kbd_sem);
     free(kbd_path);

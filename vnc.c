@@ -514,10 +514,10 @@ static void send_framebuffer_update_raw(VncState *vs, int x, int y, int w, int h
 
     vnc_framebuffer_update(vs, x, y, w, h, 0);
 
-    row = vs->ds->data + y * vs->ds->linesize + x * vs->depth;
+    row = ds_get_data(vs->ds) + y * ds_get_linesize(vs->ds) + x * vs->depth;
     for (i = 0; i < h; i++) {
 	vs->write_pixels(vs, row, w * vs->depth);
-	row += vs->ds->linesize;
+	row += ds_get_linesize(vs->ds);
     }
 }
 
@@ -594,7 +594,7 @@ static void vnc_copy(DisplayState *ds, int src_x, int src_y, int dst_x, int dst_
     uint8_t *dst_row;
     uint8_t *old_row;
     int y = 0;
-    int pitch = ds->linesize;
+    int pitch = ds_get_linesize(ds);
     VncState *vs = ds->opaque;
     int updating_client = 1;
 
@@ -620,11 +620,11 @@ static void vnc_copy(DisplayState *ds, int src_x, int src_y, int dst_x, int dst_
 	pitch = -pitch;
     }
 
-    src = (ds->linesize * (src_y + y) + vs->depth * src_x);
-    dst = (ds->linesize * (dst_y + y) + vs->depth * dst_x);
+    src = (ds_get_linesize(ds) * (src_y + y) + vs->depth * src_x);
+    dst = (ds_get_linesize(ds) * (dst_y + y) + vs->depth * dst_x);
 
-    src_row = ds->data + src;
-    dst_row = ds->data + dst;
+    src_row = ds_get_data(ds) + src;
+    dst_row = ds_get_data(ds) + dst;
     old_row = vs->old_data + dst;
 
     for (y = 0; y < h; y++) {
@@ -1916,10 +1916,10 @@ static int protocol_client_init(VncState *vs, uint8_t *data, size_t len)
 
     vga_hw_update();
 
-    vs->width = vs->ds->width;
-    vs->height = vs->ds->height;
-    vnc_write_u16(vs, vs->ds->width);
-    vnc_write_u16(vs, vs->ds->height);
+    vs->width = ds_get_width(vs->ds);
+    vs->height = ds_get_height(vs->ds);
+    vnc_write_u16(vs, ds_get_width(vs->ds));
+    vnc_write_u16(vs, ds_get_height(vs->ds));
 
     pixel_format_message(vs);
 

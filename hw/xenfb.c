@@ -325,8 +325,8 @@ static void xenfb_mouse_event(void *opaque,
 
     if (xenfb->abs_pointer_wanted)
 	xenfb_send_position(xenfb,
-			    dx * (xenfb->c.ds->width - 1) / 0x7fff,
-			    dy * (xenfb->c.ds->height - 1) / 0x7fff,
+			    dx * (ds_get_width(xenfb->c.ds) - 1) / 0x7fff,
+			    dy * (ds_get_height(xenfb->c.ds) - 1) / 0x7fff,
 			    dz);
     else
 	xenfb_send_motion(xenfb, dx, dy, dz);
@@ -566,9 +566,9 @@ static int xenfb_configure_fb(struct XenFB *xenfb, size_t fb_len_lim,
 			       + xenfb->offset				\
 			       + (line * xenfb->row_stride)		\
 			       + (x * xenfb->depth / 8));		\
-	DST_T *dst = (DST_T *)(xenfb->c.ds->data				\
-			       + (line * xenfb->c.ds->linesize)		\
-			       + (x * xenfb->c.ds->depth / 8));		\
+	DST_T *dst = (DST_T *)(ds_get_data(xenfb->c.ds)				\
+			       + (line * ds_get_linesize(xenfb->c.ds))		\
+			       + (x * ds_get_bytes_per_pixel(xenfb->c.ds)));		\
 	int col;							\
 	const int RSS = 32 - (RSB + GSB + BSB);				\
 	const int GSS = 32 - (GSB + BSB);				\
@@ -588,7 +588,7 @@ static int xenfb_configure_fb(struct XenFB *xenfb, size_t fb_len_lim,
 		(((spix << GSS) & GSM & GDM) >> GDS) |			\
 		(((spix << BSS) & BSM & BDM) >> BDS);			\
 	    src = (SRC_T *) ((unsigned long) src + xenfb->depth / 8);	\
-	    dst = (DST_T *) ((unsigned long) dst + xenfb->c.ds->depth / 8); \
+	    dst = (DST_T *) ((unsigned long) dst + ds_get_bytes_per_pixel(xenfb->c.ds)); \
 	}								\
     }
 
@@ -610,9 +610,9 @@ static void xenfb_guest_copy(struct XenFB *xenfb, int x, int y, int w, int h)
      *        - Put ds->shared_buf back into use then.
      */
     if (1 /* !xenfb->c.ds->shared_buf */) {
-	if (xenfb->depth == xenfb->c.ds->depth) { /* Perfect match can use fast path */
+	if (xenfb->depth == ds_get_bits_per_pixel(xenfb->c.ds)) { /* Perfect match can use fast path */
 	    for (line = y ; line < (y+h) ; line++) {
-		memcpy(xenfb->c.ds->data + (line * xenfb->c.ds->linesize) + (x * xenfb->c.ds->depth / 8),
+		memcpy(ds_get_data(xenfb->c.ds) + (line * ds_get_linesize(xenfb->c.ds)) + (x * ds_get_bytes_per_pixel(xenfb->c.ds)),
 		       xenfb->pixels + xenfb->offset + (line * xenfb->row_stride) + (x * xenfb->depth / 8),
 		       w * xenfb->depth / 8);
 	    }
@@ -622,23 +622,23 @@ static void xenfb_guest_copy(struct XenFB *xenfb, int x, int y, int w, int h)
 	    /* 24 bit == r:8 g:8 b:8 */
 	    /* 32 bit == r:8 g:8 b:8 (padding:8) */
 	    if (xenfb->depth == 8) {
-		if (xenfb->c.ds->depth == 16) {
+		if (ds_get_bits_per_pixel(xenfb->c.ds) == 16) {
 		    BLT(uint8_t, uint16_t,   3, 3, 2,   5, 6, 5);
-		} else if (xenfb->c.ds->depth == 32) {
+		} else if (ds_get_bits_per_pixel(xenfb->c.ds) == 32) {
 		    BLT(uint8_t, uint32_t,   3, 3, 2,   8, 8, 8);
 		}
 	    } else if (xenfb->depth == 16) {
-		if (xenfb->c.ds->depth == 8) {
+		if (ds_get_bits_per_pixel(xenfb->c.ds) == 8) {
 		    BLT(uint16_t, uint8_t,   5, 6, 5,   3, 3, 2);
-		} else if (xenfb->c.ds->depth == 32) {
+		} else if (ds_get_bits_per_pixel(xenfb->c.ds) == 32) {
 		    BLT(uint16_t, uint32_t,  5, 6, 5,   8, 8, 8);
 		}
 	    } else if (xenfb->depth == 24 || xenfb->depth == 32) {
-		if (xenfb->c.ds->depth == 8) {
+		if (ds_get_bits_per_pixel(xenfb->c.ds) == 8) {
 		    BLT(uint32_t, uint8_t,   8, 8, 8,   3, 3, 2);
-		} else if (xenfb->c.ds->depth == 16) {
+		} else if (ds_get_bits_per_pixel(xenfb->c.ds) == 16) {
 		    BLT(uint32_t, uint16_t,  8, 8, 8,   5, 6, 5);
-		} else if (xenfb->c.ds->depth == 32) {
+		} else if (ds_get_bits_per_pixel(xenfb->c.ds) == 32) {
 		    BLT(uint32_t, uint32_t,  8, 8, 8,   8, 8, 8);
 		}
 	    }
@@ -730,7 +730,7 @@ static void xenfb_update(void *opaque)
     }
 
     /* resize if needed */
-    if (xenfb->width != xenfb->c.ds->width || xenfb->height != xenfb->c.ds->height) {
+    if (xenfb->width != ds_get_width(xenfb->c.ds) || xenfb->height != ds_get_height(xenfb->c.ds)) {
         xen_be_printf(&xenfb->c.xendev, 1, "update: resizing: %dx%d\n",
                       xenfb->width, xenfb->height);
         dpy_resize(xenfb->c.ds, xenfb->width, xenfb->height);

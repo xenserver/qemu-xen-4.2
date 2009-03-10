@@ -88,7 +88,7 @@ static void opengl_setdata(DisplayState *ds, void *pixels)
     glGenTextures(1, &texture_ref);
     glBindTexture(GL_TEXTURE_RECTANGLE_ARB, texture_ref);
     glPixelStorei(GL_UNPACK_LSB_FIRST, 1);
-    switch (ds->depth) {
+    switch (ds_get_bits_per_pixel(ds)) {
         case 8:
             if (ds->palette == NULL) {
                 tex_format = GL_RGB;
@@ -128,8 +128,8 @@ static void opengl_setdata(DisplayState *ds, void *pixels)
             }
             break;
     }   
-    glPixelStorei(GL_UNPACK_ROW_LENGTH, (ds->linesize * 8) / ds->depth);
-    glTexImage2D(GL_TEXTURE_RECTANGLE_ARB, 0, gl_format, ds->width, ds->height, 0, tex_format, tex_type, pixels);
+    glPixelStorei(GL_UNPACK_ROW_LENGTH, (ds_get_linesize(ds) / ds_get_bytes_per_pixel(ds)));
+    glTexImage2D(GL_TEXTURE_RECTANGLE_ARB, 0, gl_format, ds_get_width(ds), ds_get_height(ds), 0, tex_format, tex_type, pixels);
     glTexParameterf(GL_TEXTURE_RECTANGLE_ARB, GL_TEXTURE_PRIORITY, 1.0);
     glTexParameteri(GL_TEXTURE_RECTANGLE_ARB, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_RECTANGLE_ARB, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
@@ -140,10 +140,10 @@ static void opengl_setdata(DisplayState *ds, void *pixels)
 
 static void opengl_update(DisplayState *ds, int x, int y, int w, int h)
 {  
-    int bpp = ds->depth / 8;
-    GLvoid *pixels = ds->data + y * ds->linesize + x * bpp;
+    int bpp = ds_get_bytes_per_pixel(ds);
+    GLvoid *pixels = ds_get_data(ds) + y * ds_get_linesize(ds) + x * bpp;
     glBindTexture(GL_TEXTURE_RECTANGLE_ARB, texture_ref);
-    glPixelStorei(GL_UNPACK_ROW_LENGTH, ds->linesize / bpp);
+    glPixelStorei(GL_UNPACK_ROW_LENGTH, ds_get_linesize(ds) / bpp);
     glTexSubImage2D(GL_TEXTURE_RECTANGLE_ARB, 0, x, y, w, h, tex_format, tex_type, pixels);
     glBegin(GL_QUADS);
         glTexCoord2d(0, 0);
@@ -177,7 +177,7 @@ static void sdl_update(DisplayState *ds, int x, int y, int w, int h)
 static void sdl_setdata(DisplayState *ds, void *pixels)
 {
     uint32_t rmask, gmask, bmask, amask = 0;
-    switch (ds->depth) {
+    switch (ds_get_bits_per_pixel(ds)) {
         case 8:
             rmask = 0x000000E0;
             gmask = 0x0000001C;
@@ -201,8 +201,8 @@ static void sdl_setdata(DisplayState *ds, void *pixels)
         default:
             return;
     }
-    shared = SDL_CreateRGBSurfaceFrom(pixels, width, height, ds->depth, ds->linesize, rmask , gmask, bmask, amask);
-    if (ds->depth == 8 && ds->palette != NULL) {
+    shared = SDL_CreateRGBSurfaceFrom(pixels, width, height, ds_get_bits_per_pixel(ds), ds_get_linesize(ds), rmask , gmask, bmask, amask);
+    if (ds_get_bits_per_pixel(ds) == 8 && ds->palette != NULL) {
         SDL_Color palette[256];
         int i;
         for (i = 0; i < 256; i++) {
@@ -309,7 +309,7 @@ static void sdl_resize_shared(DisplayState *ds, int w, int h, int depth, int lin
 
 static void sdl_resize(DisplayState *ds, int w, int h)
 {
-    sdl_resize_shared(ds, w, h, 0, w * (ds->depth / 8), NULL);
+    sdl_resize_shared(ds, w, h, 0, w * ds_get_bytes_per_pixel(ds), NULL);
 }
 
 static void sdl_colourdepth(DisplayState *ds, int depth)
@@ -537,7 +537,7 @@ static void sdl_send_mouse_event(int dx, int dy, int dz, int state)
 static void toggle_full_screen(DisplayState *ds)
 {
     gui_fullscreen = !gui_fullscreen;
-    sdl_resize_shared(ds, ds->width, ds->height, ds->depth, ds->linesize, ds->data);
+    sdl_resize_shared(ds, ds_get_width(ds), ds_get_height(ds), ds_get_bits_per_pixel(ds), ds_get_linesize(ds), ds_get_data(ds));
     if (gui_fullscreen) {
         gui_saved_grab = gui_grab;
         sdl_grab_start();
