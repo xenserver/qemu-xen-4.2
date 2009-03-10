@@ -86,7 +86,6 @@ struct XenFB {
     int               feature_update;
     int               refresh_period;
     int               bug_trigger;
-    int               have_console;
 
     struct {
 	int x,y,w,h;
@@ -346,12 +345,6 @@ static void xenfb_mouse_event(void *opaque,
 static int input_init(struct XenDevice *xendev)
 {
     struct XenInput *in = container_of(xendev, struct XenInput, c.xendev);
-
-    if (!in->c.ds) {
-        /* xen_set_display() below will set that and trigger us again */
-        xen_be_printf(xendev, 1, "ds not set (yet)\n");
-	return -1;
-    }
 
     xenstore_write_be_int(xendev, "feature-abs-pointer", 1);
     return 0;
@@ -702,6 +695,9 @@ static void xenfb_update(void *opaque)
     int i;
     struct DisplayChangeListener *l;
 
+    if (!xenfb->width || !xenfb->height)
+        return;
+
     if (xenfb->feature_update) {
 #ifdef XENFB_TYPE_REFRESH_PERIOD
         int period = 99999999;
@@ -841,12 +837,6 @@ static int fb_init(struct XenDevice *xendev)
 {
     struct XenFB *fb = container_of(xendev, struct XenFB, c.xendev);
 
-    if (!fb->c.ds) {
-        /* xen_set_display() below will set that and trigger us again */
-	xen_be_printf(xendev, 1, "ds not set (yet)\n");
-	return -1;
-    }
-
     fb->refresh_period = -1;
 
 #ifdef XENFB_TYPE_RESIZE
@@ -879,15 +869,6 @@ static int fb_connect(struct XenDevice *xendev)
     rc = xenfb_map_fb(fb);
     if (0 != rc)
 	return rc;
-
-    if (!fb->have_console) {
-        fb->c.ds = graphic_console_init(xenfb_update,
-                                        xenfb_invalidate,
-                                        NULL,
-                                        NULL,
-                                        fb);
-        fb->have_console = 1;
-    }
 
     if (-1 == xenstore_read_fe_int(xendev, "feature-update", &fb->feature_update))
 	fb->feature_update = 0;
@@ -977,8 +958,16 @@ static void xen_set_display_type(int domid, const char *type, DisplayState *ds)
     xen_be_check_state(xendev);
 }
 
-void xen_set_display(int domid, DisplayState *ds)
+void xen_set_display(int domid)
 {
+    struct XenDevice *xendev = xen_be_find_xendev("vfb", domid, 0);
+    struct XenFB *fb = container_of(xendev, struct XenFB, c.xendev);
+    DisplayState *ds = graphic_console_init(xenfb_update,
+            xenfb_invalidate,
+            NULL,
+            NULL,
+            fb);
+
     xen_set_display_type(domid, "vkbd", ds);
     xen_set_display_type(domid, "vfb", ds);
 }

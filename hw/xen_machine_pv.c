@@ -68,7 +68,7 @@ static void xen_init_pv(ram_addr_t ram_size, int vga_ram_size,
     xen_be_register("vfb", &xen_framebuffer_ops);
 
     /* setup framebuffer */
-    xen_set_display(xen_domid, ds);
+    xen_set_display(xen_domid);
 }
 
 QEMUMachine xenpv_machine = {

@@ -101,7 +101,7 @@ int xenstore_pv_driver_build_blacklisted(uint16_t product_number,
 
 /* xenfbfront.c */
 int xenfb_pv_display_init(DisplayState *ds);
-int xenfb_pv_display_start(void *vram_start);
+int xenfb_pv_display_vram(void *vram_start);
 int xenfb_connect_vkbd(const char *path);
 int xenfb_connect_vfb(const char *path);
 

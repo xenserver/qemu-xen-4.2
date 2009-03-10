@@ -2497,7 +2497,7 @@ void xen_vga_vram_map(uint64_t vram_addr, uint32_t vga_ram_size)
 
     xen_vga_state->vram_ptr = vram;
 #ifdef CONFIG_STUBDOM
-    xenfb_pv_display_start(vram);
+    xenfb_pv_display_vram(vram);
 #endif
 }
 
@@ -2539,13 +2539,13 @@ void vga_common_init(VGAState *s, uint8_t *vga_ram_base,
     s->get_offsets = vga_get_offsets;
     s->get_resolution = vga_get_resolution;
 
+    s->ds = graphic_console_init(vga_update_display, vga_invalidate_display,
+                                 vga_screen_dump, vga_update_text, s);
+
     if (!restore) {
         xen_vga_populate_vram(VRAM_RESERVED_ADDRESS, s->vram_size);
         s->vram_gmfn = VRAM_RESERVED_ADDRESS;
     }
-
-    s->ds = graphic_console_init(vga_update_display, vga_invalidate_display,
-                                 vga_screen_dump, vga_update_text, s);
 
     vga_bios_init(s);
     switch (vga_retrace_method) {
