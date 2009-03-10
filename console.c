@@ -139,6 +139,11 @@ struct TextConsole {
     TextCell *cells;
     int text_x[2], text_y[2], cursor_invalidate;
 
+    int update_x0;
+    int update_y0;
+    int update_x1;
+    int update_y1;
+
     enum TTYState state;
     int esc_params[MAX_ESC_PARAMS];
     int nb_esc_params;
@@ -519,6 +524,18 @@ static void text_console_resize(TextConsole *s)
     s->cells = cells;
 }
 
+static void invalidate_xy(TextConsole *s, int x, int y)
+{
+    if (s->update_x0 > x * FONT_WIDTH)
+        s->update_x0 = x * FONT_WIDTH;
+    if (s->update_y0 > y * FONT_HEIGHT)
+        s->update_y0 = y * FONT_HEIGHT;
+    if (s->update_x1 < (x + 1) * FONT_WIDTH)
+        s->update_x1 = (x + 1) * FONT_WIDTH;
+    if (s->update_y1 < (y + 1) * FONT_HEIGHT)
+        s->update_y1 = (y + 1) * FONT_HEIGHT;
+}
+
 static void update_xy(TextConsole *s, int x, int y)
 {
     TextCell *c;
@@ -533,8 +550,7 @@ static void update_xy(TextConsole *s, int x, int y)
             c = &s->cells[y1 * s->width + x];
             vga_putcharxy(s->ds, x, y2, c->ch,
                           &(c->t_attrib));
-            dpy_update(s->ds, x * FONT_WIDTH, y2 * FONT_HEIGHT,
-                       FONT_WIDTH, FONT_HEIGHT);
+            invalidate_xy(s, x, y2);
         }
     }
 }
@@ -545,22 +561,30 @@ static void console_show_cursor(TextConsole *s, int show)
     int y, y1;
 
     if (s == active_console) {
+        int x = s->x;
+
+        if (!ds_get_bits_per_pixel(s->ds)) {
+            s->cursor_invalidate = 1;
+            return;
+        }
+
+        if (x >= s->width) {
+            x = s->width - 1;
+        }
         y1 = (s->y_base + s->y) % s->total_height;
         y = y1 - s->y_displayed;
         if (y < 0)
             y += s->total_height;
         if (y < s->height) {
-            c = &s->cells[y1 * s->width + s->x];
+            c = &s->cells[y1 * s->width + x];
             if (show) {
                 TextAttributes t_attrib = s->t_attrib_default;
                 t_attrib.invers = !(t_attrib.invers); /* invert fg and bg */
-                vga_putcharxy(s->ds, s->x, y, c->ch, &t_attrib);
+                vga_putcharxy(s->ds, x, y, c->ch, &t_attrib);
             } else {
-                vga_putcharxy(s->ds, s->x, y, c->ch,
-                              &(c->t_attrib));
+                vga_putcharxy(s->ds, x, y, c->ch, &(c->t_attrib));
             }
-            dpy_update(s->ds, s->x * FONT_WIDTH, y * FONT_HEIGHT,
-                       FONT_WIDTH, FONT_HEIGHT);
+            invalidate_xy(s, x, y);
         }
     }
 }
@@ -586,8 +610,8 @@ static void console_refresh(TextConsole *s)
         if (++y1 == s->total_height)
             y1 = 0;
     }
-    dpy_update(s->ds, 0, 0, ds_get_width(s->ds), ds_get_height(s->ds));
     console_show_cursor(s, 1);
+    dpy_update(s->ds, 0, 0, ds_get_width(s->ds), ds_get_height(s->ds));
 }
 
 static void console_scroll(int ydelta)
@@ -655,8 +679,10 @@ static void console_put_lf(TextConsole *s)
             vga_fill_rect(s->ds, 0, (s->height - 1) * FONT_HEIGHT,
                           s->width * FONT_WIDTH, FONT_HEIGHT,
                           color_table[0][s->t_attrib_default.bgcol]);
-            dpy_update(s->ds, 0, 0,
-                       s->width * FONT_WIDTH, s->height * FONT_HEIGHT);
+            s->update_x0 = 0;
+            s->update_y0 = 0;
+            s->update_x1 = s->width * FONT_WIDTH;
+            s->update_y1 = s->height * FONT_HEIGHT;
         }
     }
 }
@@ -1023,11 +1049,20 @@ static int console_puts(CharDriverState *chr, const uint8_t *buf, int len)
     TextConsole *s = chr->opaque;
     int i;
 
+    s->update_x0 = s->width * FONT_WIDTH;
+    s->update_y0 = s->height * FONT_HEIGHT;
+    s->update_x1 = 0;
+    s->update_y1 = 0;
     console_show_cursor(s, 0);
     for(i = 0; i < len; i++) {
         console_putchar(s, buf[i]);
     }
     console_show_cursor(s, 1);
+    if (ds_get_bits_per_pixel(s->ds) && s->update_x0 < s->update_x1) {
+        dpy_update(s->ds, s->update_x0, s->update_y0,
+                   s->update_x1 - s->update_x0,
+                   s->update_y1 - s->update_y0);
+    }
     return len;
 }
 
