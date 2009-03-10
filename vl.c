@@ -3836,7 +3836,7 @@ static CharDriverState *qemu_chr_open_tcp(const char *host_str,
 static TAILQ_HEAD(CharDriverStateHead, CharDriverState) chardevs
 = TAILQ_HEAD_INITIALIZER(chardevs);
 
-CharDriverState *qemu_chr_open(const char *label, const char *filename)
+CharDriverState *qemu_chr_open(const char *label, const char *filename, void (*init)(struct CharDriverState *s))
 {
     const char *p;
     CharDriverState *chr;
@@ -3860,7 +3860,7 @@ CharDriverState *qemu_chr_open(const char *label, const char *filename)
         chr = qemu_chr_open_udp(p);
     } else
     if (strstart(filename, "mon:", &p)) {
-        chr = qemu_chr_open(label, p);
+        chr = qemu_chr_open(label, p, NULL);
         if (chr) {
             chr = qemu_chr_open_mux(chr);
             monitor_init(chr, !nographic);
@@ -3917,6 +3917,7 @@ CharDriverState *qemu_chr_open(const char *label, const char *filename)
     if (chr) {
         if (!chr->filename)
             chr->filename = qemu_strdup(filename);
+        chr->init = init;
         chr->label = qemu_strdup(label);
         TAILQ_INSERT_TAIL(&chardevs, chr, next);
     }
@@ -10067,7 +10068,7 @@ int main(int argc, char **argv)
     }
 
     if (monitor_device) {
-        monitor_hd = qemu_chr_open("monitor", monitor_device);
+        monitor_hd = qemu_chr_open("monitor", monitor_device, NULL);
         if (!monitor_hd) {
             fprintf(stderr, "qemu: could not open monitor device '%s'\n", monitor_device);
             exit(1);
@@ -10079,7 +10080,7 @@ int main(int argc, char **argv)
         if (devname && strcmp(devname, "none")) {
             char label[32];
             snprintf(label, sizeof(label), "serial%d", i);
-            serial_hds[i] = qemu_chr_open(label, devname);
+            serial_hds[i] = qemu_chr_open(label, devname, NULL);
             if (!serial_hds[i]) {
                 fprintf(stderr, "qemu: could not open serial device '%s'\n",
                         devname);
@@ -10093,7 +10094,7 @@ int main(int argc, char **argv)
         if (devname && strcmp(devname, "none")) {
             char label[32];
             snprintf(label, sizeof(label), "parallel%d", i);
-            parallel_hds[i] = qemu_chr_open(label, devname);
+            parallel_hds[i] = qemu_chr_open(label, devname, NULL);
             if (!parallel_hds[i]) {
                 fprintf(stderr, "qemu: could not open parallel device '%s'\n",
                         devname);
