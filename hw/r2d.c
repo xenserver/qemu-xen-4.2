@@ -127,7 +127,7 @@ static void r2d_fpga_init(target_phys_addr_t base)
 }
 
 static void r2d_init(ram_addr_t ram_size, int vga_ram_size,
-              const char *boot_device, DisplayState * ds,
+              const char *boot_device,
 	      const char *kernel_filename, const char *kernel_cmdline,
 	      const char *initrd_filename, const char *cpu_model)
 {

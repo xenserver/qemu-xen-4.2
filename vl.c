@@ -192,7 +192,7 @@ int nb_drives;
 /* point to the block driver where the snapshots are managed */
 static BlockDriverState *bs_snapshots;
 enum vga_retrace_method vga_retrace_method = VGA_RETRACE_DUMB;
-static DisplayState display_state;
+static DisplayState *display_state;
 int nographic;
 static int curses;
 static int sdl;
@@ -3842,10 +3842,10 @@ CharDriverState *qemu_chr_open(const char *label, const char *filename)
     CharDriverState *chr;
 
     if (!strcmp(filename, "vc")) {
-        chr = text_console_init(&display_state, 0);
+        chr = text_console_init(0);
     } else
     if (strstart(filename, "vc:", &p)) {
-        chr = text_console_init(&display_state, p);
+        chr = text_console_init(p);
     } else
     if (!strcmp(filename, "null")) {
         chr = qemu_chr_open_null();
@@ -6240,34 +6240,34 @@ void pcmcia_info(void)
 }
 
 /***********************************************************/
+/* register display */
+
+void register_displaystate(DisplayState *ds)
+{
+    DisplayState **s;
+    s = &display_state;
+    while (*s != NULL)
+        s = &(*s)->next;
+    ds->next = NULL;
+    *s = ds;
+}
+
+DisplayState *get_displaystate(void)
+{
+    return display_state;
+}
+
 /* dumb display */
 
-static void dumb_update(DisplayState *ds, int x, int y, int w, int h)
+static void dumb_display_init(void)
 {
-}
-
-static void dumb_resize(DisplayState *ds)
-{
-}
-
-static void dumb_refresh(DisplayState *ds)
-{
-#if defined(CONFIG_SDL)
-    vga_hw_update();
-#endif
-}
-
-static void dumb_display_init(DisplayState *ds)
-{
-    DisplayChangeListener *dcl = qemu_mallocz(sizeof(DisplayChangeListener));
-    if (!dcl)
+    DisplayState *ds = qemu_mallocz(sizeof(DisplayState));
+    if (ds == NULL) {
+        fprintf(stderr, "dumb_display_init: DisplayState allocation failed\n");
         exit(1);
-    dcl->dpy_update = dumb_update;
-    dcl->dpy_resize = dumb_resize;
-    dcl->dpy_refresh = NULL;
-    dcl->idle = 1;
-    dcl->gui_timer_interval = 500;
-    register_displaychangelistener(ds, dcl);
+    }
+    ds->surface = qemu_create_displaysurface(640, 480, 32, 640 * 4);
+    register_displaystate(ds);
 }
 
 /***********************************************************/
@@ -9058,7 +9058,7 @@ int main(int argc, char **argv)
     const char *initrd_filename;
     const char *kernel_filename, *kernel_cmdline;
     const char *boot_devices = "";
-    DisplayState *ds = &display_state;
+    DisplayState *ds;
     DisplayChangeListener *dcl;
     int cyls, heads, secs, translation;
     const char *net_clients[MAX_NET_CLIENTS];
@@ -9066,7 +9066,7 @@ int main(int argc, char **argv)
     int hda_index;
     int optind;
     const char *r, *optarg;
-    CharDriverState *monitor_hd;
+    CharDriverState *monitor_hd = NULL;
     const char *monitor_device;
     const char *serial_devices[MAX_SERIAL_PORTS];
     int serial_device_index;
@@ -10046,9 +10046,81 @@ int main(int argc, char **argv)
     register_savevm("timer", 0, 2, timer_save, timer_load, NULL);
     register_savevm_live("ram", 0, 3, ram_save_live, NULL, ram_load, NULL);
 
+#ifndef _WIN32
+    /* must be after terminal init, SDL library changes signal handlers */
+    termsig_setup();
+#endif
+
+    /* Maintain compatibility with multiple stdio monitors */
+    if (!strcmp(monitor_device,"stdio")) {
+        for (i = 0; i < MAX_SERIAL_PORTS; i++) {
+            const char *devname = serial_devices[i];
+            if (devname && !strcmp(devname,"mon:stdio")) {
+                monitor_device = NULL;
+                break;
+            } else if (devname && !strcmp(devname,"stdio")) {
+                monitor_device = NULL;
+                serial_devices[i] = "mon:stdio";
+                break;
+            }
+        }
+    }
+
+    if (monitor_device) {
+        monitor_hd = qemu_chr_open("monitor", monitor_device);
+        if (!monitor_hd) {
+            fprintf(stderr, "qemu: could not open monitor device '%s'\n", monitor_device);
+            exit(1);
+        }
+    }
+
+    for(i = 0; i < MAX_SERIAL_PORTS; i++) {
+        const char *devname = serial_devices[i];
+        if (devname && strcmp(devname, "none")) {
+            char label[32];
+            snprintf(label, sizeof(label), "serial%d", i);
+            serial_hds[i] = qemu_chr_open(label, devname);
+            if (!serial_hds[i]) {
+                fprintf(stderr, "qemu: could not open serial device '%s'\n",
+                        devname);
+                exit(1);
+            }
+        }
+    }
+
+    for(i = 0; i < MAX_PARALLEL_PORTS; i++) {
+        const char *devname = parallel_devices[i];
+        if (devname && strcmp(devname, "none")) {
+            char label[32];
+            snprintf(label, sizeof(label), "parallel%d", i);
+            parallel_hds[i] = qemu_chr_open(label, devname);
+            if (!parallel_hds[i]) {
+                fprintf(stderr, "qemu: could not open parallel device '%s'\n",
+                        devname);
+                exit(1);
+            }
+        }
+    }
+
+    machine->init(ram_size, vga_ram_size, boot_devices,
+                  kernel_filename, kernel_cmdline, initrd_filename, cpu_model,
+		  direct_pci);
+
+    /* init USB devices */
+    if (usb_enabled) {
+        for(i = 0; i < usb_devices_index; i++) {
+            if (usb_device_add(usb_devices[i]) < 0) {
+                fprintf(stderr, "Warning: could not add USB device %s\n",
+                        usb_devices[i]);
+            }
+        }
+    }
+
+    if (!display_state)
+        dumb_display_init();
+    /* just use the first displaystate for the moment */
+    ds = display_state;
     /* terminal init */
-    memset(&display_state, 0, sizeof(display_state));
-    ds->surface = qemu_create_displaysurface(640, 480, 32, 640 * 4);
 #ifdef CONFIG_STUBDOM
     if (xenfb_pv_display_init(ds) == 0) {
     } else
@@ -10088,31 +10160,18 @@ int main(int argc, char **argv)
     }
     dpy_resize(ds);
 
-#ifndef _WIN32
-    /* must be after terminal init, SDL library changes signal handlers */
-    termsig_setup();
-#endif
-
-    /* Maintain compatibility with multiple stdio monitors */
-    if (!strcmp(monitor_device,"stdio")) {
-        for (i = 0; i < MAX_SERIAL_PORTS; i++) {
-            const char *devname = serial_devices[i];
-            if (devname && !strcmp(devname,"mon:stdio")) {
-                monitor_device = NULL;
-                break;
-            } else if (devname && !strcmp(devname,"stdio")) {
-                monitor_device = NULL;
-                serial_devices[i] = "mon:stdio";
-                break;
-            }
+    dcl = ds->listeners;
+    while (dcl != NULL) {
+        if (dcl->dpy_refresh != NULL) {
+            ds->gui_timer = qemu_new_timer(rt_clock, gui_update, ds);
+            qemu_mod_timer(ds->gui_timer, qemu_get_clock(rt_clock));
         }
+        dcl = dcl->next;
     }
-    if (monitor_device) {
-        monitor_hd = qemu_chr_open("monitor", monitor_device);
-        if (!monitor_hd) {
-            fprintf(stderr, "qemu: could not open monitor device '%s'\n", monitor_device);
-            exit(1);
-        }
+
+    text_consoles_set_display(display_state);
+
+    if (monitor_device && monitor_hd) {
         monitor_init(monitor_hd, !nographic);
     }
 
@@ -10121,12 +10180,6 @@ int main(int argc, char **argv)
         if (devname && strcmp(devname, "none")) {
             char label[32];
             snprintf(label, sizeof(label), "serial%d", i);
-            serial_hds[i] = qemu_chr_open(label, devname);
-            if (!serial_hds[i]) {
-                fprintf(stderr, "qemu: could not open serial device '%s'\n",
-                        devname);
-                exit(1);
-            }
             if (strstart(devname, "vc", 0))
                 qemu_chr_printf(serial_hds[i], "serial%d console\r\n", i);
 	    xenstore_store_serial_port_info(i, serial_hds[i], devname);
@@ -10138,12 +10191,6 @@ int main(int argc, char **argv)
         if (devname && strcmp(devname, "none")) {
             char label[32];
             snprintf(label, sizeof(label), "parallel%d", i);
-            parallel_hds[i] = qemu_chr_open(label, devname);
-            if (!parallel_hds[i]) {
-                fprintf(stderr, "qemu: could not open parallel device '%s'\n",
-                        devname);
-                exit(1);
-            }
             if (strstart(devname, "vc", 0))
                 qemu_chr_printf(parallel_hds[i], "parallel%d console\r\n", i);
         }
@@ -10158,29 +10205,6 @@ int main(int argc, char **argv)
 
     if (strlen(direct_pci_str) > 0)
         direct_pci = direct_pci_str;
-
-    machine->init(ram_size, vga_ram_size, boot_devices, ds,
-                  kernel_filename, kernel_cmdline, initrd_filename, cpu_model,
-		  direct_pci);
-
-    /* init USB devices */
-    if (usb_enabled) {
-        for(i = 0; i < usb_devices_index; i++) {
-            if (usb_device_add(usb_devices[i]) < 0) {
-                fprintf(stderr, "Warning: could not add USB device %s\n",
-                        usb_devices[i]);
-            }
-        }
-    }
-
-    dcl = ds->listeners;
-    while (dcl != NULL) {
-        if (dcl->dpy_refresh != NULL) {
-            display_state.gui_timer = qemu_new_timer(rt_clock, gui_update, &display_state);
-            qemu_mod_timer(display_state.gui_timer, qemu_get_clock(rt_clock));
-        }
-        dcl = dcl->next;
-    }
 
 #ifdef CONFIG_GDBSTUB
     if (use_gdbstub) {

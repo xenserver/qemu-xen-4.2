@@ -475,7 +475,7 @@ static struct arm_boot_info integrator_binfo = {
 };
 
 static void integratorcp_init(ram_addr_t ram_size, int vga_ram_size,
-                     const char *boot_device, DisplayState *ds,
+                     const char *boot_device,
                      const char *kernel_filename, const char *kernel_cmdline,
                      const char *initrd_filename, const char *cpu_model)
 {
@@ -530,7 +530,7 @@ static void integratorcp_init(ram_addr_t ram_size, int vga_ram_size,
             exit (1);
         }
     }
-    pl110_init(ds, 0xc0000000, pic[22], 0);
+    pl110_init(0xc0000000, pic[22], 0);
 
     integrator_binfo.ram_size = ram_size;
     integrator_binfo.kernel_filename = kernel_filename;

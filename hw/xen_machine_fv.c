@@ -187,7 +187,7 @@ void qemu_invalidate_map_cache(void)
 
 
 static void xen_init_fv(ram_addr_t ram_size, int vga_ram_size,
-			const char *boot_device, DisplayState *ds,
+			const char *boot_device,
 			const char *kernel_filename,const char *kernel_cmdline,
                         const char *initrd_filename, const char *cpu_model,
                         const char *direct_pci)
@@ -279,7 +279,7 @@ static void xen_init_fv(ram_addr_t ram_size, int vga_ram_size,
     timeoffset_get();
 
 
-    pc_machine.init(ram_size, vga_ram_size, boot_device, ds,
+    pc_machine.init(ram_size, vga_ram_size, boot_device,
 		    kernel_filename, kernel_cmdline, initrd_filename,
 		    cpu_model, direct_pci);
 }

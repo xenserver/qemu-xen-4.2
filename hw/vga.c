@@ -1274,8 +1274,7 @@ static void vga_draw_text(VGAState *s, int full_update)
         cw != s->last_cw || cheight != s->last_ch || s->last_depth) {
         s->last_scr_width = width * cw;
         s->last_scr_height = height * cheight;
-        qemu_console_resize(s->console, s->last_scr_width, s->last_scr_height);
-        dpy_resize(s->ds);
+        qemu_console_resize(s->ds, s->last_scr_width, s->last_scr_height);
         s->last_depth = 0;
         s->last_width = width;
         s->last_height = height;
@@ -1344,7 +1343,7 @@ static void vga_draw_text(VGAState *s, int full_update)
         cw != s->last_cw || cheight != s->last_ch) {
         s->last_scr_width = width * cw;
         s->last_scr_height = height * cheight;
-        qemu_console_resize(s->console, s->last_scr_width, s->last_scr_height);
+        qemu_console_resize(s->ds, s->last_scr_width, s->last_scr_height);
         s->last_width = width;
         s->last_height = height;
         s->last_ch = cheight;
@@ -1638,10 +1637,10 @@ static void vga_draw_graphic(VGAState *s, int full_update)
 #endif
                 dpy_resize(s->ds);
             } else {
-                qemu_console_resize(s->console, disp_width, height);
+                qemu_console_resize(s->ds, disp_width, height);
             }
         } else {
-            qemu_console_resize(s->console, disp_width, height);
+            qemu_console_resize(s->ds, disp_width, height);
         }
         s->last_scr_width = disp_width;
         s->last_scr_height = height;
@@ -2503,7 +2502,7 @@ void xen_vga_vram_map(uint64_t vram_addr, uint32_t vga_ram_size)
 }
 
 /* when used on xen environment, the vga_ram_base is not used */
-void vga_common_init(VGAState *s, DisplayState *ds, uint8_t *vga_ram_base,
+void vga_common_init(VGAState *s, uint8_t *vga_ram_base,
                      unsigned long vga_ram_offset, int vga_ram_size)
 {
     int i, j, v, b;
@@ -2536,7 +2535,6 @@ void vga_common_init(VGAState *s, DisplayState *ds, uint8_t *vga_ram_base,
     xen_vga_state = s;
     s->vram_offset = vga_ram_offset;
     s->vram_size = vga_ram_size;
-    s->ds = ds;
     s->get_bpp = vga_get_bpp;
     s->get_offsets = vga_get_offsets;
     s->get_resolution = vga_get_resolution;
@@ -2546,8 +2544,8 @@ void vga_common_init(VGAState *s, DisplayState *ds, uint8_t *vga_ram_base,
         s->vram_gmfn = VRAM_RESERVED_ADDRESS;
     }
 
-    graphic_console_init(s->ds, vga_update_display, vga_invalidate_display,
-                         vga_screen_dump, vga_update_text, s);
+    s->ds = graphic_console_init(vga_update_display, vga_invalidate_display,
+                                 vga_screen_dump, vga_update_text, s);
 
     vga_bios_init(s);
     switch (vga_retrace_method) {
@@ -2616,7 +2614,7 @@ static void vga_init(VGAState *s)
                                  vga_io_memory);
 }
 
-int isa_vga_init(DisplayState *ds, uint8_t *vga_ram_base,
+int isa_vga_init(uint8_t *vga_ram_base,
                  unsigned long vga_ram_offset, int vga_ram_size)
 {
     VGAState *s;
@@ -2630,7 +2628,7 @@ int isa_vga_init(DisplayState *ds, uint8_t *vga_ram_base,
         vga_ram_size = 16*1024*1024;
     }
 
-    vga_common_init(s, ds, vga_ram_base, vga_ram_offset, vga_ram_size);
+    vga_common_init(s, vga_ram_base, vga_ram_offset, vga_ram_size);
     vga_init(s);
 
 #ifdef CONFIG_BOCHS_VBE
@@ -2641,7 +2639,7 @@ int isa_vga_init(DisplayState *ds, uint8_t *vga_ram_base,
     return 0;
 }
 
-int pci_vga_init(PCIBus *bus, DisplayState *ds, uint8_t *vga_ram_base,
+int pci_vga_init(PCIBus *bus, uint8_t *vga_ram_base,
                  unsigned long vga_ram_offset, int vga_ram_size,
                  unsigned long vga_bios_offset, int vga_bios_size)
 {
@@ -2661,7 +2659,7 @@ int pci_vga_init(PCIBus *bus, DisplayState *ds, uint8_t *vga_ram_base,
         vga_ram_size = 16*1024*1024;
     }
 
-    vga_common_init(s, ds, vga_ram_base, vga_ram_offset, vga_ram_size);
+    vga_common_init(s, vga_ram_base, vga_ram_offset, vga_ram_size);
     vga_init(s);
     s->pci_dev = &d->dev;
 

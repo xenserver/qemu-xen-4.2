@@ -778,7 +778,7 @@ static void cirrus_do_copy(CirrusVGAState *s, int dst, int src, int w, int h)
 		      s->cirrus_blt_width, s->cirrus_blt_height);
 
     if (notify)
-	qemu_console_copy(s->console,
+	qemu_console_copy(s->ds,
 			  sx, sy, dx, dy,
 			  s->cirrus_blt_width / depth,
 			  s->cirrus_blt_height);
@@ -3280,7 +3280,7 @@ static void cirrus_init_common(CirrusVGAState * s, int device_id, int is_pci)
  *
  ***************************************/
 
-void isa_cirrus_vga_init(DisplayState *ds, uint8_t *vga_ram_base,
+void isa_cirrus_vga_init(uint8_t *vga_ram_base,
                          unsigned long vga_ram_offset, int vga_ram_size)
 {
     CirrusVGAState *s;
@@ -3293,7 +3293,7 @@ void isa_cirrus_vga_init(DisplayState *ds, uint8_t *vga_ram_base,
     }
 
     vga_common_init((VGAState *)s,
-                    ds, vga_ram_base, vga_ram_offset, vga_ram_size);
+                    vga_ram_base, vga_ram_offset, vga_ram_size);
     cirrus_init_common(s, CIRRUS_ID_CLGD5430, 0);
     /* XXX ISA-LFB support */
 }
@@ -3331,7 +3331,7 @@ static void cirrus_pci_mmio_map(PCIDevice *d, int region_num,
 				 s->cirrus_mmio_io_addr);
 }
 
-void pci_cirrus_vga_init(PCIBus *bus, DisplayState *ds, uint8_t *vga_ram_base,
+void pci_cirrus_vga_init(PCIBus *bus, uint8_t *vga_ram_base,
                          unsigned long vga_ram_offset, int vga_ram_size)
 {
     PCICirrusVGAState *d;
@@ -3366,8 +3366,9 @@ void pci_cirrus_vga_init(PCIBus *bus, DisplayState *ds, uint8_t *vga_ram_base,
         vga_ram_size = 4*1024*1024;
     }
     vga_common_init((VGAState *)s,
-                    ds, vga_ram_base, vga_ram_offset, vga_ram_size);
+                    vga_ram_base, vga_ram_offset, vga_ram_size);
     cirrus_init_common(s, device_id, 1);
+
     s->pci_dev = (PCIDevice *)d;
 
     /* setup memory space */

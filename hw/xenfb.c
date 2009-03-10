@@ -742,9 +742,7 @@ static void xenfb_update(void *opaque)
     if (xenfb->width != ds_get_width(xenfb->c.ds) || xenfb->height != ds_get_height(xenfb->c.ds)) {
         xen_be_printf(&xenfb->c.xendev, 1, "update: resizing: %dx%d\n",
                       xenfb->width, xenfb->height);
-        xenfb->c.ds->surface->width = xenfb->width;
-        xenfb->c.ds->surface->height = xenfb->height;
-        dpy_resize(xenfb->c.ds);
+        qemu_console_resize(xenfb->c.ds, xenfb->width, xenfb->height);
         xenfb->up_fullscreen = 1;
     }
 
@@ -883,12 +881,11 @@ static int fb_connect(struct XenDevice *xendev)
 	return rc;
 
     if (!fb->have_console) {
-        graphic_console_init(fb->c.ds,
-                             xenfb_update,
-                             xenfb_invalidate,
-                             NULL,
-                             NULL,
-                             fb);
+        fb->c.ds = graphic_console_init(xenfb_update,
+                                        xenfb_invalidate,
+                                        NULL,
+                                        NULL,
+                                        fb);
         fb->have_console = 1;
     }
 

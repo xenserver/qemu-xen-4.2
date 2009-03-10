@@ -117,8 +117,12 @@ struct DisplayState {
     void (*mouse_set)(int x, int y, int on);
     void (*cursor_define)(int width, int height, int bpp, int hot_x, int hot_y,
                           uint8_t *image, uint8_t *mask);
+
+    struct DisplayState *next;
 };
 
+void register_displaystate(DisplayState *ds);
+DisplayState *get_displaystate(void);
 DisplaySurface* qemu_create_displaysurface(int width, int height, int bpp, int linesize);
 DisplaySurface* qemu_resize_displaysurface(DisplaySurface *surface,
                                            int width, int height, int bpp, int linesize);
@@ -245,7 +249,7 @@ typedef void (*vga_hw_invalidate_ptr)(void *);
 typedef void (*vga_hw_screen_dump_ptr)(void *, const char *);
 typedef void (*vga_hw_text_update_ptr)(void *, console_ch_t *);
 
-TextConsole *graphic_console_init(DisplayState *ds, vga_hw_update_ptr update,
+DisplayState *graphic_console_init(vga_hw_update_ptr update,
                                   vga_hw_invalidate_ptr invalidate,
                                   vga_hw_screen_dump_ptr screen_dump,
                                   vga_hw_text_update_ptr text_update,
@@ -256,11 +260,12 @@ void vga_hw_screen_dump(const char *filename);
 
 int is_graphic_console(void);
 int is_fixedsize_console(void);
-CharDriverState *text_console_init(DisplayState *ds, const char *p);
+CharDriverState *text_console_init(const char *p);
+void text_consoles_set_display(DisplayState *ds);
 void console_select(unsigned int index);
 void console_color_init(DisplayState *ds);
-void qemu_console_resize(QEMUConsole *console, int width, int height);
-void qemu_console_copy(QEMUConsole *console, int src_x, int src_y,
+void qemu_console_resize(DisplayState *ds, int width, int height);
+void qemu_console_copy(DisplayState *ds, int src_x, int src_y,
                 int dst_x, int dst_y, int w, int h);
 
 /* sdl.c */

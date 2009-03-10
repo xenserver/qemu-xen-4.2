@@ -335,7 +335,7 @@ static const int parallel_irq[MAX_PARALLEL_PORTS] = { 7, 7, 7 };
 static fdctrl_t *floppy_controller;
 
 static void sun4uv_init(ram_addr_t RAM_size, int vga_ram_size,
-                        const char *boot_devices, DisplayState *ds,
+                        const char *boot_devices,
                         const char *kernel_filename, const char *kernel_cmdline,
                         const char *initrd_filename, const char *cpu_model,
                         const struct hwdef *hwdef)
@@ -555,31 +555,31 @@ static const struct hwdef hwdefs[] = {
 
 /* Sun4u hardware initialisation */
 static void sun4u_init(ram_addr_t RAM_size, int vga_ram_size,
-                       const char *boot_devices, DisplayState *ds,
+                       const char *boot_devices,
                        const char *kernel_filename, const char *kernel_cmdline,
                        const char *initrd_filename, const char *cpu_model)
 {
-    sun4uv_init(RAM_size, vga_ram_size, boot_devices, ds, kernel_filename,
+    sun4uv_init(RAM_size, vga_ram_size, boot_devices, kernel_filename,
                 kernel_cmdline, initrd_filename, cpu_model, &hwdefs[0]);
 }
 
 /* Sun4v hardware initialisation */
 static void sun4v_init(ram_addr_t RAM_size, int vga_ram_size,
-                       const char *boot_devices, DisplayState *ds,
+                       const char *boot_devices,
                        const char *kernel_filename, const char *kernel_cmdline,
                        const char *initrd_filename, const char *cpu_model)
 {
-    sun4uv_init(RAM_size, vga_ram_size, boot_devices, ds, kernel_filename,
+    sun4uv_init(RAM_size, vga_ram_size, boot_devices, kernel_filename,
                 kernel_cmdline, initrd_filename, cpu_model, &hwdefs[1]);
 }
 
 /* Niagara hardware initialisation */
 static void niagara_init(ram_addr_t RAM_size, int vga_ram_size,
-                         const char *boot_devices, DisplayState *ds,
+                         const char *boot_devices,
                          const char *kernel_filename, const char *kernel_cmdline,
                          const char *initrd_filename, const char *cpu_model)
 {
-    sun4uv_init(RAM_size, vga_ram_size, boot_devices, ds, kernel_filename,
+    sun4uv_init(RAM_size, vga_ram_size, boot_devices, kernel_filename,
                 kernel_cmdline, initrd_filename, cpu_model, &hwdefs[2]);
 }
 

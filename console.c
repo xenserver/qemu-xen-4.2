@@ -1006,8 +1006,13 @@ void console_select(unsigned int index)
     if (s) {
         DisplayState *ds = s->ds;
         active_console = s;
-        ds->surface = qemu_resize_displaysurface(ds->surface, s->g_width,
-                                                s->g_height, 32, 4 * s->g_width);
+        if (ds_get_bits_per_pixel(s->ds)) {
+            ds->surface = qemu_resize_displaysurface(ds->surface, s->g_width,
+                    s->g_height, 32, 4 * s->g_width);
+        } else {
+            s->ds->surface->width = s->width;
+            s->ds->surface->height = s->height;
+        }
         dpy_resize(s->ds);
         vga_hw_invalidate();
     }
@@ -1116,7 +1121,11 @@ void kbd_put_keysym(int keysym)
 static void text_console_invalidate(void *opaque)
 {
     TextConsole *s = (TextConsole *) opaque;
-
+    if (!ds_get_bits_per_pixel(s->ds) && s->console_type == TEXT_CONSOLE) {
+        s->g_width = ds_get_width(s->ds);
+        s->g_height = ds_get_height(s->ds);
+        text_console_resize(s);
+    }
     console_refresh(s);
 }
 
@@ -1147,6 +1156,18 @@ static void text_console_update(void *opaque, console_ch_t *chardata)
     }
 }
 
+static TextConsole *get_graphic_console(DisplayState *ds)
+{
+    int i;
+    TextConsole *s;
+    for (i = 0; i < nb_consoles; i++) {
+        s = consoles[i];
+        if (s->console_type == GRAPHIC_CONSOLE && s->ds == ds)
+            return s;
+    }
+    return NULL;
+}
+
 static TextConsole *new_console(DisplayState *ds, console_type_t console_type)
 {
     TextConsole *s;
@@ -1174,27 +1195,39 @@ static TextConsole *new_console(DisplayState *ds, console_type_t console_type)
             consoles[i] = consoles[i - 1];
         }
         consoles[i] = s;
+        nb_consoles++;
     }
     return s;
 }
 
-TextConsole *graphic_console_init(DisplayState *ds, vga_hw_update_ptr update,
-                                  vga_hw_invalidate_ptr invalidate,
-                                  vga_hw_screen_dump_ptr screen_dump,
-                                  vga_hw_text_update_ptr text_update,
-                                  void *opaque)
+DisplayState *graphic_console_init(vga_hw_update_ptr update,
+                                   vga_hw_invalidate_ptr invalidate,
+                                   vga_hw_screen_dump_ptr screen_dump,
+                                   vga_hw_text_update_ptr text_update,
+                                   void *opaque)
 {
     TextConsole *s;
+    DisplayState *ds;
+
+    ds = (DisplayState *) qemu_mallocz(sizeof(DisplayState));
+    if (ds == NULL)
+        return NULL;
+    ds->surface = qemu_create_displaysurface(640, 480, 32, 640 * 4);
 
     s = new_console(ds, GRAPHIC_CONSOLE);
-    if (!s)
-      return NULL;
+    if (s == NULL) {
+        qemu_free_displaysurface(ds->surface);
+        qemu_free(ds);
+        return NULL;
+    }
     s->hw_update = update;
     s->hw_invalidate = invalidate;
     s->hw_screen_dump = screen_dump;
     s->hw_text_update = text_update;
     s->hw = opaque;
-    return s;
+
+    register_displaystate(ds);
+    return ds;
 }
 
 int is_graphic_console(void)
@@ -1218,19 +1251,19 @@ void console_color_init(DisplayState *ds)
     }
 }
 
-CharDriverState *text_console_init(DisplayState *ds, const char *p)
+static int n_text_consoles;
+static CharDriverState *text_consoles[128];
+static char *text_console_strs[128];
+
+static void text_console_do_init(CharDriverState *chr, DisplayState *ds, const char *p)
 {
-    CharDriverState *chr;
     TextConsole *s;
     static int color_inited;
 
-    chr = qemu_mallocz(sizeof(CharDriverState));
-    if (!chr)
-        return NULL;
     s = new_console(ds, (p == 0) ? TEXT_CONSOLE : TEXT_CONSOLE_FIXED_SIZE);
     if (!s) {
         free(chr);
-        return NULL;
+        return;
     }
     chr->opaque = s;
     chr->chr_write = console_puts;
@@ -1240,6 +1273,7 @@ CharDriverState *text_console_init(DisplayState *ds, const char *p)
     s->out_fifo.buf = s->out_fifo_buf;
     s->out_fifo.buf_size = sizeof(s->out_fifo_buf);
     s->kbd_timer = qemu_new_timer(rt_clock, kbd_send_chars, s);
+    s->ds = ds;
 
     if (!color_inited) {
         color_inited = 1;
@@ -1267,26 +1301,57 @@ CharDriverState *text_console_init(DisplayState *ds, const char *p)
     text_console_resize(s);
 
     qemu_chr_reset(chr);
+}
+
+CharDriverState *text_console_init(const char *p)
+{
+    CharDriverState *chr;
+
+    chr = qemu_mallocz(sizeof(CharDriverState));
+    if (!chr)
+        return NULL;
+
+    if (n_text_consoles == 128) {
+        fprintf(stderr, "Too many text consoles\n");
+        exit(1);
+    }
+    text_consoles[n_text_consoles] = chr;
+    text_console_strs[n_text_consoles] = p ? qemu_strdup(p) : NULL;
+    n_text_consoles++;
 
     return chr;
 }
 
-void qemu_console_resize(QEMUConsole *console, int width, int height)
+void text_consoles_set_display(DisplayState *ds)
 {
-    console->g_width = width;
-    console->g_height = height;
-    if (active_console == console) {
-        DisplayState *ds = console->ds;
+    int i;
+
+    for (i = 0; i < n_text_consoles; i++) {
+        text_console_do_init(text_consoles[i], ds, text_console_strs[i]);
+        qemu_free(text_console_strs[i]);
+    }
+
+    n_text_consoles = 0;
+}
+
+void qemu_console_resize(DisplayState *ds, int width, int height)
+{
+    TextConsole *s = get_graphic_console(ds);
+    if (!s) return;
+    s->g_width = width;
+    s->g_height = height;
+    if (is_graphic_console()) {
         ds->surface = qemu_resize_displaysurface(ds->surface, width, height, 32, 4 * width);
-        dpy_resize(console->ds);
+        dpy_resize(ds);
     }
 }
 
-void qemu_console_copy(QEMUConsole *console, int src_x, int src_y,
+void qemu_console_copy(DisplayState *ds, int src_x, int src_y,
                 int dst_x, int dst_y, int w, int h)
 {
-    if (active_console == console)
-        dpy_copy(console->ds, src_x, src_y, dst_x, dst_y, w, h);
+    if (is_graphic_console()) {
+        dpy_copy(ds, src_x, src_y, dst_x, dst_y, w, h);
+    }
 }
 
 PixelFormat qemu_different_endianness_pixelformat(int bpp)

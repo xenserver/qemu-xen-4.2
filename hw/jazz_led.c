@@ -37,7 +37,6 @@ typedef struct LedState {
     target_phys_addr_t base;
     uint8_t segments;
     DisplayState *ds;
-    QEMUConsole *console;
     screen_state_t state;
 } LedState;
 
@@ -292,7 +291,7 @@ static void jazz_led_text_update(void *opaque, console_ch_t *chardata)
     char buf[2];
 
     dpy_cursor(s->ds, -1, -1);
-    qemu_console_resize(s->console, 2, 1);
+    qemu_console_resize(s->ds, 2, 1);
 
     /* TODO: draw the segments */
     snprintf(buf, 2, "%02hhx\n", s->segments);
@@ -302,7 +301,7 @@ static void jazz_led_text_update(void *opaque, console_ch_t *chardata)
     dpy_update(s->ds, 0, 0, 2, 1);
 }
 
-void jazz_led_init(DisplayState *ds, target_phys_addr_t base)
+void jazz_led_init(target_phys_addr_t base)
 {
     LedState *s;
     int io;
@@ -312,15 +311,14 @@ void jazz_led_init(DisplayState *ds, target_phys_addr_t base)
         return;
 
     s->base = base;
-    s->ds = ds;
     s->state = REDRAW_SEGMENTS | REDRAW_BACKGROUND;
 
     io = cpu_register_io_memory(0, led_read, led_write, s);
     cpu_register_physical_memory(s->base, 1, io);
 
-    s->console = graphic_console_init(ds, jazz_led_update_display,
-                                     jazz_led_invalidate_display,
-                                     jazz_led_screen_dump,
-                                     jazz_led_text_update, s);
-    qemu_console_resize(s->console, 60, 80);
+    s->ds = graphic_console_init(jazz_led_update_display,
+                                 jazz_led_invalidate_display,
+                                 jazz_led_screen_dump,
+                                 jazz_led_text_update, s);
+    qemu_console_resize(s->ds, 60, 80);
 }

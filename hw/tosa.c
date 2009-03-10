@@ -77,7 +77,7 @@ static struct arm_boot_info tosa_binfo = {
 };
 
 static void tosa_init(ram_addr_t ram_size, int vga_ram_size,
-                const char *boot_device, DisplayState *ds,
+                const char *boot_device,
                 const char *kernel_filename, const char *kernel_cmdline,
                 const char *initrd_filename, const char *cpu_model)
 {
@@ -93,7 +93,7 @@ static void tosa_init(ram_addr_t ram_size, int vga_ram_size,
     if (!cpu_model)
         cpu_model = "pxa255";
 
-    cpu = pxa255_init(tosa_binfo.ram_size, ds);
+    cpu = pxa255_init(tosa_binfo.ram_size);
 
     cpu_register_physical_memory(0, TOSA_ROM,
                     qemu_ram_alloc(TOSA_ROM) | IO_MEM_ROM);
