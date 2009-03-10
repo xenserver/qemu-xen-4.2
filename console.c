@@ -1310,6 +1310,9 @@ PixelFormat qemu_different_endianness_pixelformat(int bpp)
             pf.rshift = 0;
             pf.gshift = 8;
             pf.bshift = 16;
+            pf.rbits = 8;
+            pf.gbits = 8;
+            pf.bbits = 8;
             break;
         case 32:
             pf.rmask = 0x0000FF00;
@@ -1324,6 +1327,10 @@ PixelFormat qemu_different_endianness_pixelformat(int bpp)
             pf.rshift = 8;
             pf.gshift = 16;
             pf.bshift = 24;
+            pf.rbits = 8;
+            pf.gbits = 8;
+            pf.bbits = 8;
+            pf.abits = 8;
             break;
         default:
             break;
@@ -1352,6 +1359,9 @@ PixelFormat qemu_default_pixelformat(int bpp)
             pf.rshift = 11;
             pf.gshift = 5;
             pf.bshift = 0;
+            pf.rbits = 5;
+            pf.gbits = 6;
+            pf.bbits = 5;
             break;
         case 24:
             pf.rmask = 0x00FF0000;
@@ -1363,6 +1373,9 @@ PixelFormat qemu_default_pixelformat(int bpp)
             pf.rshift = 16;
             pf.gshift = 8;
             pf.bshift = 0;
+            pf.rbits = 8;
+            pf.gbits = 8;
+            pf.bbits = 8;
         case 32:
             pf.rmask = 0x00FF0000;
             pf.gmask = 0x0000FF00;
@@ -1375,6 +1388,10 @@ PixelFormat qemu_default_pixelformat(int bpp)
             pf.rshift = 16;
             pf.gshift = 8;
             pf.bshift = 0;
+            pf.rbits = 8;
+            pf.gbits = 8;
+            pf.bbits = 8;
+            pf.abits = 8;
             break;
         default:
             break;
