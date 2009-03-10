@@ -700,21 +700,30 @@ static void xenfb_update(void *opaque)
 {
     struct XenFB *xenfb = opaque;
     int i;
+    struct DisplayChangeListener *l;
 
     if (xenfb->feature_update) {
 #ifdef XENFB_TYPE_REFRESH_PERIOD
-	int period;
+        int period = 99999999;
+        int idle = 1;
 
 	if (xenfb_queue_full(xenfb))
 	    return;
 
-	if (xenfb->c.ds->idle)
-	    period = XENFB_NO_REFRESH;
-	else {
-	    period = xenfb->c.ds->gui_timer_interval;
-	    if (!period)
-		period = GUI_REFRESH_INTERVAL;
-	}
+        for (l = xenfb->c.ds->listeners; l != NULL; l = l->next) {
+            if (l->idle)
+                continue;
+            idle = 0;
+            if (!l->gui_timer_interval) {
+                if (period > GUI_REFRESH_INTERVAL)
+                    period = GUI_REFRESH_INTERVAL;
+            } else {
+                if (period > l->gui_timer_interval)
+                    period = l->gui_timer_interval;
+            }
+        }
+        if (idle)
+            period = XENFB_NO_REFRESH;
 
 	if (xenfb->refresh_period != period) {
 	    xenfb_send_refresh_period(xenfb, period);
@@ -733,7 +742,9 @@ static void xenfb_update(void *opaque)
     if (xenfb->width != ds_get_width(xenfb->c.ds) || xenfb->height != ds_get_height(xenfb->c.ds)) {
         xen_be_printf(&xenfb->c.xendev, 1, "update: resizing: %dx%d\n",
                       xenfb->width, xenfb->height);
-        dpy_resize(xenfb->c.ds, xenfb->width, xenfb->height);
+        xenfb->c.ds->surface->width = xenfb->width;
+        xenfb->c.ds->surface->height = xenfb->height;
+        dpy_resize(xenfb->c.ds);
         xenfb->up_fullscreen = 1;
     }
 

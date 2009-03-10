@@ -23,6 +23,7 @@ XenFBState *xs;
 static char *kbd_path, *fb_path;
 
 static unsigned char linux2scancode[KEY_MAX + 1];
+static DisplayChangeListener *dcl;
 
 extern uint32_t vga_ram_size;
 
@@ -47,50 +48,27 @@ static void xenfb_pv_update(DisplayState *ds, int x, int y, int w, int h)
     fbfront_update(fb_dev, x, y, w, h);
 }
 
-static void xenfb_pv_resize_shared(DisplayState *ds, int w, int h, int depth, int linesize, void *pixels)
+static void xenfb_pv_resize(DisplayState *ds)
 {
     XenFBState *xs = ds->opaque;
     struct fbfront_dev *fb_dev = xs->fb_dev;
     int offset;
 
-    fprintf(stderr,"resize to %dx%d@%d, %d required\n", w, h, depth, linesize);
-    ds->width = w;
-    ds->height = h;
-    if (!depth) {
-        ds->shared_buf = 0;
-        ds->depth = 32;
-    } else {
-        ds->shared_buf = 1;
-        ds->depth = depth;
-    }
-    if (!linesize)
-        ds->shared_buf = 0;
-    if (!ds->shared_buf)
-        linesize = w * 4;
-    ds->linesize = linesize;
+    fprintf(stderr,"resize to %dx%d@%d, %d required\n", ds_get_width(ds), ds_get_height(ds), ds_get_bits_per_pixel(ds), ds_get_linesize(ds));
     if (!fb_dev)
         return;
-    if (ds->shared_buf) {
-        offset = pixels - xs->vga_vram;
-        ds->data = pixels;
-        fbfront_resize(fb_dev, ds_get_width(ds), ds_get_height(ds), ds_get_linesize(ds), ds_get_bits_per_pixel(ds), offset);
-    } else {
-        ds->data = xs->nonshared_vram;
-        fbfront_resize(fb_dev, w, h, linesize, ds_get_bits_per_pixel(ds), vga_ram_size);
-    }
+    if (!(ds->surface->flags & QEMU_ALLOCATED_FLAG))
+        offset = ((void *) ds_get_data(ds)) - xs->vga_vram;
+    else
+        offset = vga_ram_size;
+    fbfront_resize(fb_dev, ds_get_width(ds), ds_get_height(ds), ds_get_linesize(ds), ds_get_bits_per_pixel(ds), offset);
 }
 
-static void xenfb_pv_resize(DisplayState *ds, int w, int h)
-{
-    xenfb_pv_resize_shared(ds, w, h, 0, 0, NULL);
-}
-
-static void xenfb_pv_setdata(DisplayState *ds, void *pixels)
+static void xenfb_pv_setdata(DisplayState *ds)
 {
     XenFBState *xs = ds->opaque;
     struct fbfront_dev *fb_dev = xs->fb_dev;
-    int offset = pixels - xs->vga_vram;
-    ds->data = pixels;
+    int offset = ((void *) ds_get_data(ds)) - xs->vga_vram;
     if (!fb_dev)
         return;
     fbfront_resize(fb_dev, ds_get_width(ds), ds_get_height(ds), ds_get_linesize(ds), ds_get_bits_per_pixel(ds), offset);
@@ -115,12 +93,12 @@ static void xenfb_fb_handler(void *opaque)
         case XENFB_TYPE_REFRESH_PERIOD:
             if (buf[i].refresh_period.period == XENFB_NO_REFRESH) {
                 /* Sleeping interval */
-                ds->idle = 1;
-                ds->gui_timer_interval = 500;
+                dcl->idle = 1;
+                dcl->gui_timer_interval = 500;
             } else {
                 /* Set interval */
-                ds->idle = 0;
-                ds->gui_timer_interval = buf[i].refresh_period.period;
+                dcl->idle = 0;
+                dcl->gui_timer_interval = buf[i].refresh_period.period;
             }
         default:
             /* ignore unknown events */
@@ -247,22 +225,19 @@ int xenfb_pv_display_init(DisplayState *ds)
 
     init_SEMAPHORE(&xs->kbd_sem, 0);
     xs->ds = ds;
+    xs->nonshared_vram = ds_get_data(ds);
 
     create_thread("kbdfront", kbdfront_thread, (void*) xs);
 
-    ds->data = xs->nonshared_vram = qemu_memalign(PAGE_SIZE, vga_ram_size);
-    memset(ds->data, 0, vga_ram_size);
+    dcl = qemu_mallocz(sizeof(DisplayChangeListener));
+    if (!dcl)
+        exit(1);
     ds->opaque = xs;
-    ds->depth = 32;
-    ds->bgr = 0;
-    ds->width = 640;
-    ds->height = 400;
-    ds->linesize = 640 * 4;
-    ds->dpy_update = xenfb_pv_update;
-    ds->dpy_resize = xenfb_pv_resize;
-    ds->dpy_resize_shared = xenfb_pv_resize_shared;
-    ds->dpy_setdata = xenfb_pv_setdata;
-    ds->dpy_refresh = xenfb_pv_refresh;
+    dcl->dpy_update = xenfb_pv_update;
+    dcl->dpy_resize = xenfb_pv_resize;
+    dcl->dpy_setdata = xenfb_pv_setdata;
+    dcl->dpy_refresh = xenfb_pv_refresh;
+    register_displaychangelistener(ds, dcl);
     return 0;
 }
 
@@ -295,11 +270,10 @@ int xenfb_pv_display_start(void *data)
     }
     free(fb_path);
 
-    if (ds->shared_buf) {
-        offset = (void*) ds->data - xs->vga_vram;
+    if (!(ds->surface->flags & QEMU_ALLOCATED_FLAG)) {
+        offset = (void*) ds_get_data(ds) - xs->vga_vram;
     } else {
         offset = vga_ram_size;
-        ds->data = xs->nonshared_vram;
     }
     if (offset)
         fbfront_resize(fb_dev, ds_get_width(ds), ds_get_height(ds), ds_get_linesize(ds), ds_get_bits_per_pixel(ds), offset);

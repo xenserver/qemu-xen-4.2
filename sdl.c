@@ -35,8 +35,9 @@
 #include <SDL_opengl.h>
 #endif
 
-static SDL_Surface *screen;
-static SDL_Surface *shared = NULL;
+static DisplayChangeListener *dcl;
+static SDL_Surface *real_screen;
+static SDL_Surface *guest_screen = NULL;
 static int gui_grab; /* if true, all keyboard/mouse events are grabbed */
 static int last_vm_running;
 static int gui_saved_grab;
@@ -52,17 +53,15 @@ static SDL_Cursor *sdl_cursor_normal;
 static SDL_Cursor *sdl_cursor_hidden;
 static int absolute_enabled = 0;
 static int opengl_enabled;
-static uint8_t bgr;
-
-static void sdl_colourdepth(DisplayState *ds, int depth);
 
 #ifdef CONFIG_OPENGL
 static GLint tex_format;
 static GLint tex_type;
 static GLuint texture_ref = 0;
 static GLint gl_format;
+static uint8_t bgr;
 
-static void opengl_setdata(DisplayState *ds, void *pixels)
+static void opengl_setdata(DisplayState *ds)
 {
     glEnable(GL_TEXTURE_RECTANGLE_ARB);
     glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_REPLACE);
@@ -72,14 +71,13 @@ static void opengl_setdata(DisplayState *ds, void *pixels)
     glDisable(GL_DEPTH_TEST);
     glDepthMask(GL_FALSE);
     glDisable(GL_CULL_FACE);
-    glViewport( 0, 0, screen->w, screen->h);
+    glViewport( 0, 0, real_screen->w, real_screen->h);
     glMatrixMode(GL_PROJECTION);
     glLoadIdentity();
-    glOrtho(0, screen->w, screen->h, 0, -1,1);
+    glOrtho(0, real_screen->w, real_screen->h, 0, -1,1);
     glMatrixMode(GL_MODELVIEW);
     glLoadIdentity();
     glClear(GL_COLOR_BUFFER_BIT);
-    ds->data = pixels;
 
     if (texture_ref) {
         glDeleteTextures(1, &texture_ref);
@@ -90,27 +88,6 @@ static void opengl_setdata(DisplayState *ds, void *pixels)
     glBindTexture(GL_TEXTURE_RECTANGLE_ARB, texture_ref);
     glPixelStorei(GL_UNPACK_LSB_FIRST, 1);
     switch (ds_get_bits_per_pixel(ds)) {
-        case 8:
-            if (ds->palette == NULL) {
-                tex_format = GL_RGB;
-                tex_type = GL_UNSIGNED_BYTE_3_3_2;
-            } else {
-                int i;
-                GLushort paletter[256], paletteg[256], paletteb[256];
-                for (i = 0; i < 256; i++) {
-                    uint8_t rgb = ds->palette[i] >> 16;
-                    paletter[i] = ((rgb & 0xe0) >> 5) * 65535 / 7;
-                    paletteg[i] = ((rgb & 0x1c) >> 2) * 65535 / 7;
-                    paletteb[i] = (rgb & 0x3) * 65535 / 3;
-                }
-                glPixelMapusv(GL_PIXEL_MAP_I_TO_R, 256, paletter);
-                glPixelMapusv(GL_PIXEL_MAP_I_TO_G, 256, paletteg);
-                glPixelMapusv(GL_PIXEL_MAP_I_TO_B, 256, paletteb);
-
-                tex_format = GL_COLOR_INDEX;
-                tex_type = GL_UNSIGNED_BYTE;
-            }
-            break;
         case 16:
             tex_format = GL_RGB;
             tex_type = GL_UNSIGNED_SHORT_5_6_5;
@@ -120,7 +97,7 @@ static void opengl_setdata(DisplayState *ds, void *pixels)
             tex_type = GL_UNSIGNED_BYTE;
             break;
         case 32:
-            if (!bgr) {
+            if (bgr == (ds->surface->pf.rshift < ds->surface->pf.bshift)) {
                 tex_format = GL_BGRA;
                 tex_type = GL_UNSIGNED_BYTE;
             } else {
@@ -130,7 +107,7 @@ static void opengl_setdata(DisplayState *ds, void *pixels)
             break;
     }   
     glPixelStorei(GL_UNPACK_ROW_LENGTH, (ds_get_linesize(ds) / ds_get_bytes_per_pixel(ds)));
-    glTexImage2D(GL_TEXTURE_RECTANGLE_ARB, 0, gl_format, ds_get_width(ds), ds_get_height(ds), 0, tex_format, tex_type, pixels);
+    glTexImage2D(GL_TEXTURE_RECTANGLE_ARB, 0, gl_format, ds_get_width(ds), ds_get_height(ds), 0, tex_format, tex_type, ds_get_data(ds));
     glTexParameterf(GL_TEXTURE_RECTANGLE_ARB, GL_TEXTURE_PRIORITY, 1.0);
     glTexParameteri(GL_TEXTURE_RECTANGLE_ARB, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_RECTANGLE_ARB, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
@@ -149,12 +126,12 @@ static void opengl_update(DisplayState *ds, int x, int y, int w, int h)
     glBegin(GL_QUADS);
         glTexCoord2d(0, 0);
         glVertex2d(0, 0);
-        glTexCoord2d(ds->width, 0);
-        glVertex2d(screen->w, 0);
-        glTexCoord2d(ds->width, ds->height);
-        glVertex2d(screen->w, screen->h);
-        glTexCoord2d(0, ds->height);
-        glVertex2d(0, screen->h);
+        glTexCoord2d(ds_get_width(ds), 0);
+        glVertex2d(real_screen->w, 0);
+        glTexCoord2d(ds_get_width(ds), ds_get_height(ds));
+        glVertex2d(real_screen->w, real_screen->h);
+        glTexCoord2d(0, ds_get_height(ds));
+        glVertex2d(0, real_screen->h);
     glEnd();
     glBindTexture(GL_TEXTURE_RECTANGLE_ARB, 0);
     SDL_GL_SwapBuffers();
@@ -163,130 +140,73 @@ static void opengl_update(DisplayState *ds, int x, int y, int w, int h)
 
 static void sdl_update(DisplayState *ds, int x, int y, int w, int h)
 {
-    //    printf("updating x=%d y=%d w=%d h=%d\n", x, y, w, h);
-    if (shared) {
-        SDL_Rect rec;
-        rec.x = x;
-        rec.y = y;
-        rec.w = w;
-        rec.h = h;
-        SDL_BlitSurface(shared, &rec, screen, &rec);
-    }
-    SDL_Flip(screen);
+    SDL_Rect rec;
+    rec.x = x;
+    rec.y = y;
+    rec.w = w;
+    rec.h = h;
+    //    printf("updating x=%d y=%d w=%d h=%d\n", x, y, w, h);i
+
+    SDL_BlitSurface(guest_screen, &rec, real_screen, &rec);
+    SDL_UpdateRect(real_screen, x, y, w, h);
 }
 
-static void sdl_setdata(DisplayState *ds, void *pixels)
+static void sdl_setdata(DisplayState *ds)
 {
-    uint32_t rmask, gmask, bmask, amask = 0;
-    switch (ds_get_bits_per_pixel(ds)) {
-        case 8:
-            rmask = 0x000000E0;
-            gmask = 0x0000001C;
-            bmask = 0x00000003;
-            break;
-        case 16:
-            rmask = 0x0000F800;
-            gmask = 0x000007E0;
-            bmask = 0x0000001F;
-            break;
-        case 24:
-            rmask = 0x00FF0000;
-            gmask = 0x0000FF00;
-            bmask = 0x000000FF;
-            break;
-        case 32:
-            rmask = 0x00FF0000;
-            gmask = 0x0000FF00;
-            bmask = 0x000000FF;
-            break;
-        default:
-            return;
-    }
-    shared = SDL_CreateRGBSurfaceFrom(pixels, width, height, ds_get_bits_per_pixel(ds), ds_get_linesize(ds), rmask , gmask, bmask, amask);
-    if (ds_get_bits_per_pixel(ds) == 8 && ds->palette != NULL) {
-        SDL_Color palette[256];
-        int i;
-        for (i = 0; i < 256; i++) {
-            uint8_t rgb = ds->palette[i] >> 16;
-            palette[i].r = ((rgb & 0xe0) >> 5) * 255 / 7;
-            palette[i].g = ((rgb & 0x1c) >> 2) * 255 / 7;
-            palette[i].b = (rgb & 0x3) * 255 / 3;
-        }
-        SDL_SetColors(shared, palette, 0, 256);
-    }
-    ds->data = pixels;
+    SDL_Rect rec;
+    rec.x = 0;
+    rec.y = 0;
+    rec.w = real_screen->w;
+    rec.h = real_screen->h;
+
+    if (guest_screen != NULL) SDL_FreeSurface(guest_screen);
+
+    guest_screen = SDL_CreateRGBSurfaceFrom(ds_get_data(ds), ds_get_width(ds), ds_get_height(ds),
+                                            ds_get_bits_per_pixel(ds), ds_get_linesize(ds),
+                                            ds->surface->pf.rmask, ds->surface->pf.gmask,
+                                            ds->surface->pf.bmask, ds->surface->pf.amask);
 }
 
-static void sdl_resize_shared(DisplayState *ds, int w, int h, int depth, int linesize, void *pixels)
+static void sdl_resize(DisplayState *ds)
 {
     int flags;
 
     //    printf("resizing to %d %d\n", w, h);
-
-    sdl_colourdepth(ds, depth);
-
 #ifdef CONFIG_OPENGL
-    if (ds->shared_buf && opengl_enabled)
+    if (opengl_enabled)
         flags = SDL_OPENGL|SDL_RESIZABLE;
     else
 #endif
-        flags = SDL_HWSURFACE|SDL_ASYNCBLIT|SDL_HWACCEL|SDL_DOUBLEBUF|SDL_HWPALETTE;
+        flags = SDL_HWSURFACE|SDL_ASYNCBLIT|SDL_HWACCEL;
 
-    if (gui_fullscreen) {
+    if (gui_fullscreen)
         flags |= SDL_FULLSCREEN;
-        flags &= ~SDL_RESIZABLE;
-    }
     if (gui_noframe)
         flags |= SDL_NOFRAME;
 
-    width = w;
-    height = h;
-
- again:
-    screen = SDL_SetVideoMode(w, h, 0, flags);
-
-    if (!screen) {
-        fprintf(stderr, "Could not open SDL display: %s\n", SDL_GetError());
+    width = ds_get_width(ds);
+    height = ds_get_height(ds);
+    real_screen = SDL_SetVideoMode(width, height, 0, flags);
+    if (!real_screen) {
         if (opengl_enabled) {
             /* Fallback to SDL */
             opengl_enabled = 0;
-            ds->dpy_update = sdl_update;
-            ds->dpy_setdata = sdl_setdata;
-            ds->dpy_resize_shared = sdl_resize_shared;
-            sdl_resize_shared(ds, w, h, depth, linesize, pixels);
+            dcl->dpy_update = sdl_update;
+            dcl->dpy_setdata = sdl_setdata;
+            sdl_resize(ds);
             return;
         }
+        fprintf(stderr, "Could not open SDL display\n");
         exit(1);
     }
 
-    if (!opengl_enabled) {
-        if (!screen->pixels && (flags & SDL_HWSURFACE) && (flags & SDL_FULLSCREEN)) {
-            flags &= ~SDL_HWSURFACE;
-            goto again;
-        }
-
-        if (!screen->pixels) {
-            fprintf(stderr, "Could not open SDL display: %s\n", SDL_GetError());
-            exit(1);
-        }
-    }
-
-    ds->width = w;
-    ds->height = h;
-    if (!ds->shared_buf) {
-        ds->depth = screen->format->BitsPerPixel;
-	if (screen->format->Bshift > screen->format->Rshift) {
-            bgr = 1;
-        } else {
-            bgr = 0;
-        }
-        shared = NULL;
-        ds->data = screen->pixels;
-        ds->linesize = screen->pitch;
-    } else {
-        ds->linesize = linesize;
 #ifdef CONFIG_OPENGL
-        switch(screen->format->BitsPerPixel) {
+    if (real_screen->format->Bshift > real_screen->format->Rshift) {
+        bgr = 1;
+    } else {
+        bgr = 0;
+    }
+    switch(real_screen->format->BitsPerPixel) {
         case 8:
             gl_format = GL_RGB;
             break;
@@ -297,36 +217,15 @@ static void sdl_resize_shared(DisplayState *ds, int w, int h, int depth, int lin
             gl_format = GL_RGB;
             break;
         case 32:
-            if (!screen->format->Rshift)
+            if (!real_screen->format->Rshift)
                 gl_format = GL_BGRA;
             else
                 gl_format = GL_RGBA;
             break;
-        };
+    };
 #endif
-    }
-    if (ds->shared_buf) ds->dpy_setdata(ds, pixels);
-}
 
-static void sdl_resize(DisplayState *ds, int w, int h)
-{
-    sdl_resize_shared(ds, w, h, 0, w * ds_get_bytes_per_pixel(ds), NULL);
-}
-
-static void sdl_colourdepth(DisplayState *ds, int depth)
-{
-    if (!depth || !ds->depth) {
-	ds->shared_buf = 0;
-	ds->dpy_update = sdl_update;
-	return;
-    }
-    ds->shared_buf = 1;
-    ds->depth = depth;
-#ifdef CONFIG_OPENGL
-    if (opengl_enabled) {
-        ds->dpy_update = opengl_update;
-    }
-#endif
+    dcl->dpy_setdata(ds);
 }
 
 /* generic keyboard conversion */
@@ -525,8 +424,8 @@ static void sdl_send_mouse_event(int dx, int dy, int dz, int state)
 	}
 
 	SDL_GetMouseState(&dx, &dy);
-        dx = dx * 0x7FFF / (screen->w - 1);
-        dy = dy * 0x7FFF / (screen->h - 1);
+        dx = dx * 0x7FFF / (real_screen->w - 1);
+        dy = dy * 0x7FFF / (real_screen->h - 1);
     } else if (absolute_enabled) {
 	sdl_show_cursor();
 	absolute_enabled = 0;
@@ -538,7 +437,7 @@ static void sdl_send_mouse_event(int dx, int dy, int dz, int state)
 static void toggle_full_screen(DisplayState *ds)
 {
     gui_fullscreen = !gui_fullscreen;
-    sdl_resize_shared(ds, ds_get_width(ds), ds_get_height(ds), ds_get_bits_per_pixel(ds), ds_get_linesize(ds), ds_get_data(ds));
+    sdl_resize(ds);
     if (gui_fullscreen) {
         gui_saved_grab = gui_grab;
         sdl_grab_start();
@@ -566,7 +465,7 @@ static void sdl_refresh(DisplayState *ds)
     while (SDL_PollEvent(ev)) {
         switch (ev->type) {
         case SDL_VIDEOEXPOSE:
-            ds->dpy_update(ds, 0, 0, ds->width, ds->height);
+            dcl->dpy_update(ds, 0, 0, ds_get_width(ds), ds_get_height(ds));
             break;
         case SDL_KEYDOWN:
         case SDL_KEYUP:
@@ -726,23 +625,23 @@ static void sdl_refresh(DisplayState *ds)
 	    if (ev->active.state & SDL_APPACTIVE) {
 		if (ev->active.gain) {
 		    /* Back to default interval */
-		    ds->gui_timer_interval = 0;
-		    ds->idle = 0;
+		    dcl->gui_timer_interval = 0;
+		    dcl->idle = 0;
 		} else {
 		    /* Sleeping interval */
-		    ds->gui_timer_interval = 500;
-		    ds->idle = 1;
+		    dcl->gui_timer_interval = 500;
+		    dcl->idle = 1;
 		}
 	    }
             break;
 #ifdef CONFIG_OPENGL
         case SDL_VIDEORESIZE:
         {
-            if (ds->shared_buf && opengl_enabled) {
+            if (opengl_enabled) {
                 SDL_ResizeEvent *rev = &ev->resize;
-                screen = SDL_SetVideoMode(rev->w, rev->h, 0, SDL_OPENGL|SDL_RESIZABLE);
-                opengl_setdata(ds, ds->data);
-                opengl_update(ds, 0, 0, ds->width, ds->height);
+                real_screen = SDL_SetVideoMode(rev->w, rev->h, 0, SDL_OPENGL|SDL_RESIZABLE);
+                opengl_setdata(ds);
+                opengl_update(ds, 0, 0, ds_get_width(ds), ds_get_height(ds));
             }
             break;
         }
@@ -792,17 +691,21 @@ void sdl_display_init(DisplayState *ds, int full_screen, int no_frame, int openg
     signal(SIGQUIT, SIG_DFL);
 #endif
 
-    ds->dpy_update = sdl_update;
-    ds->dpy_resize = sdl_resize;
-    ds->dpy_resize_shared = sdl_resize_shared;
-    ds->dpy_refresh = sdl_refresh;
-    ds->dpy_setdata = sdl_setdata;
+    dcl = qemu_mallocz(sizeof(DisplayChangeListener));
+    if (!dcl)
+        exit(1);
+    dcl->dpy_update = sdl_update;
+    dcl->dpy_resize = sdl_resize;
+    dcl->dpy_refresh = sdl_refresh;
+    dcl->dpy_setdata = sdl_setdata;
 #ifdef CONFIG_OPENGL
-    if (opengl_enabled)
-        ds->dpy_setdata = opengl_setdata;
+    if (opengl_enabled) {
+        dcl->dpy_update = opengl_update;
+        dcl->dpy_setdata = opengl_setdata;
+    }
 #endif
+    register_displaychangelistener(ds, dcl);
 
-    sdl_resize(ds, 640, 400);
     sdl_update_caption();
     SDL_EnableKeyRepeat(250, 50);
     gui_grab = 0;
