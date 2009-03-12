@@ -15,7 +15,8 @@
  *
  *  You should have received a copy of the GNU General Public License
  *  along with this program; if not, write to the Free Software
- *  Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+ *  Foundation, Inc., 51 Franklin Street - Fifth Floor, Boston,
+ *  MA 02110-1301, USA.
  */
 #include <stdlib.h>
 #include <stdio.h>
@@ -54,6 +55,9 @@
 #include <netinet/ip.h>
 #include <netinet/tcp.h>
 #include <qemu-common.h>
+#ifdef HAVE_GPROF
+#include <sys/gmon.h>
+#endif
 
 #define termios host_termios
 #define winsize host_winsize
@@ -152,6 +156,7 @@ static type name (type1 arg1,type2 arg2,type3 arg3,type4 arg4,type5 arg5,	\
 }
 
 
+#define __NR_sys_exit __NR_exit
 #define __NR_sys_uname __NR_uname
 #define __NR_sys_faccessat __NR_faccessat
 #define __NR_sys_fchmodat __NR_fchmodat
@@ -193,6 +198,7 @@ static int gettid(void) {
     return -ENOSYS;
 }
 #endif
+_syscall1(int,sys_exit,int,status)
 _syscall1(int,sys_uname,struct new_utsname *,buf)
 #if defined(TARGET_NR_faccessat) && defined(__NR_faccessat)
 _syscall4(int,sys_faccessat,int,dirfd,const char *,pathname,int,mode,int,flags)
@@ -1062,7 +1068,7 @@ static abi_long lock_iovec(int type, struct iovec *vec, abi_ulong target_addr,
 {
     struct target_iovec *target_vec;
     abi_ulong base;
-    int i, j;
+    int i;
 
     target_vec = lock_user(VERIFY_READ, target_addr, count * sizeof(struct target_iovec), 1);
     if (!target_vec)
@@ -1072,8 +1078,8 @@ static abi_long lock_iovec(int type, struct iovec *vec, abi_ulong target_addr,
         vec[i].iov_len = tswapl(target_vec[i].iov_len);
         if (vec[i].iov_len != 0) {
             vec[i].iov_base = lock_user(type, base, vec[i].iov_len, copy);
-            if (!vec[i].iov_base && vec[i].iov_len) 
-                goto fail;
+            /* Don't check lock_user return value. We must call writev even
+               if a element has invalid base address. */
         } else {
             /* zero length pointer is ignored */
             vec[i].iov_base = NULL;
@@ -1081,14 +1087,6 @@ static abi_long lock_iovec(int type, struct iovec *vec, abi_ulong target_addr,
     }
     unlock_user (target_vec, target_addr, 0);
     return 0;
- fail:
-    /* failure - unwind locks */
-    for (j = 0; j < i; j++) {
-        base = tswapl(target_vec[j].iov_base);
-        unlock_user(vec[j].iov_base, base, 0);
-    }
-    unlock_user (target_vec, target_addr, 0);
-    return -TARGET_EFAULT;
 }
 
 static abi_long unlock_iovec(struct iovec *vec, abi_ulong target_addr,
@@ -1102,8 +1100,10 @@ static abi_long unlock_iovec(struct iovec *vec, abi_ulong target_addr,
     if (!target_vec)
         return -TARGET_EFAULT;
     for(i = 0;i < count; i++) {
-        base = tswapl(target_vec[i].iov_base);
-        unlock_user(vec[i].iov_base, base, copy ? vec[i].iov_len : 0);
+        if (target_vec[i].iov_base) {
+            base = tswapl(target_vec[i].iov_base);
+            unlock_user(vec[i].iov_base, base, copy ? vec[i].iov_len : 0);
+        }
     }
     unlock_user (target_vec, target_addr, 0);
 
@@ -1164,7 +1164,7 @@ static abi_long do_connect(int sockfd, abi_ulong target_addr,
 static abi_long do_sendrecvmsg(int fd, abi_ulong target_msg,
                                int flags, int send)
 {
-    abi_long ret;
+    abi_long ret, len;
     struct target_msghdr *msgp;
     struct msghdr msg;
     int count;
@@ -1203,8 +1203,12 @@ static abi_long do_sendrecvmsg(int fd, abi_ulong target_msg,
             ret = get_errno(sendmsg(fd, &msg, flags));
     } else {
         ret = get_errno(recvmsg(fd, &msg, flags));
-        if (!is_error(ret))
+        if (!is_error(ret)) {
+            len = ret;
             ret = host_to_target_cmsg(msgp, &msg);
+            if (!is_error(ret))
+                ret = len;
+        }
     }
     unlock_iovec(vec, target_vec, count, !send);
     unlock_user_struct(msgp, target_msg, send ? 0 : 1);
@@ -1611,12 +1615,14 @@ static abi_long do_socketcall(int num, abi_ulong vptr)
 }
 #endif
 
+#ifdef TARGET_NR_ipc
 #define N_SHM_REGIONS	32
 
 static struct shm_region {
     abi_ulong	start;
     abi_ulong	size;
 } shm_regions[N_SHM_REGIONS];
+#endif
 
 struct target_ipc_perm
 {
@@ -1934,6 +1940,7 @@ static inline abi_long host_to_target_msginfo(abi_ulong target_addr,
     __put_user(host_msginfo->msgtql, &target_msginfo->msgtql);
     __put_user(host_msginfo->msgseg, &target_msginfo->msgseg);
     unlock_user_struct(target_msginfo, target_addr, 1);
+    return 0;
 }
 
 static inline abi_long do_msgctl(int msgid, int cmd, abi_long ptr)
@@ -2499,7 +2506,7 @@ static bitmask_transtbl fcntl_flags_tbl[] = {
 #if defined(TARGET_I386)
 
 /* NOTE: there is really one LDT for all the threads */
-uint8_t *ldt_table;
+static uint8_t *ldt_table;
 
 static abi_long read_ldt(abi_ulong ptr, unsigned long bytecount)
 {
@@ -2561,12 +2568,16 @@ static abi_long write_ldt(CPUX86State *env,
     }
     /* allocate the LDT */
     if (!ldt_table) {
-        ldt_table = malloc(TARGET_LDT_ENTRIES * TARGET_LDT_ENTRY_SIZE);
-        if (!ldt_table)
+        env->ldt.base = target_mmap(0,
+                                    TARGET_LDT_ENTRIES * TARGET_LDT_ENTRY_SIZE,
+                                    PROT_READ|PROT_WRITE,
+                                    MAP_ANONYMOUS|MAP_PRIVATE, -1, 0);
+        if (env->ldt.base == -1)
             return -TARGET_ENOMEM;
-        memset(ldt_table, 0, TARGET_LDT_ENTRIES * TARGET_LDT_ENTRY_SIZE);
-        env->ldt.base = h2g((unsigned long)ldt_table);
+        memset(g2h(env->ldt.base), 0,
+               TARGET_LDT_ENTRIES * TARGET_LDT_ENTRY_SIZE);
         env->ldt.limit = 0xffff;
+        ldt_table = g2h(env->ldt.base);
     }
 
     /* NOTE: same code as Linux kernel */
@@ -2950,17 +2961,17 @@ static int do_fork(CPUState *env, unsigned int flags, abi_ulong newsp,
             return -EINVAL;
         fork_start();
         ret = fork();
-#if defined(USE_NPTL)
-        /* There is a race condition here.  The parent process could
-           theoretically read the TID in the child process before the child
-           tid is set.  This would require using either ptrace
-           (not implemented) or having *_tidptr to point at a shared memory
-           mapping.  We can't repeat the spinlock hack used above because
-           the child process gets its own copy of the lock.  */
         if (ret == 0) {
+            /* Child Process.  */
             cpu_clone_regs(env, newsp);
             fork_end(1);
-            /* Child Process.  */
+#if defined(USE_NPTL)
+            /* There is a race condition here.  The parent process could
+               theoretically read the TID in the child process before the child
+               tid is set.  This would require using either ptrace
+               (not implemented) or having *_tidptr to point at a shared memory
+               mapping.  We can't repeat the spinlock hack used above because
+               the child process gets its own copy of the lock.  */
             if (flags & CLONE_CHILD_SETTID)
                 put_user_u32(gettid(), child_tidptr);
             if (flags & CLONE_PARENT_SETTID)
@@ -2969,14 +2980,10 @@ static int do_fork(CPUState *env, unsigned int flags, abi_ulong newsp,
             if (flags & CLONE_SETTLS)
                 cpu_set_tls (env, newtls);
             /* TODO: Implement CLONE_CHILD_CLEARTID.  */
+#endif
         } else {
             fork_end(0);
         }
-#else
-        if (ret == 0) {
-            cpu_clone_regs(env, newsp);
-        }
-#endif
     }
     return ret;
 }
@@ -3394,7 +3401,7 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
 #endif
         gdb_exit(cpu_env, arg1);
         /* XXX: should free thread stack and CPU env */
-        _exit(arg1);
+        sys_exit(arg1);
         ret = 0; /* avoid warning */
         break;
     case TARGET_NR_read:
@@ -4856,6 +4863,8 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
     case TARGET_NR_clone:
 #if defined(TARGET_SH4)
         ret = get_errno(do_fork(cpu_env, arg1, arg2, arg3, arg5, arg4));
+#elif defined(TARGET_CRIS)
+        ret = get_errno(do_fork(cpu_env, arg2, arg1, arg3, arg4, arg5));
 #else
         ret = get_errno(do_fork(cpu_env, arg1, arg2, arg3, arg4, arg5));
 #endif
@@ -4863,6 +4872,9 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
 #ifdef __NR_exit_group
         /* new thread calls */
     case TARGET_NR_exit_group:
+#ifdef HAVE_GPROF
+        _mcleanup();
+#endif
         gdb_exit(cpu_env, arg1);
         ret = get_errno(exit_group(arg1));
         break;
@@ -4992,7 +5004,7 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
 		    if (tnamelen > 256)
                         tnamelen = 256;
                     /* XXX: may not be correct */
-		    strncpy(tde->d_name, de->d_name, tnamelen);
+                    pstrcpy(tde->d_name, tnamelen, de->d_name);
                     de = (struct linux_dirent *)((char *)de + reclen);
                     len -= reclen;
                     tde = (struct target_dirent *)((char *)tde + treclen);
@@ -5522,6 +5534,30 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
         ret = get_errno(getuid());
         break;
 #endif
+
+#if defined(TARGET_NR_getxuid) && defined(TARGET_ALPHA)
+   /* Alpha specific */
+    case TARGET_NR_getxuid:
+	 {
+	    uid_t euid;
+	    euid=geteuid();
+	    ((CPUAlphaState *)cpu_env)->ir[IR_A4]=euid;
+	 }
+        ret = get_errno(getuid());
+        break;
+#endif
+#if defined(TARGET_NR_getxgid) && defined(TARGET_ALPHA)
+   /* Alpha specific */
+    case TARGET_NR_getxgid:
+	 {
+	    uid_t egid;
+	    egid=getegid();
+	    ((CPUAlphaState *)cpu_env)->ir[IR_A4]=egid;
+	 }
+        ret = get_errno(getgid());
+        break;
+#endif
+
 #ifdef TARGET_NR_getgid32
     case TARGET_NR_getgid32:
         ret = get_errno(getgid());
@@ -5877,6 +5913,14 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
 #if defined(TARGET_MIPS)
       ((CPUMIPSState *) cpu_env)->tls_value = arg1;
       ret = 0;
+      break;
+#elif defined(TARGET_CRIS)
+      if (arg1 & 0xff)
+          ret = -TARGET_EINVAL;
+      else {
+          ((CPUCRISState *) cpu_env)->pregs[PR_PID] = arg1;
+          ret = 0;
+      }
       break;
 #elif defined(TARGET_I386) && defined(TARGET_ABI32)
       ret = do_set_thread_area(cpu_env, arg1);

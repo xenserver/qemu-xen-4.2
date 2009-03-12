@@ -13,6 +13,8 @@
  * the host adapter emulator.
  */
 
+#include <qemu-common.h>
+#include <sysemu.h>
 //#define DEBUG_SCSI
 
 #ifdef DEBUG_SCSI
@@ -44,6 +46,8 @@ do { fprintf(stderr, "scsi-disk: " fmt , ##args); } while (0)
 #define SCSI_DMA_BUF_SIZE    131072
 #endif
 
+#define SCSI_MAX_INQUIRY_LEN 256
+
 typedef struct SCSIRequest {
     SCSIDeviceState *dev;
     uint32_t tag;
@@ -72,6 +76,7 @@ struct SCSIDeviceState
        or from the AIO completion routines.  */
     scsi_completionfn completion;
     void *opaque;
+    char drive_serial_str[21];
 };
 
 /* Global pool of SCSIRequest structures.  */
@@ -422,6 +427,8 @@ static int32_t scsi_send_command(SCSIDevice *d, uint32_t tag,
                     break;
                 case 0x80:
                     {
+                        int l;
+
                         /* Device serial number, optional */
                         if (len < 4) {
                             BADF("Error: EVPD[Serial number] Inquiry buffer "
@@ -430,6 +437,7 @@ static int32_t scsi_send_command(SCSIDevice *d, uint32_t tag,
                         }
 
                         DPRINTF("Inquiry EVPD[Serial number] buffer size %d\n", len);
+                        l = MIN(len, strlen(s->drive_serial_str));
 
                         r->buf_len = 0;
 
@@ -442,9 +450,9 @@ static int32_t scsi_send_command(SCSIDevice *d, uint32_t tag,
 
                         outbuf[r->buf_len++] = 0x80; // this page
                         outbuf[r->buf_len++] = 0x00;
-                        outbuf[r->buf_len++] = 0x01; // 1 byte data follow
-
-                        outbuf[r->buf_len++] = '0';  // 1 byte data follow 
+                        outbuf[r->buf_len++] = l;
+                        memcpy(&outbuf[r->buf_len], s->drive_serial_str, l);
+                        r->buf_len += l;
                     }
 
                     break;
@@ -507,7 +515,11 @@ static int32_t scsi_send_command(SCSIDevice *d, uint32_t tag,
                      "is less than 36 (TODO: only 5 required)\n", len);
             }
         }
-	memset(outbuf, 0, 36);
+
+        if(len > SCSI_MAX_INQUIRY_LEN)
+            len = SCSI_MAX_INQUIRY_LEN;
+
+        memset(outbuf, 0, len);
 
         if (lun || buf[1] >> 5) {
             outbuf[0] = 0x7f;	/* LUN not supported */
@@ -525,10 +537,10 @@ static int32_t scsi_send_command(SCSIDevice *d, uint32_t tag,
            Some later commands are also implemented. */
 	outbuf[2] = 3;
 	outbuf[3] = 2; /* Format 2 */
-	outbuf[4] = 31;
+	outbuf[4] = len - 5; /* Additional Length = (Len - 1) - 4 */
         /* Sync data transfer and TCQ.  */
         outbuf[7] = 0x10 | (s->tcq ? 0x02 : 0);
-	r->buf_len = 36;
+	r->buf_len = len;
 	break;
     case 0x16:
         DPRINTF("Reserve(6)\n");
@@ -822,7 +834,10 @@ SCSIDevice *scsi_disk_init(BlockDriverState *bdrv, int tcq,
     } else {
         s->cluster_size = 1;
     }
-
+    strncpy(s->drive_serial_str, drive_get_serial(s->bdrv),
+            sizeof(s->drive_serial_str));
+    if (strlen(s->drive_serial_str) == 0)
+        pstrcpy(s->drive_serial_str, sizeof(s->drive_serial_str), "0");
     d = (SCSIDevice *)qemu_mallocz(sizeof(SCSIDevice));
     d->state = s;
     d->destroy = scsi_destroy;

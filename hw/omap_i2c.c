@@ -13,17 +13,15 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston,
- * MA 02111-1307 USA
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 #include "hw.h"
 #include "i2c.h"
 #include "omap.h"
 
 struct omap_i2c_s {
-    target_phys_addr_t base;
     qemu_irq irq;
     qemu_irq drq[2];
     i2c_slave slave;
@@ -493,7 +491,6 @@ struct omap_i2c_s *omap_i2c_init(target_phys_addr_t base,
 
     /* TODO: set a value greater or equal to real hardware */
     s->revision = 0x11;
-    s->base = base;
     s->irq = irq;
     s->drq[0] = dma[0];
     s->drq[1] = dma[1];
@@ -505,7 +502,7 @@ struct omap_i2c_s *omap_i2c_init(target_phys_addr_t base,
 
     iomemtype = cpu_register_io_memory(0, omap_i2c_readfn,
                     omap_i2c_writefn, s);
-    cpu_register_physical_memory(s->base, 0x800, iomemtype);
+    cpu_register_physical_memory(base, 0x800, iomemtype);
 
     return s;
 }
@@ -529,7 +526,7 @@ struct omap_i2c_s *omap2_i2c_init(struct omap_target_agent_s *ta,
 
     iomemtype = l4_register_io_memory(0, omap_i2c_readfn,
                     omap_i2c_writefn, s);
-    s->base = omap_l4_attach(ta, 0, iomemtype);
+    omap_l4_attach(ta, 0, iomemtype);
 
     return s;
 }

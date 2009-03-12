@@ -28,6 +28,7 @@ void register_machines(void);
 
 /* Axis ETRAX.  */
 extern QEMUMachine bareetraxfs_machine;
+extern QEMUMachine axisdev88_machine;
 
 /* pc.c */
 extern QEMUMachine pc_machine;
@@ -43,6 +44,7 @@ extern QEMUMachine core99_machine;
 extern QEMUMachine heathrow_machine;
 extern QEMUMachine ref405ep_machine;
 extern QEMUMachine taihu_machine;
+extern QEMUMachine bamboo_machine;
 
 /* mips_r4k.c */
 extern QEMUMachine mips_machine;
@@ -90,6 +92,10 @@ extern QEMUMachine akitapda_machine;
 extern QEMUMachine spitzpda_machine;
 extern QEMUMachine borzoipda_machine;
 extern QEMUMachine terrierpda_machine;
+
+/* omap_sx1.c */
+extern QEMUMachine sx1_machine_v1;
+extern QEMUMachine sx1_machine_v2;
 
 /* palm.c */
 extern QEMUMachine palmte_machine;

@@ -16,7 +16,7 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston MA  02110-1301 USA
  */
 #ifndef CPU_M68K_H
 #define CPU_M68K_H
@@ -231,8 +231,22 @@ static inline void cpu_clone_regs(CPUState *env, target_ulong newsp)
 }
 #endif
 
-#define CPU_PC_FROM_TB(env, tb) env->pc = tb->pc
-
 #include "cpu-all.h"
+#include "exec-all.h"
+
+static inline void cpu_pc_from_tb(CPUState *env, TranslationBlock *tb)
+{
+    env->pc = tb->pc;
+}
+
+static inline void cpu_get_tb_cpu_state(CPUState *env, target_ulong *pc,
+                                        target_ulong *cs_base, int *flags)
+{
+    *pc = env->pc;
+    *cs_base = 0;
+    *flags = (env->fpcr & M68K_FPCR_PREC)       /* Bit  6 */
+            | (env->sr & SR_S)                  /* Bit  13 */
+            | ((env->macsr >> 4) & 0xf);        /* Bits 0-3 */
+}
 
 #endif

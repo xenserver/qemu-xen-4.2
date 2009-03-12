@@ -1,6 +1,9 @@
 #ifndef __SH_INTC_H__
 #define __SH_INTC_H__
 
+#include "qemu-common.h"
+#include "irq.h"
+
 typedef unsigned char intc_enum;
 
 struct intc_vect {
@@ -29,7 +32,7 @@ struct intc_prio_reg {
     unsigned long value;
 };
 
-#define _INTC_ARRAY(a) a, sizeof(a)/sizeof(*a)
+#define _INTC_ARRAY(a) a, ARRAY_SIZE(a)
 
 struct intc_source {
     unsigned short vect;
@@ -43,13 +46,13 @@ struct intc_source {
 };
 
 struct intc_desc {
+    qemu_irq *irqs;
     struct intc_source *sources;
     int nr_sources;
     struct intc_mask_reg *mask_regs;
     int nr_mask_regs;
     struct intc_prio_reg *prio_regs;
     int nr_prio_regs;
-
     int iomemtype;
     int pending; /* number of interrupt sources that has pending set */
 };
@@ -71,5 +74,7 @@ int sh_intc_init(struct intc_desc *desc,
 		 int nr_mask_regs,
 		 struct intc_prio_reg *prio_regs,
 		 int nr_prio_regs);
+
+void sh_intc_set_irl(void *opaque, int n, int level);
 
 #endif /* __SH_INTC_H__ */

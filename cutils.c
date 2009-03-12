@@ -22,6 +22,7 @@
  * THE SOFTWARE.
  */
 #include "qemu-common.h"
+#include "host-utils.h"
 
 void pstrcpy(char *buf, size_t buf_size, const char *str)
 {
@@ -72,7 +73,7 @@ int stristart(const char *str, const char *val, const char **ptr)
     p = str;
     q = val;
     while (*q != '\0') {
-        if (CTYPE(toupper,*p) != CTYPE(toupper,*q))
+        if (qemu_toupper(*p) != qemu_toupper(*q))
             return 0;
         p++;
         q++;
@@ -94,4 +95,9 @@ time_t mktimegm(struct tm *tm)
                  y / 400 - 719469);
     t += 3600 * tm->tm_hour + 60 * tm->tm_min + tm->tm_sec;
     return t;
+}
+
+int qemu_fls(int i)
+{
+    return 32 - clz32(i);
 }

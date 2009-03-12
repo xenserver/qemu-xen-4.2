@@ -14,10 +14,9 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston,
- * MA 02111-1307 USA
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
 #include "qemu-common.h"
@@ -432,7 +431,7 @@ static uint32_t mipid_txrx(void *opaque, uint32_t cmd, int len)
         cpu_abort(cpu_single_env, "%s: FIXME: bad SPI word width %i\n",
                         __FUNCTION__, len);
 
-    if (s->p >= sizeof(s->resp) / sizeof(*s->resp))
+    if (s->p >= ARRAY_SIZE(s->resp))
         ret = 0;
     else
         ret = s->resp[s->p ++];
@@ -840,7 +839,7 @@ static void n800_setup_nolo_tags(void *sram_base)
 
     /* OMAP STI console? Pin out settings? */
     ADD_TAG(0x6e01, 414);
-    for (i = 0; i < sizeof(n800_pinout) / 4; i ++)
+    for (i = 0; i < ARRAY_SIZE(n800_pinout); i ++)
         stl_raw(v ++, n800_pinout[i]);
 
     /* Kernel memsize? */
@@ -1407,14 +1406,14 @@ QEMUMachine n800_machine = {
     .name = "n800",
     .desc = "Nokia N800 tablet aka. RX-34 (OMAP2420)",
     .init = n800_init,
-    .ram_require = (0x08000000 + 0x00010000 + OMAP242X_SRAM_SIZE) | RAMSIZE_FIXED,
-    .max_cpus = 1,
+    .ram_require = (0x08000000 + 0x00010000 + OMAP242X_SRAM_SIZE) |
+            RAMSIZE_FIXED,
 };
 
 QEMUMachine n810_machine = {
     .name = "n810",
     .desc = "Nokia N810 tablet aka. RX-44 (OMAP2420)",
     .init = n810_init,
-    .ram_require = (0x08000000 + 0x00010000 + OMAP242X_SRAM_SIZE) | RAMSIZE_FIXED,
-    .max_cpus = 1,
+    .ram_require = (0x08000000 + 0x00010000 + OMAP242X_SRAM_SIZE) |
+            RAMSIZE_FIXED,
 };

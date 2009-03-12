@@ -44,7 +44,7 @@ static void dummy_m68k_init(ram_addr_t ram_size, int vga_ram_size,
         kernel_size = load_elf(kernel_filename, 0, &elf_entry, NULL, NULL);
         entry = elf_entry;
         if (kernel_size < 0) {
-            kernel_size = load_uboot(kernel_filename, &entry, NULL);
+            kernel_size = load_uimage(kernel_filename, &entry, NULL, NULL);
         }
         if (kernel_size < 0) {
             kernel_size = load_image(kernel_filename,
@@ -66,5 +66,4 @@ QEMUMachine dummy_m68k_machine = {
     .name = "dummy",
     .desc = "Dummy board",
     .init = dummy_m68k_init,
-    .max_cpus = 1,
 };

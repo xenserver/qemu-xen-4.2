@@ -15,7 +15,7 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston MA  02110-1301 USA
  */
 #include <stdarg.h>
 #include <stdlib.h>
@@ -27,12 +27,10 @@
 
 #include "cpu.h"
 #include "exec-all.h"
-#include "svm.h"
 #include "qemu-common.h"
+#include "kvm.h"
 
 //#define DEBUG_MMU
-
-static int cpu_x86_register (CPUX86State *env, const char *cpu_model);
 
 static void add_flagname_to_bitmaps(char *flagname, uint32_t *features, 
                                     uint32_t *ext_features, 
@@ -89,33 +87,6 @@ static void add_flagname_to_bitmaps(char *flagname, uint32_t *features,
             return;
         }
     fprintf(stderr, "CPU feature %s not found\n", flagname);
-}
-
-CPUX86State *cpu_x86_init(const char *cpu_model)
-{
-    CPUX86State *env;
-    static int inited;
-
-    env = qemu_mallocz(sizeof(CPUX86State));
-    if (!env)
-        return NULL;
-    cpu_exec_init(env);
-    env->cpu_model_str = cpu_model;
-
-    /* init various static tables */
-    if (!inited) {
-        inited = 1;
-        optimize_flags_init();
-    }
-    if (cpu_x86_register(env, cpu_model) < 0) {
-        cpu_x86_close(env);
-        return NULL;
-    }
-    cpu_reset(env);
-#ifdef USE_KQEMU
-    kqemu_init(env);
-#endif
-    return env;
 }
 
 typedef struct x86_def_t {
@@ -281,7 +252,7 @@ static x86_def_t x86_defs[] = {
              * CPUID_HT | CPUID_TM | CPUID_PBE */
             /* Some CPUs got no CPUID_SEP */
         .ext_features = CPUID_EXT_MONITOR |
-            CPUID_EXT_SSE3 /* PNI */, CPUID_EXT_SSSE3,
+            CPUID_EXT_SSE3 /* PNI */ | CPUID_EXT_SSSE3,
             /* Missing: CPUID_EXT_DSCPL | CPUID_EXT_EST |
              * CPUID_EXT_TM2 | CPUID_EXT_XTPR */
         .ext2_features = (PPRO_FEATURES & 0x0183F3FF) | CPUID_EXT2_NX,
@@ -303,7 +274,7 @@ static int cpu_x86_find_by_name(x86_def_t *x86_cpu_def, const char *cpu_model)
     int family = -1, model = -1, stepping = -1;
 
     def = NULL;
-    for (i = 0; i < sizeof(x86_defs) / sizeof(x86_def_t); i++) {
+    for (i = 0; i < ARRAY_SIZE(x86_defs); i++) {
         if (strcmp(name, x86_defs[i].name) == 0) {
             def = &x86_defs[i];
             break;
@@ -334,7 +305,7 @@ static int cpu_x86_find_by_name(x86_def_t *x86_cpu_def, const char *cpu_model)
             } else if (!strcmp(featurestr, "model")) {
                 char *err;
                 model = strtol(val, &err, 10);
-                if (!*val || *err || model < 0 || model > 0xf) {
+                if (!*val || *err || model < 0 || model > 0xff) {
                     fprintf(stderr, "bad numerical value %s\n", val);
                     goto error;
                 }
@@ -393,7 +364,7 @@ void x86_cpu_list (FILE *f, int (*cpu_fprintf)(FILE *f, const char *fmt, ...))
 {
     unsigned int i;
 
-    for (i = 0; i < sizeof(x86_defs) / sizeof(x86_def_t); i++)
+    for (i = 0; i < ARRAY_SIZE(x86_defs); i++)
         (*cpu_fprintf)(f, "x86 %16s\n", x86_defs[i].name);
 }
 
@@ -413,7 +384,12 @@ static int cpu_x86_register (CPUX86State *env, const char *cpu_model)
         env->cpuid_vendor3 = CPUID_VENDOR_INTEL_3;
     }
     env->cpuid_level = def->level;
-    env->cpuid_version = (def->family << 8) | (def->model << 4) | def->stepping;
+    if (def->family > 0x0f)
+        env->cpuid_version = 0xf00 | ((def->family - 0x0f) << 20);
+    else
+        env->cpuid_version = def->family << 8;
+    env->cpuid_version |= ((def->model & 0xf) << 4) | ((def->model >> 4) << 16);
+    env->cpuid_version |= def->stepping;
     env->cpuid_features = def->features;
     env->pat = 0x0007040600070406ULL;
     env->cpuid_ext_features = def->ext_features;
@@ -490,6 +466,12 @@ void cpu_reset(CPUX86State *env)
     env->fpuc = 0x37f;
 
     env->mxcsr = 0x1f80;
+
+    memset(env->dr, 0, sizeof(env->dr));
+    env->dr[6] = DR6_FIXED_1;
+    env->dr[7] = DR7_FIXED_1;
+    cpu_breakpoint_remove_all(env, BP_CPU);
+    cpu_watchpoint_remove_all(env, BP_CPU);
 }
 
 void cpu_x86_close(CPUX86State *env)
@@ -660,6 +642,10 @@ void cpu_dump_state(CPUState *env, FILE *f,
                     env->cr[2],
                     env->cr[3],
                     (uint32_t)env->cr[4]);
+        for(i = 0; i < 4; i++)
+            cpu_fprintf(f, "DR%d=%016" PRIx64 " ", i, env->dr[i]);
+        cpu_fprintf(f, "\nDR6=%016" PRIx64 " DR7=%016" PRIx64 "\n",
+                    env->dr[6], env->dr[7]);
     } else
 #endif
     {
@@ -691,6 +677,9 @@ void cpu_dump_state(CPUState *env, FILE *f,
                     (uint32_t)env->cr[2],
                     (uint32_t)env->cr[3],
                     (uint32_t)env->cr[4]);
+        for(i = 0; i < 4; i++)
+            cpu_fprintf(f, "DR%d=%08x ", i, env->dr[i]);
+        cpu_fprintf(f, "\nDR6=%08x DR7=%08x\n", env->dr[6], env->dr[7]);
     }
     if (flags & X86_DUMP_CCOP) {
         if ((unsigned)env->cc_op < CC_OP_NB)
@@ -856,12 +845,6 @@ void cpu_x86_update_cr4(CPUX86State *env, uint32_t new_cr4)
         env->hflags &= ~HF_OSFXSR_MASK;
 
     env->cr[4] = new_cr4;
-}
-
-/* XXX: also flush 4MB pages */
-void cpu_x86_flush_tlb(CPUX86State *env, target_ulong addr)
-{
-    tlb_flush_page(env, addr);
 }
 
 #if defined(CONFIG_USER_ONLY)
@@ -1286,4 +1269,372 @@ target_phys_addr_t cpu_get_phys_page_debug(CPUState *env, target_ulong addr)
     paddr = (pte & TARGET_PAGE_MASK) + page_offset;
     return paddr;
 }
+
+void hw_breakpoint_insert(CPUState *env, int index)
+{
+    int type, err = 0;
+
+    switch (hw_breakpoint_type(env->dr[7], index)) {
+    case 0:
+        if (hw_breakpoint_enabled(env->dr[7], index))
+            err = cpu_breakpoint_insert(env, env->dr[index], BP_CPU,
+                                        &env->cpu_breakpoint[index]);
+        break;
+    case 1:
+        type = BP_CPU | BP_MEM_WRITE;
+        goto insert_wp;
+    case 2:
+         /* No support for I/O watchpoints yet */
+        break;
+    case 3:
+        type = BP_CPU | BP_MEM_ACCESS;
+    insert_wp:
+        err = cpu_watchpoint_insert(env, env->dr[index],
+                                    hw_breakpoint_len(env->dr[7], index),
+                                    type, &env->cpu_watchpoint[index]);
+        break;
+    }
+    if (err)
+        env->cpu_breakpoint[index] = NULL;
+}
+
+void hw_breakpoint_remove(CPUState *env, int index)
+{
+    if (!env->cpu_breakpoint[index])
+        return;
+    switch (hw_breakpoint_type(env->dr[7], index)) {
+    case 0:
+        if (hw_breakpoint_enabled(env->dr[7], index))
+            cpu_breakpoint_remove_by_ref(env, env->cpu_breakpoint[index]);
+        break;
+    case 1:
+    case 3:
+        cpu_watchpoint_remove_by_ref(env, env->cpu_watchpoint[index]);
+        break;
+    case 2:
+        /* No support for I/O watchpoints yet */
+        break;
+    }
+}
+
+int check_hw_breakpoints(CPUState *env, int force_dr6_update)
+{
+    target_ulong dr6;
+    int reg, type;
+    int hit_enabled = 0;
+
+    dr6 = env->dr[6] & ~0xf;
+    for (reg = 0; reg < 4; reg++) {
+        type = hw_breakpoint_type(env->dr[7], reg);
+        if ((type == 0 && env->dr[reg] == env->eip) ||
+            ((type & 1) && env->cpu_watchpoint[reg] &&
+             (env->cpu_watchpoint[reg]->flags & BP_WATCHPOINT_HIT))) {
+            dr6 |= 1 << reg;
+            if (hw_breakpoint_enabled(env->dr[7], reg))
+                hit_enabled = 1;
+        }
+    }
+    if (hit_enabled || force_dr6_update)
+        env->dr[6] = dr6;
+    return hit_enabled;
+}
+
+static CPUDebugExcpHandler *prev_debug_excp_handler;
+
+void raise_exception(int exception_index);
+
+static void breakpoint_handler(CPUState *env)
+{
+    CPUBreakpoint *bp;
+
+    if (env->watchpoint_hit) {
+        if (env->watchpoint_hit->flags & BP_CPU) {
+            env->watchpoint_hit = NULL;
+            if (check_hw_breakpoints(env, 0))
+                raise_exception(EXCP01_DB);
+            else
+                cpu_resume_from_signal(env, NULL);
+        }
+    } else {
+        TAILQ_FOREACH(bp, &env->breakpoints, entry)
+            if (bp->pc == env->eip) {
+                if (bp->flags & BP_CPU) {
+                    check_hw_breakpoints(env, 1);
+                    raise_exception(EXCP01_DB);
+                }
+                break;
+            }
+    }
+    if (prev_debug_excp_handler)
+        prev_debug_excp_handler(env);
+}
 #endif /* !CONFIG_USER_ONLY */
+
+static void host_cpuid(uint32_t function, uint32_t *eax, uint32_t *ebx,
+                       uint32_t *ecx, uint32_t *edx)
+{
+#if defined(CONFIG_KVM)
+    uint32_t vec[4];
+
+#ifdef __x86_64__
+    asm volatile("cpuid"
+		 : "=a"(vec[0]), "=b"(vec[1]),
+		   "=c"(vec[2]), "=d"(vec[3])
+		 : "0"(function) : "cc");
+#else
+    asm volatile("pusha \n\t"
+		 "cpuid \n\t"
+		 "mov %%eax, 0(%1) \n\t"
+		 "mov %%ebx, 4(%1) \n\t"
+		 "mov %%ecx, 8(%1) \n\t"
+		 "mov %%edx, 12(%1) \n\t"
+		 "popa"
+		 : : "a"(function), "S"(vec)
+		 : "memory", "cc");
+#endif
+
+    if (eax)
+	*eax = vec[0];
+    if (ebx)
+	*ebx = vec[1];
+    if (ecx)
+	*ecx = vec[2];
+    if (edx)
+	*edx = vec[3];
+#endif
+}
+
+void cpu_x86_cpuid(CPUX86State *env, uint32_t index,
+                   uint32_t *eax, uint32_t *ebx,
+                   uint32_t *ecx, uint32_t *edx)
+{
+    /* test if maximum index reached */
+    if (index & 0x80000000) {
+        if (index > env->cpuid_xlevel)
+            index = env->cpuid_level;
+    } else {
+        if (index > env->cpuid_level)
+            index = env->cpuid_level;
+    }
+
+    switch(index) {
+    case 0:
+        *eax = env->cpuid_level;
+        *ebx = env->cpuid_vendor1;
+        *edx = env->cpuid_vendor2;
+        *ecx = env->cpuid_vendor3;
+
+        /* sysenter isn't supported on compatibility mode on AMD.  and syscall
+         * isn't supported in compatibility mode on Intel.  so advertise the
+         * actuall cpu, and say goodbye to migration between different vendors
+         * is you use compatibility mode. */
+        if (kvm_enabled())
+            host_cpuid(0, NULL, ebx, ecx, edx);
+        break;
+    case 1:
+        *eax = env->cpuid_version;
+        *ebx = (env->cpuid_apic_id << 24) | 8 << 8; /* CLFLUSH size in quad words, Linux wants it. */
+        *ecx = env->cpuid_ext_features;
+        *edx = env->cpuid_features;
+
+        /* "Hypervisor present" bit required for Microsoft SVVP */
+        if (kvm_enabled())
+            *ecx |= (1 << 31);
+        break;
+    case 2:
+        /* cache info: needed for Pentium Pro compatibility */
+        *eax = 1;
+        *ebx = 0;
+        *ecx = 0;
+        *edx = 0x2c307d;
+        break;
+    case 4:
+        /* cache info: needed for Core compatibility */
+        switch (*ecx) {
+            case 0: /* L1 dcache info */
+                *eax = 0x0000121;
+                *ebx = 0x1c0003f;
+                *ecx = 0x000003f;
+                *edx = 0x0000001;
+                break;
+            case 1: /* L1 icache info */
+                *eax = 0x0000122;
+                *ebx = 0x1c0003f;
+                *ecx = 0x000003f;
+                *edx = 0x0000001;
+                break;
+            case 2: /* L2 cache info */
+                *eax = 0x0000143;
+                *ebx = 0x3c0003f;
+                *ecx = 0x0000fff;
+                *edx = 0x0000001;
+                break;
+            default: /* end of info */
+                *eax = 0;
+                *ebx = 0;
+                *ecx = 0;
+                *edx = 0;
+                break;
+        }
+
+        break;
+    case 5:
+        /* mwait info: needed for Core compatibility */
+        *eax = 0; /* Smallest monitor-line size in bytes */
+        *ebx = 0; /* Largest monitor-line size in bytes */
+        *ecx = CPUID_MWAIT_EMX | CPUID_MWAIT_IBE;
+        *edx = 0;
+        break;
+    case 6:
+        /* Thermal and Power Leaf */
+        *eax = 0;
+        *ebx = 0;
+        *ecx = 0;
+        *edx = 0;
+        break;
+    case 9:
+        /* Direct Cache Access Information Leaf */
+        *eax = 0; /* Bits 0-31 in DCA_CAP MSR */
+        *ebx = 0;
+        *ecx = 0;
+        *edx = 0;
+        break;
+    case 0xA:
+        /* Architectural Performance Monitoring Leaf */
+        *eax = 0;
+        *ebx = 0;
+        *ecx = 0;
+        *edx = 0;
+        break;
+    case 0x80000000:
+        *eax = env->cpuid_xlevel;
+        *ebx = env->cpuid_vendor1;
+        *edx = env->cpuid_vendor2;
+        *ecx = env->cpuid_vendor3;
+        break;
+    case 0x80000001:
+        *eax = env->cpuid_features;
+        *ebx = 0;
+        *ecx = env->cpuid_ext3_features;
+        *edx = env->cpuid_ext2_features;
+
+        if (kvm_enabled()) {
+            uint32_t h_eax, h_edx;
+
+            host_cpuid(0x80000001, &h_eax, NULL, NULL, &h_edx);
+
+            /* disable CPU features that the host does not support */
+
+            /* long mode */
+            if ((h_edx & 0x20000000) == 0 /* || !lm_capable_kernel */)
+                *edx &= ~0x20000000;
+            /* syscall */
+            if ((h_edx & 0x00000800) == 0)
+                *edx &= ~0x00000800;
+            /* nx */
+            if ((h_edx & 0x00100000) == 0)
+                *edx &= ~0x00100000;
+
+            /* disable CPU features that KVM cannot support */
+
+            /* svm */
+            *ecx &= ~4UL;
+            /* 3dnow */
+            *edx &= ~0xc0000000;
+        }
+        break;
+    case 0x80000002:
+    case 0x80000003:
+    case 0x80000004:
+        *eax = env->cpuid_model[(index - 0x80000002) * 4 + 0];
+        *ebx = env->cpuid_model[(index - 0x80000002) * 4 + 1];
+        *ecx = env->cpuid_model[(index - 0x80000002) * 4 + 2];
+        *edx = env->cpuid_model[(index - 0x80000002) * 4 + 3];
+        break;
+    case 0x80000005:
+        /* cache info (L1 cache) */
+        *eax = 0x01ff01ff;
+        *ebx = 0x01ff01ff;
+        *ecx = 0x40020140;
+        *edx = 0x40020140;
+        break;
+    case 0x80000006:
+        /* cache info (L2 cache) */
+        *eax = 0;
+        *ebx = 0x42004200;
+        *ecx = 0x02008140;
+        *edx = 0;
+        break;
+    case 0x80000008:
+        /* virtual & phys address size in low 2 bytes. */
+/* XXX: This value must match the one used in the MMU code. */ 
+        if (env->cpuid_ext2_features & CPUID_EXT2_LM) {
+            /* 64 bit processor */
+#if defined(USE_KQEMU)
+            *eax = 0x00003020;	/* 48 bits virtual, 32 bits physical */
+#else
+/* XXX: The physical address space is limited to 42 bits in exec.c. */
+            *eax = 0x00003028;	/* 48 bits virtual, 40 bits physical */
+#endif
+        } else {
+#if defined(USE_KQEMU)
+            *eax = 0x00000020;	/* 32 bits physical */
+#else
+            if (env->cpuid_features & CPUID_PSE36)
+                *eax = 0x00000024; /* 36 bits physical */
+            else
+                *eax = 0x00000020; /* 32 bits physical */
+#endif
+        }
+        *ebx = 0;
+        *ecx = 0;
+        *edx = 0;
+        break;
+    case 0x8000000A:
+        *eax = 0x00000001; /* SVM Revision */
+        *ebx = 0x00000010; /* nr of ASIDs */
+        *ecx = 0;
+        *edx = 0; /* optional features */
+        break;
+    default:
+        /* reserved values: zero */
+        *eax = 0;
+        *ebx = 0;
+        *ecx = 0;
+        *edx = 0;
+        break;
+    }
+}
+
+CPUX86State *cpu_x86_init(const char *cpu_model)
+{
+    CPUX86State *env;
+    static int inited;
+
+    env = qemu_mallocz(sizeof(CPUX86State));
+    if (!env)
+        return NULL;
+    cpu_exec_init(env);
+    env->cpu_model_str = cpu_model;
+
+    /* init various static tables */
+    if (!inited) {
+        inited = 1;
+        optimize_flags_init();
+#ifndef CONFIG_USER_ONLY
+        prev_debug_excp_handler =
+            cpu_set_debug_excp_handler(breakpoint_handler);
+#endif
+    }
+    if (cpu_x86_register(env, cpu_model) < 0) {
+        cpu_x86_close(env);
+        return NULL;
+    }
+    cpu_reset(env);
+#ifdef USE_KQEMU
+    kqemu_init(env);
+#endif
+    if (kvm_enabled())
+        kvm_init_vcpu(env);
+    return env;
+}

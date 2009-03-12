@@ -1937,17 +1937,10 @@ static void pcnet_common_init(PCNetState *d, NICInfo *nd, const char *info_str)
     d->nd = nd;
 
     if (nd && nd->vlan) {
-        d->vc = qemu_new_vlan_client(nd->vlan, pcnet_receive,
-                                     pcnet_can_receive, d);
+        d->vc = qemu_new_vlan_client(nd->vlan, nd->model, nd->name,
+                                     pcnet_receive, pcnet_can_receive, d);
 
-        snprintf(d->vc->info_str, sizeof(d->vc->info_str),
-                 "pcnet macaddr=%02x:%02x:%02x:%02x:%02x:%02x",
-                 d->nd->macaddr[0],
-                 d->nd->macaddr[1],
-                 d->nd->macaddr[2],
-                 d->nd->macaddr[3],
-                 d->nd->macaddr[4],
-                 d->nd->macaddr[5]);
+        qemu_format_nic_info_str(d->vc, d->nd->macaddr);
     } else {
         d->vc = NULL;
     }
@@ -2062,14 +2055,14 @@ static void lance_mem_writew(void *opaque, target_phys_addr_t addr,
     printf("lance_mem_writew addr=" TARGET_FMT_plx " val=0x%04x\n", addr,
            val & 0xffff);
 #endif
-    pcnet_ioport_writew(opaque, addr & 7, val & 0xffff);
+    pcnet_ioport_writew(opaque, addr, val & 0xffff);
 }
 
 static uint32_t lance_mem_readw(void *opaque, target_phys_addr_t addr)
 {
     uint32_t val;
 
-    val = pcnet_ioport_readw(opaque, addr & 7);
+    val = pcnet_ioport_readw(opaque, addr);
 #ifdef PCNET_DEBUG_IO
     printf("lance_mem_readw addr=" TARGET_FMT_plx " val = 0x%04x\n", addr,
            val & 0xffff);
@@ -2095,6 +2088,8 @@ void lance_init(NICInfo *nd, target_phys_addr_t leaddr, void *dma_opaque,
 {
     PCNetState *d;
     int lance_io_memory;
+
+    qemu_check_nic_model(nd, "lance");
 
     d = qemu_mallocz(sizeof(PCNetState));
     if (!d)

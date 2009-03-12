@@ -50,13 +50,12 @@ typedef struct MiscState {
     uint8_t diag, mctrl;
     uint32_t sysctrl;
     uint16_t leds;
-    CPUState *env;
+    qemu_irq cpu_halt;
     qemu_irq fdc_tc;
 } MiscState;
 
 #define MISC_SIZE 1
-#define SYSCTRL_MAXADDR 3
-#define SYSCTRL_SIZE (SYSCTRL_MAXADDR + 1)
+#define SYSCTRL_SIZE 4
 #define LED_MAXADDR 1
 #define LED_SIZE (LED_MAXADDR + 1)
 
@@ -112,62 +111,96 @@ void slavio_set_power_fail(void *opaque, int power_failing)
     slavio_misc_update_irq(s);
 }
 
-static void slavio_misc_mem_writeb(void *opaque, target_phys_addr_t addr,
-                                   uint32_t val)
+static void slavio_cfg_mem_writeb(void *opaque, target_phys_addr_t addr,
+                                  uint32_t val)
 {
     MiscState *s = opaque;
 
-    switch (addr & MISC_MASK) {
-    case MISC_CFG:
-        MISC_DPRINTF("Write config %2.2x\n", val & 0xff);
-        s->config = val & 0xff;
-        slavio_misc_update_irq(s);
-        break;
-    case MISC_DIAG:
-        MISC_DPRINTF("Write diag %2.2x\n", val & 0xff);
-        s->diag = val & 0xff;
-        break;
-    case MISC_MDM:
-        MISC_DPRINTF("Write modem control %2.2x\n", val & 0xff);
-        s->mctrl = val & 0xff;
-        break;
-    default:
-        break;
-    }
+    MISC_DPRINTF("Write config %2.2x\n", val & 0xff);
+    s->config = val & 0xff;
+    slavio_misc_update_irq(s);
 }
 
-static uint32_t slavio_misc_mem_readb(void *opaque, target_phys_addr_t addr)
+static uint32_t slavio_cfg_mem_readb(void *opaque, target_phys_addr_t addr)
 {
     MiscState *s = opaque;
     uint32_t ret = 0;
 
-    switch (addr & MISC_MASK) {
-    case MISC_CFG:
-        ret = s->config;
-        MISC_DPRINTF("Read config %2.2x\n", ret);
-        break;
-    case MISC_DIAG:
-        ret = s->diag;
-        MISC_DPRINTF("Read diag %2.2x\n", ret);
-        break;
-    case MISC_MDM:
-        ret = s->mctrl;
-        MISC_DPRINTF("Read modem control %2.2x\n", ret);
-        break;
-    default:
-        break;
-    }
+    ret = s->config;
+    MISC_DPRINTF("Read config %2.2x\n", ret);
     return ret;
 }
 
-static CPUReadMemoryFunc *slavio_misc_mem_read[3] = {
-    slavio_misc_mem_readb,
+static CPUReadMemoryFunc *slavio_cfg_mem_read[3] = {
+    slavio_cfg_mem_readb,
     NULL,
     NULL,
 };
 
-static CPUWriteMemoryFunc *slavio_misc_mem_write[3] = {
-    slavio_misc_mem_writeb,
+static CPUWriteMemoryFunc *slavio_cfg_mem_write[3] = {
+    slavio_cfg_mem_writeb,
+    NULL,
+    NULL,
+};
+
+static void slavio_diag_mem_writeb(void *opaque, target_phys_addr_t addr,
+                                   uint32_t val)
+{
+    MiscState *s = opaque;
+
+    MISC_DPRINTF("Write diag %2.2x\n", val & 0xff);
+    s->diag = val & 0xff;
+}
+
+static uint32_t slavio_diag_mem_readb(void *opaque, target_phys_addr_t addr)
+{
+    MiscState *s = opaque;
+    uint32_t ret = 0;
+
+    ret = s->diag;
+    MISC_DPRINTF("Read diag %2.2x\n", ret);
+    return ret;
+}
+
+static CPUReadMemoryFunc *slavio_diag_mem_read[3] = {
+    slavio_diag_mem_readb,
+    NULL,
+    NULL,
+};
+
+static CPUWriteMemoryFunc *slavio_diag_mem_write[3] = {
+    slavio_diag_mem_writeb,
+    NULL,
+    NULL,
+};
+
+static void slavio_mdm_mem_writeb(void *opaque, target_phys_addr_t addr,
+                                  uint32_t val)
+{
+    MiscState *s = opaque;
+
+    MISC_DPRINTF("Write modem control %2.2x\n", val & 0xff);
+    s->mctrl = val & 0xff;
+}
+
+static uint32_t slavio_mdm_mem_readb(void *opaque, target_phys_addr_t addr)
+{
+    MiscState *s = opaque;
+    uint32_t ret = 0;
+
+    ret = s->mctrl;
+    MISC_DPRINTF("Read modem control %2.2x\n", ret);
+    return ret;
+}
+
+static CPUReadMemoryFunc *slavio_mdm_mem_read[3] = {
+    slavio_mdm_mem_readb,
+    NULL,
+    NULL,
+};
+
+static CPUWriteMemoryFunc *slavio_mdm_mem_write[3] = {
+    slavio_mdm_mem_writeb,
     NULL,
     NULL,
 };
@@ -256,7 +289,7 @@ static void apc_mem_writeb(void *opaque, target_phys_addr_t addr, uint32_t val)
     MiscState *s = opaque;
 
     MISC_DPRINTF("Write power management %2.2x\n", val & 0xff);
-    cpu_interrupt(s->env, CPU_INTERRUPT_HALT);
+    qemu_irq_raise(s->cpu_halt);
 }
 
 static uint32_t apc_mem_readb(void *opaque, target_phys_addr_t addr)
@@ -282,18 +315,16 @@ static CPUWriteMemoryFunc *apc_mem_write[3] = {
 static uint32_t slavio_sysctrl_mem_readl(void *opaque, target_phys_addr_t addr)
 {
     MiscState *s = opaque;
-    uint32_t ret = 0, saddr;
+    uint32_t ret = 0;
 
-    saddr = addr & SYSCTRL_MAXADDR;
-    switch (saddr) {
+    switch (addr) {
     case 0:
         ret = s->sysctrl;
         break;
     default:
         break;
     }
-    MISC_DPRINTF("Read system control reg 0x" TARGET_FMT_plx " = %x\n", addr,
-                 ret);
+    MISC_DPRINTF("Read system control %08x\n", ret);
     return ret;
 }
 
@@ -301,12 +332,9 @@ static void slavio_sysctrl_mem_writel(void *opaque, target_phys_addr_t addr,
                                       uint32_t val)
 {
     MiscState *s = opaque;
-    uint32_t saddr;
 
-    saddr = addr & SYSCTRL_MAXADDR;
-    MISC_DPRINTF("Write system control reg 0x" TARGET_FMT_plx " =  %x\n", addr,
-                 val);
-    switch (saddr) {
+    MISC_DPRINTF("Write system control %08x\n", val);
+    switch (addr) {
     case 0:
         if (val & SYS_RESET) {
             s->sysctrl = SYS_RESETSTAT;
@@ -333,18 +361,16 @@ static CPUWriteMemoryFunc *slavio_sysctrl_mem_write[3] = {
 static uint32_t slavio_led_mem_readw(void *opaque, target_phys_addr_t addr)
 {
     MiscState *s = opaque;
-    uint32_t ret = 0, saddr;
+    uint32_t ret = 0;
 
-    saddr = addr & LED_MAXADDR;
-    switch (saddr) {
+    switch (addr) {
     case 0:
         ret = s->leds;
         break;
     default:
         break;
     }
-    MISC_DPRINTF("Read diagnostic LED reg 0x" TARGET_FMT_plx " = %x\n", addr,
-                 ret);
+    MISC_DPRINTF("Read diagnostic LED %04x\n", ret);
     return ret;
 }
 
@@ -352,12 +378,9 @@ static void slavio_led_mem_writew(void *opaque, target_phys_addr_t addr,
                                   uint32_t val)
 {
     MiscState *s = opaque;
-    uint32_t saddr;
 
-    saddr = addr & LED_MAXADDR;
-    MISC_DPRINTF("Write diagnostic LED reg 0x" TARGET_FMT_plx " =  %x\n", addr,
-                 val);
-    switch (saddr) {
+    MISC_DPRINTF("Write diagnostic LED %04x\n", val & 0xffff);
+    switch (addr) {
     case 0:
         s->leds = val;
         break;
@@ -417,7 +440,7 @@ static int slavio_misc_load(QEMUFile *f, void *opaque, int version_id)
 void *slavio_misc_init(target_phys_addr_t base, target_phys_addr_t power_base,
                        target_phys_addr_t aux1_base,
                        target_phys_addr_t aux2_base, qemu_irq irq,
-                       CPUState *env, qemu_irq **fdc_tc)
+                       qemu_irq cpu_halt, qemu_irq **fdc_tc)
 {
     int io;
     MiscState *s;
@@ -428,13 +451,20 @@ void *slavio_misc_init(target_phys_addr_t base, target_phys_addr_t power_base,
 
     if (base) {
         /* 8 bit registers */
-        io = cpu_register_io_memory(0, slavio_misc_mem_read,
-                                    slavio_misc_mem_write, s);
+
         // Slavio control
+        io = cpu_register_io_memory(0, slavio_cfg_mem_read,
+                                    slavio_cfg_mem_write, s);
         cpu_register_physical_memory(base + MISC_CFG, MISC_SIZE, io);
+
         // Diagnostics
+        io = cpu_register_io_memory(0, slavio_diag_mem_read,
+                                    slavio_diag_mem_write, s);
         cpu_register_physical_memory(base + MISC_DIAG, MISC_SIZE, io);
+
         // Modem control
+        io = cpu_register_io_memory(0, slavio_mdm_mem_read,
+                                    slavio_mdm_mem_write, s);
         cpu_register_physical_memory(base + MISC_MDM, MISC_SIZE, io);
 
         /* 16 bit registers */
@@ -471,7 +501,7 @@ void *slavio_misc_init(target_phys_addr_t base, target_phys_addr_t power_base,
     }
 
     s->irq = irq;
-    s->env = env;
+    s->cpu_halt = cpu_halt;
     *fdc_tc = &s->fdc_tc;
 
     register_savevm("slavio_misc", base, 1, slavio_misc_save, slavio_misc_load,

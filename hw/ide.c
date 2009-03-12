@@ -31,6 +31,7 @@
 #include "qemu-timer.h"
 #include "sysemu.h"
 #include "ppc_mac.h"
+#include "sh.h"
 
 /* debug IDE devices */
 //#define DEBUG_IDE
@@ -391,6 +392,7 @@ typedef struct IDEState {
     struct BMDMAState *bmdma;
     int drive_serial;
     uint8_t write_cache;
+    char drive_serial_str[21];
     /* ide regs */
     uint8_t feature;
     uint8_t error;
@@ -707,7 +709,6 @@ static void ide_identify(IDEState *s)
 {
     uint16_t *p;
     unsigned int oldsize;
-    char buf[20];
 
     if (s->identify_set) {
 	memcpy(s->io_buffer, s->identify_data, sizeof(s->identify_data));
@@ -722,8 +723,7 @@ static void ide_identify(IDEState *s)
     put_le16(p + 4, 512 * s->sectors); /* XXX: retired, remove ? */
     put_le16(p + 5, 512); /* XXX: retired, remove ? */
     put_le16(p + 6, s->sectors);
-    snprintf(buf, sizeof(buf), "QM%05d", s->drive_serial);
-    padstr((char *)(p + 10), buf, 20); /* serial number */
+    padstr((char *)(p + 10), s->drive_serial_str, 20); /* serial number */
     put_le16(p + 20, 3); /* XXX: retired, remove ? */
     put_le16(p + 21, 512); /* cache size in sectors */
     put_le16(p + 22, 4); /* ecc bytes */
@@ -778,7 +778,6 @@ static void ide_identify(IDEState *s)
 static void ide_atapi_identify(IDEState *s)
 {
     uint16_t *p;
-    char buf[20];
 
     if (s->identify_set) {
 	memcpy(s->io_buffer, s->identify_data, sizeof(s->identify_data));
@@ -789,8 +788,7 @@ static void ide_atapi_identify(IDEState *s)
     p = (uint16_t *)s->io_buffer;
     /* Removable CDROM, 50us response, 12 byte packets */
     put_le16(p + 0, (2 << 14) | (5 << 8) | (1 << 7) | (2 << 5) | (0 << 0));
-    snprintf(buf, sizeof(buf), "QM%05d", s->drive_serial);
-    padstr((char *)(p + 10), buf, 20); /* serial number */
+    padstr((char *)(p + 10), s->drive_serial_str, 20); /* serial number */
     put_le16(p + 20, 3); /* buffer type */
     put_le16(p + 21, 512); /* cache size in sectors */
     put_le16(p + 22, 4); /* ecc bytes */
@@ -829,7 +827,6 @@ static void ide_cfata_identify(IDEState *s)
 {
     uint16_t *p;
     uint32_t cur_sec;
-    char buf[20];
 
     p = (uint16_t *) s->identify_data;
     if (s->identify_set)
@@ -845,8 +842,7 @@ static void ide_cfata_identify(IDEState *s)
     put_le16(p + 6, s->sectors);		/* Default sectors per track */
     put_le16(p + 7, s->nb_sectors >> 16);	/* Sectors per card */
     put_le16(p + 8, s->nb_sectors);		/* Sectors per card */
-    snprintf(buf, sizeof(buf), "QM%05d", s->drive_serial);
-    padstr((char *)(p + 10), buf, 20);	/* Serial number in ASCII */
+    padstr((char *)(p + 10), s->drive_serial_str, 20); /* serial number */
     put_le16(p + 22, 0x0004);			/* ECC bytes */
     padstr((char *) (p + 23), QEMU_VERSION, 8);	/* Firmware Revision */
     padstr((char *) (p + 27), "QEMU MICRODRIVE", 40);/* Model number */
@@ -1026,7 +1022,7 @@ static void ide_sector_read(IDEState *s)
         ide_transfer_stop(s);
     } else {
 #if defined(DEBUG_IDE)
-        printf("read sector=%Ld\n", sector_num);
+        printf("read sector=%" PRId64 "\n", sector_num);
 #endif
         if (n > s->req_nb_sectors)
             n = s->req_nb_sectors;
@@ -1146,7 +1142,7 @@ static void ide_read_dma_cb(void *opaque, int ret)
     s->io_buffer_index = 0;
     s->io_buffer_size = n * 512;
 #ifdef DEBUG_AIO
-    printf("aio_read: sector_num=%lld n=%d\n", sector_num, n);
+    printf("aio_read: sector_num=%" PRId64 " n=%d\n", sector_num, n);
 #endif
     bm->aiocb = bdrv_aio_read(s->bs, sector_num, s->io_buffer, n,
                               ide_read_dma_cb, bm);
@@ -1175,7 +1171,7 @@ static void ide_sector_write(IDEState *s)
     s->status = READY_STAT | SEEK_STAT;
     sector_num = ide_get_sector(s);
 #if defined(DEBUG_IDE)
-    printf("write sector=%Ld\n", sector_num);
+    printf("write sector=%" PRId64 "\n", sector_num);
 #endif
     n = s->nsector;
     if (n > s->req_nb_sectors)
@@ -1277,7 +1273,7 @@ static void ide_write_dma_cb(void *opaque, int ret)
     if (dma_buf_rw(bm, 0) == 0)
         goto eot;
 #ifdef DEBUG_AIO
-    printf("aio_write: sector_num=%lld n=%d\n", sector_num, n);
+    printf("aio_write: sector_num=%" PRId64 " n=%d\n", sector_num, n);
 #endif
     bm->aiocb = bdrv_aio_write(s->bs, sector_num, s->io_buffer, n,
                                ide_write_dma_cb, bm);
@@ -1343,6 +1339,17 @@ static void ide_atapi_cmd_error(IDEState *s, int sense_key, int asc)
     s->nsector = (s->nsector & ~7) | ATAPI_INT_REASON_IO | ATAPI_INT_REASON_CD;
     s->sense_key = sense_key;
     s->asc = asc;
+    ide_set_irq(s);
+}
+
+static void ide_atapi_cmd_check_status(IDEState *s)
+{
+#ifdef DEBUG_IDE_ATAPI
+    printf("atapi_cmd_check_status\n");
+#endif
+    s->error = MC_ERR | (SENSE_UNIT_ATTENTION << 4);
+    s->status = ERR_STAT;
+    s->nsector = 0;
     ide_set_irq(s);
 }
 
@@ -1766,6 +1773,14 @@ static void ide_atapi_cmd(IDEState *s)
         printf("\n");
     }
 #endif
+    /* If there's a UNIT_ATTENTION condition pending, only
+       REQUEST_SENSE and INQUIRY commands are allowed to complete. */
+    if (s->sense_key == SENSE_UNIT_ATTENTION &&
+	s->io_buffer[0] != GPCMD_REQUEST_SENSE &&
+	s->io_buffer[0] != GPCMD_INQUIRY) {
+	ide_atapi_cmd_check_status(s);
+	return;
+    }
     switch(s->io_buffer[0]) {
     case GPCMD_TEST_UNIT_READY:
         if (bdrv_is_inserted(s->bs)) {
@@ -1826,7 +1841,9 @@ static void ide_atapi_cmd(IDEState *s)
                     buf[10] = 0x00;
                     buf[11] = 0x00;
 
-                    buf[12] = 0x70;
+                    /* Claim PLAY_AUDIO capability (0x01) since some Linux
+                       code checks for this to automount media. */
+                    buf[12] = 0x71;
                     buf[13] = 3 << 5;
                     buf[14] = (1 << 0) | (1 << 3) | (1 << 5);
                     if (bdrv_is_locked(s->bs))
@@ -1866,6 +1883,8 @@ static void ide_atapi_cmd(IDEState *s)
         buf[2] = s->sense_key;
         buf[7] = 10;
         buf[12] = s->asc;
+        if (s->sense_key == SENSE_UNIT_ATTENTION)
+            s->sense_key = SENSE_NONE;
         ide_atapi_cmd_reply(s, 18, max_len);
         break;
     case GPCMD_PREVENT_ALLOW_MEDIUM_REMOVAL:
@@ -2219,9 +2238,13 @@ static void cdrom_change_cb(void *opaque)
 
     if (!s->bs) return; /* ouch! (see ide_flush_cb) */
 
-    /* XXX: send interrupt too */
     bdrv_get_geometry(s->bs, &nb_sectors);
     s->nb_sectors = nb_sectors;
+
+    s->sense_key = SENSE_UNIT_ATTENTION;
+    s->asc = ASC_MEDIUM_MAY_HAVE_CHANGED;
+
+    ide_set_irq(s);
 }
 
 static void ide_cmd_lba48_transform(IDEState *s, int lba48)
@@ -2550,6 +2573,13 @@ static void ide_ioport_write(void *opaque, uint32_t addr, uint32_t val)
             s->status = READY_STAT;
             ide_set_irq(s);
             break;
+        case WIN_SEEK:
+            if(s->is_cdrom)
+                goto abort_cmd;
+            /* XXX: Check that seek is within bounds */
+            s->status = READY_STAT | SEEK_STAT;
+            ide_set_irq(s);
+            break;
             /* ATAPI commands */
         case WIN_PIDENTIFY:
             if (s->is_cdrom) {
@@ -2691,7 +2721,8 @@ static uint32_t ide_ioport_read(void *opaque, uint32_t addr1)
         ret = 0xff;
         break;
     case 1:
-        if (!ide_if[0].bs && !ide_if[1].bs)
+        if ((!ide_if[0].bs && !ide_if[1].bs) ||
+            (s != ide_if && !s->bs))
             ret = 0;
         else if (!hob)
             ret = s->error;
@@ -2947,70 +2978,13 @@ void ide_unplug_harddisks(void)
     _ide_unplug_harddisks(0);
 }
 
-
-struct partition {
-	uint8_t boot_ind;		/* 0x80 - active */
-	uint8_t head;		/* starting head */
-	uint8_t sector;		/* starting sector */
-	uint8_t cyl;		/* starting cylinder */
-	uint8_t sys_ind;		/* What partition type */
-	uint8_t end_head;		/* end head */
-	uint8_t end_sector;	/* end sector */
-	uint8_t end_cyl;		/* end cylinder */
-	uint32_t start_sect;	/* starting sector counting from 0 */
-	uint32_t nr_sects;		/* nr of sectors in partition */
-} __attribute__((packed));
-
-/* try to guess the disk logical geometry from the MSDOS partition table. Return 0 if OK, -1 if could not guess */
-static int guess_disk_lchs(IDEState *s,
-                           int *pcylinders, int *pheads, int *psectors)
-{
-    uint8_t *buf = s->io_buffer;
-    int ret, i, heads, sectors, cylinders;
-    struct partition *p;
-    uint32_t nr_sects;
-
-    ret = bdrv_read(s->bs, 0, buf, 1);
-    if (ret < 0) {
-        return -1;
-    }
-    /* test msdos magic */
-    if (buf[510] != 0x55 || buf[511] != 0xaa) {
-        return -1;
-    }
-    for(i = 0; i < 4; i++) {
-        p = ((struct partition *)(buf + 0x1be)) + i;
-        nr_sects = le32_to_cpu(p->nr_sects);
-        if (nr_sects && p->end_head) {
-            /* We make the assumption that the partition terminates on
-               a cylinder boundary */
-            heads = p->end_head + 1;
-            sectors = p->end_sector & 63;
-            if (sectors == 0)
-                continue;
-            cylinders = s->nb_sectors / (heads * sectors);
-            if (cylinders < 1 || cylinders > 16383)
-                continue;
-            *pheads = heads;
-            *psectors = sectors;
-            *pcylinders = cylinders;
-#if 0
-            printf("guessed geometry: LCHS=%d %d %d\n",
-                   cylinders, heads, sectors);
-#endif
-            return 0;
-        }
-    }
-    return -1;
-}
-
 static void ide_init2(IDEState *ide_state,
                       BlockDriverState *hd0, BlockDriverState *hd1,
                       qemu_irq irq)
 {
     IDEState *s;
     static int drive_serial = 1;
-    int i, cylinders, heads, secs, translation, lba_detected = 0;
+    int i, cylinders, heads, secs;
     uint64_t nb_sectors;
 
     for(i = 0; i < 2; i++) {
@@ -3022,62 +2996,23 @@ static void ide_init2(IDEState *ide_state,
             s->bs = hd1;
         if (s->bs) {
             bdrv_get_geometry(s->bs, &nb_sectors);
+            bdrv_guess_geometry(s->bs, &cylinders, &heads, &secs);
+            s->cylinders = cylinders;
+            s->heads = heads;
+            s->sectors = secs;
             s->nb_sectors = nb_sectors;
-            /* if a geometry hint is available, use it */
-            bdrv_get_geometry_hint(s->bs, &cylinders, &heads, &secs);
-            translation = bdrv_get_translation_hint(s->bs);
-            if (cylinders != 0) {
-                s->cylinders = cylinders;
-                s->heads = heads;
-                s->sectors = secs;
-            } else {
-                if (guess_disk_lchs(s, &cylinders, &heads, &secs) == 0) {
-                    if (heads > 16) {
-                        /* if heads > 16, it means that a BIOS LBA
-                           translation was active, so the default
-                           hardware geometry is OK */
-                        lba_detected = 1;
-                        goto default_geometry;
-                    } else {
-                        s->cylinders = cylinders;
-                        s->heads = heads;
-                        s->sectors = secs;
-                        /* disable any translation to be in sync with
-                           the logical geometry */
-                        if (translation == BIOS_ATA_TRANSLATION_AUTO) {
-                            bdrv_set_translation_hint(s->bs,
-                                                      BIOS_ATA_TRANSLATION_NONE);
-                        }
-                    }
-                } else {
-                default_geometry:
-                    /* if no geometry, use a standard physical disk geometry */
-                    cylinders = nb_sectors / (16 * 63);
-                    if (cylinders > 16383)
-                        cylinders = 16383;
-                    else if (cylinders < 2)
-                        cylinders = 2;
-                    s->cylinders = cylinders;
-                    s->heads = 16;
-                    s->sectors = 63;
-                    if ((lba_detected == 1) && (translation == BIOS_ATA_TRANSLATION_AUTO)) {
-                      if ((s->cylinders * s->heads) <= 131072) {
-                        bdrv_set_translation_hint(s->bs,
-                                                  BIOS_ATA_TRANSLATION_LARGE);
-                      } else {
-                        bdrv_set_translation_hint(s->bs,
-                                                  BIOS_ATA_TRANSLATION_LBA);
-                      }
-                    }
-                }
-                bdrv_set_geometry_hint(s->bs, s->cylinders, s->heads, s->sectors);
-            }
+
             if (bdrv_get_type_hint(s->bs) == BDRV_TYPE_CDROM) {
                 s->is_cdrom = 1;
 		bdrv_set_change_cb(s->bs, cdrom_change_cb, s);
             }
         }
         s->drive_serial = drive_serial++;
+        strncpy(s->drive_serial_str, drive_get_serial(s->bs),
+                sizeof(s->drive_serial_str));
+        if (strlen(s->drive_serial_str) == 0)
+            snprintf(s->drive_serial_str, sizeof(s->drive_serial_str),
+                    "QM%05d", s->drive_serial);
         s->irq = irq;
         s->sector_write_timer = qemu_new_timer(vm_clock,
                                                ide_sector_write_timer_cb, s);
@@ -3426,88 +3361,6 @@ static void bmdma_map(PCIDevice *pci_dev, int region_num,
     }
 }
 
-/* XXX: call it also when the MRDMODE is changed from the PCI config
-   registers */
-static void cmd646_update_irq(PCIIDEState *d)
-{
-    int pci_level;
-    pci_level = ((d->dev.config[MRDMODE] & MRDMODE_INTR_CH0) &&
-                 !(d->dev.config[MRDMODE] & MRDMODE_BLK_CH0)) ||
-        ((d->dev.config[MRDMODE] & MRDMODE_INTR_CH1) &&
-         !(d->dev.config[MRDMODE] & MRDMODE_BLK_CH1));
-    qemu_set_irq(d->dev.irq[0], pci_level);
-}
-
-/* the PCI irq level is the logical OR of the two channels */
-static void cmd646_set_irq(void *opaque, int channel, int level)
-{
-    PCIIDEState *d = opaque;
-    int irq_mask;
-
-    irq_mask = MRDMODE_INTR_CH0 << channel;
-    if (level)
-        d->dev.config[MRDMODE] |= irq_mask;
-    else
-        d->dev.config[MRDMODE] &= ~irq_mask;
-    cmd646_update_irq(d);
-}
-
-/* CMD646 PCI IDE controller */
-void pci_cmd646_ide_init(PCIBus *bus, BlockDriverState **hd_table,
-                         int secondary_ide_enabled)
-{
-    PCIIDEState *d;
-    uint8_t *pci_conf;
-    int i;
-    qemu_irq *irq;
-
-    d = (PCIIDEState *)pci_register_device(bus, "CMD646 IDE",
-                                           sizeof(PCIIDEState),
-                                           -1,
-                                           NULL, NULL);
-    if (principal_ide_controller)
-	abort();
-    principal_ide_controller = d;
-    d->type = IDE_TYPE_CMD646;
-    pci_conf = d->dev.config;
-    pci_conf[0x00] = 0x95; // CMD646
-    pci_conf[0x01] = 0x10;
-    pci_conf[0x02] = 0x46;
-    pci_conf[0x03] = 0x06;
-
-    pci_conf[0x08] = 0x07; // IDE controller revision
-    pci_conf[0x09] = 0x8f;
-
-    pci_conf[0x0a] = 0x01; // class_sub = PCI_IDE
-    pci_conf[0x0b] = 0x01; // class_base = PCI_mass_storage
-    pci_conf[0x0e] = 0x00; // header_type
-
-    if (secondary_ide_enabled) {
-        /* XXX: if not enabled, really disable the seconday IDE controller */
-        pci_conf[0x51] = 0x80; /* enable IDE1 */
-    }
-
-    pci_register_io_region((PCIDevice *)d, 0, 0x8,
-                           PCI_ADDRESS_SPACE_IO, ide_map);
-    pci_register_io_region((PCIDevice *)d, 1, 0x4,
-                           PCI_ADDRESS_SPACE_IO, ide_map);
-    pci_register_io_region((PCIDevice *)d, 2, 0x8,
-                           PCI_ADDRESS_SPACE_IO, ide_map);
-    pci_register_io_region((PCIDevice *)d, 3, 0x4,
-                           PCI_ADDRESS_SPACE_IO, ide_map);
-    pci_register_io_region((PCIDevice *)d, 4, 0x10,
-                           PCI_ADDRESS_SPACE_IO, bmdma_map);
-
-    pci_conf[0x3d] = 0x01; // interrupt on pin 1
-
-    for(i = 0; i < 4; i++)
-        d->ide_if[i].pci_dev = (PCIDevice *)d;
-
-    irq = qemu_allocate_irqs(cmd646_set_irq, d, 2);
-    ide_init2(&d->ide_if[0], hd_table[0], hd_table[1], irq[0]);
-    ide_init2(&d->ide_if[2], hd_table[2], hd_table[3], irq[1]);
-}
-
 static void pci_ide_save(QEMUFile* f, void *opaque)
 {
     PCIIDEState *d = opaque;
@@ -3571,6 +3424,102 @@ static int pci_ide_load(QEMUFile* f, void *opaque, int version_id)
         ide_load(f, &d->ide_if[i], version_id);
     }
     return 0;
+}
+
+/* XXX: call it also when the MRDMODE is changed from the PCI config
+   registers */
+static void cmd646_update_irq(PCIIDEState *d)
+{
+    int pci_level;
+    pci_level = ((d->dev.config[MRDMODE] & MRDMODE_INTR_CH0) &&
+                 !(d->dev.config[MRDMODE] & MRDMODE_BLK_CH0)) ||
+        ((d->dev.config[MRDMODE] & MRDMODE_INTR_CH1) &&
+         !(d->dev.config[MRDMODE] & MRDMODE_BLK_CH1));
+    qemu_set_irq(d->dev.irq[0], pci_level);
+}
+
+/* the PCI irq level is the logical OR of the two channels */
+static void cmd646_set_irq(void *opaque, int channel, int level)
+{
+    PCIIDEState *d = opaque;
+    int irq_mask;
+
+    irq_mask = MRDMODE_INTR_CH0 << channel;
+    if (level)
+        d->dev.config[MRDMODE] |= irq_mask;
+    else
+        d->dev.config[MRDMODE] &= ~irq_mask;
+    cmd646_update_irq(d);
+}
+
+static void cmd646_reset(void *opaque)
+{
+    PCIIDEState *d = opaque;
+    unsigned int i;
+
+    for (i = 0; i < 2; i++)
+        ide_dma_cancel(&d->bmdma[i]);
+}
+
+/* CMD646 PCI IDE controller */
+void pci_cmd646_ide_init(PCIBus *bus, BlockDriverState **hd_table,
+                         int secondary_ide_enabled)
+{
+    PCIIDEState *d;
+    uint8_t *pci_conf;
+    int i;
+    qemu_irq *irq;
+
+    d = (PCIIDEState *)pci_register_device(bus, "CMD646 IDE",
+                                           sizeof(PCIIDEState),
+                                           -1,
+                                           NULL, NULL);
+    if (principal_ide_controller)
+	abort();
+    principal_ide_controller = d;
+    d->type = IDE_TYPE_CMD646;
+    pci_conf = d->dev.config;
+    pci_conf[0x00] = 0x95; // CMD646
+    pci_conf[0x01] = 0x10;
+    pci_conf[0x02] = 0x46;
+    pci_conf[0x03] = 0x06;
+
+    pci_conf[0x08] = 0x07; // IDE controller revision
+    pci_conf[0x09] = 0x8f;
+
+    pci_conf[0x0a] = 0x01; // class_sub = PCI_IDE
+    pci_conf[0x0b] = 0x01; // class_base = PCI_mass_storage
+    pci_conf[0x0e] = 0x00; // header_type
+
+    pci_conf[0x51] = 0x04; // enable IDE0
+    if (secondary_ide_enabled) {
+        /* XXX: if not enabled, really disable the seconday IDE controller */
+        pci_conf[0x51] |= 0x08; /* enable IDE1 */
+    }
+
+    pci_register_io_region((PCIDevice *)d, 0, 0x8,
+                           PCI_ADDRESS_SPACE_IO, ide_map);
+    pci_register_io_region((PCIDevice *)d, 1, 0x4,
+                           PCI_ADDRESS_SPACE_IO, ide_map);
+    pci_register_io_region((PCIDevice *)d, 2, 0x8,
+                           PCI_ADDRESS_SPACE_IO, ide_map);
+    pci_register_io_region((PCIDevice *)d, 3, 0x4,
+                           PCI_ADDRESS_SPACE_IO, ide_map);
+    pci_register_io_region((PCIDevice *)d, 4, 0x10,
+                           PCI_ADDRESS_SPACE_IO, bmdma_map);
+
+    pci_conf[0x3d] = 0x01; // interrupt on pin 1
+
+    for(i = 0; i < 4; i++)
+        d->ide_if[i].pci_dev = (PCIDevice *)d;
+
+    irq = qemu_allocate_irqs(cmd646_set_irq, d, 2);
+    ide_init2(&d->ide_if[0], hd_table[0], hd_table[1], irq[0]);
+    ide_init2(&d->ide_if[2], hd_table[2], hd_table[3], irq[1]);
+
+    register_savevm("ide", 0, 1, pci_ide_save, pci_ide_load, d);
+    qemu_register_reset(cmd646_reset, d);
+    cmd646_reset(d);
 }
 
 static void piix3_reset(void *opaque)
@@ -3791,6 +3740,52 @@ static CPUReadMemoryFunc *pmac_ide_read[] = {
     pmac_ide_readl,
 };
 
+static void pmac_ide_save(QEMUFile *f, void *opaque)
+{
+    IDEState *s = (IDEState *)opaque;
+    uint8_t drive1_selected;
+    unsigned int i;
+
+    /* per IDE interface data */
+    qemu_put_8s(f, &s->cmd);
+    drive1_selected = (s->cur_drive != s);
+    qemu_put_8s(f, &drive1_selected);
+
+    /* per IDE drive data */
+    for(i = 0; i < 2; i++) {
+        ide_save(f, &s[i]);
+    }
+}
+
+static int pmac_ide_load(QEMUFile *f, void *opaque, int version_id)
+{
+    IDEState *s = (IDEState *)opaque;
+    uint8_t drive1_selected;
+    unsigned int i;
+
+    if (version_id != 1)
+        return -EINVAL;
+
+    /* per IDE interface data */
+    qemu_get_8s(f, &s->cmd);
+    qemu_get_8s(f, &drive1_selected);
+    s->cur_drive = &s[(drive1_selected != 0)];
+
+    /* per IDE drive data */
+    for(i = 0; i < 2; i++) {
+        ide_load(f, &s[i]);
+    }
+    return 0;
+}
+
+static void pmac_ide_reset(void *opaque)
+{
+    IDEState *s = (IDEState *)opaque;
+
+    ide_reset(&s[0]);
+    ide_reset(&s[1]);
+}
+
 /* hd_table must contain 4 block drivers */
 /* PowerMac uses memory mapped registers, not I/O. Return the memory
    I/O index to access the ide. */
@@ -3804,7 +3799,102 @@ int pmac_ide_init (BlockDriverState **hd_table, qemu_irq irq)
 
     pmac_ide_memory = cpu_register_io_memory(0, pmac_ide_read,
                                              pmac_ide_write, &ide_if[0]);
+    register_savevm("ide", 0, 1, pmac_ide_save, pmac_ide_load, &ide_if[0]);
+    qemu_register_reset(pmac_ide_reset, &ide_if[0]);
+    pmac_ide_reset(&ide_if[0]);
     return pmac_ide_memory;
+}
+
+/***********************************************************/
+/* MMIO based ide port
+ * This emulates IDE device connected directly to the CPU bus without
+ * dedicated ide controller, which is often seen on embedded boards.
+ */
+
+typedef struct {
+    void *dev;
+    int shift;
+} MMIOState;
+
+static uint32_t mmio_ide_read (void *opaque, target_phys_addr_t addr)
+{
+    MMIOState *s = (MMIOState*)opaque;
+    IDEState *ide = (IDEState*)s->dev;
+    addr >>= s->shift;
+    if (addr & 7)
+        return ide_ioport_read(ide, addr);
+    else
+        return ide_data_readw(ide, 0);
+}
+
+static void mmio_ide_write (void *opaque, target_phys_addr_t addr,
+	uint32_t val)
+{
+    MMIOState *s = (MMIOState*)opaque;
+    IDEState *ide = (IDEState*)s->dev;
+    addr >>= s->shift;
+    if (addr & 7)
+        ide_ioport_write(ide, addr, val);
+    else
+        ide_data_writew(ide, 0, val);
+}
+
+static CPUReadMemoryFunc *mmio_ide_reads[] = {
+    mmio_ide_read,
+    mmio_ide_read,
+    mmio_ide_read,
+};
+
+static CPUWriteMemoryFunc *mmio_ide_writes[] = {
+    mmio_ide_write,
+    mmio_ide_write,
+    mmio_ide_write,
+};
+
+static uint32_t mmio_ide_status_read (void *opaque, target_phys_addr_t addr)
+{
+    MMIOState *s= (MMIOState*)opaque;
+    IDEState *ide = (IDEState*)s->dev;
+    return ide_status_read(ide, 0);
+}
+
+static void mmio_ide_cmd_write (void *opaque, target_phys_addr_t addr,
+	uint32_t val)
+{
+    MMIOState *s = (MMIOState*)opaque;
+    IDEState *ide = (IDEState*)s->dev;
+    ide_cmd_write(ide, 0, val);
+}
+
+static CPUReadMemoryFunc *mmio_ide_status[] = {
+    mmio_ide_status_read,
+    mmio_ide_status_read,
+    mmio_ide_status_read,
+};
+
+static CPUWriteMemoryFunc *mmio_ide_cmd[] = {
+    mmio_ide_cmd_write,
+    mmio_ide_cmd_write,
+    mmio_ide_cmd_write,
+};
+
+void mmio_ide_init (target_phys_addr_t membase, target_phys_addr_t membase2,
+                    qemu_irq irq, int shift,
+                    BlockDriverState *hd0, BlockDriverState *hd1)
+{
+    MMIOState *s = qemu_mallocz(sizeof(MMIOState));
+    IDEState *ide = qemu_mallocz(sizeof(IDEState) * 2);
+    int mem1, mem2;
+
+    ide_init2(ide, hd0, hd1, irq);
+
+    s->dev = ide;
+    s->shift = shift;
+
+    mem1 = cpu_register_io_memory(0, mmio_ide_reads, mmio_ide_writes, s);
+    mem2 = cpu_register_io_memory(0, mmio_ide_status, mmio_ide_cmd, s);
+    cpu_register_physical_memory(membase, 16 << shift, mem1);
+    cpu_register_physical_memory(membase2, 2 << shift, mem2);
 }
 
 /***********************************************************/

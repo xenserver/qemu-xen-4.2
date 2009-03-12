@@ -411,7 +411,7 @@ struct CPUMIPSState {
     int error_code;
     uint32_t hflags;    /* CPU State */
     /* TMASK defines different execution modes */
-#define MIPS_HFLAG_TMASK  0x01FF
+#define MIPS_HFLAG_TMASK  0x03FF
 #define MIPS_HFLAG_MODE   0x0007 /* execution modes                    */
     /* The KSU flags must be the lowest bits in hflags. The flag order
        must be the same as defined for CP0 Status. This allows to use
@@ -430,15 +430,16 @@ struct CPUMIPSState {
        and RSQRT.D.  */
 #define MIPS_HFLAG_COP1X  0x0080 /* COP1X instructions enabled         */
 #define MIPS_HFLAG_RE     0x0100 /* Reversed endianness                */
+#define MIPS_HFLAG_UX     0x0200 /* 64-bit user mode                   */
     /* If translation is interrupted between the branch instruction and
      * the delay slot, record what type of branch it is so that we can
      * resume translation properly.  It might be possible to reduce
      * this from three bits to two.  */
-#define MIPS_HFLAG_BMASK  0x0e00
-#define MIPS_HFLAG_B      0x0200 /* Unconditional branch               */
-#define MIPS_HFLAG_BC     0x0400 /* Conditional branch                 */
-#define MIPS_HFLAG_BL     0x0600 /* Likely branch                      */
-#define MIPS_HFLAG_BR     0x0800 /* branch to register (can't link TB) */
+#define MIPS_HFLAG_BMASK  0x1C00
+#define MIPS_HFLAG_B      0x0400 /* Unconditional branch               */
+#define MIPS_HFLAG_BC     0x0800 /* Conditional branch                 */
+#define MIPS_HFLAG_BL     0x0C00 /* Likely branch                      */
+#define MIPS_HFLAG_BR     0x1000 /* branch to register (can't link TB) */
     target_ulong btarget;        /* Jump / branch target               */
     int bcond;                   /* Branch condition (if needed)       */
 
@@ -501,6 +502,7 @@ static inline void cpu_clone_regs(CPUState *env, target_ulong newsp)
 }
 
 #include "cpu-all.h"
+#include "exec-all.h"
 
 /* Memory access type :
  * may be needed for precise access rights control and precise exceptions.
@@ -559,13 +561,39 @@ enum {
 
 int cpu_mips_exec(CPUMIPSState *s);
 CPUMIPSState *cpu_mips_init(const char *cpu_model);
-uint32_t cpu_mips_get_clock (void);
+//~ uint32_t cpu_mips_get_clock (void);
 int cpu_mips_signal_handler(int host_signum, void *pinfo, void *puc);
 
-#define CPU_PC_FROM_TB(env, tb) do { \
-    env->active_tc.PC = tb->pc; \
-    env->hflags &= ~MIPS_HFLAG_BMASK; \
-    env->hflags |= tb->flags & MIPS_HFLAG_BMASK; \
-    } while (0)
+/* mips_timer.c */
+uint32_t cpu_mips_get_random (CPUState *env);
+uint32_t cpu_mips_get_count (CPUState *env);
+void cpu_mips_store_count (CPUState *env, uint32_t value);
+void cpu_mips_store_compare (CPUState *env, uint32_t value);
+void cpu_mips_start_count(CPUState *env);
+void cpu_mips_stop_count(CPUState *env);
+
+/* mips_int.c */
+void cpu_mips_update_irq (CPUState *env);
+
+/* helper.c */
+int cpu_mips_handle_mmu_fault (CPUState *env, target_ulong address, int rw,
+                               int mmu_idx, int is_softmmu);
+void do_interrupt (CPUState *env);
+void r4k_invalidate_tlb (CPUState *env, int idx, int use_extra);
+
+static inline void cpu_pc_from_tb(CPUState *env, TranslationBlock *tb)
+{
+    env->active_tc.PC = tb->pc;
+    env->hflags &= ~MIPS_HFLAG_BMASK;
+    env->hflags |= tb->flags & MIPS_HFLAG_BMASK;
+}
+
+static inline void cpu_get_tb_cpu_state(CPUState *env, target_ulong *pc,
+                                        target_ulong *cs_base, int *flags)
+{
+    *pc = env->active_tc.PC;
+    *cs_base = 0;
+    *flags = env->hflags & (MIPS_HFLAG_TMASK | MIPS_HFLAG_BMASK);
+}
 
 #endif /* !defined (__MIPS_CPU_H__) */

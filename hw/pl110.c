@@ -28,7 +28,6 @@ enum pl110_bppmode
 };
 
 typedef struct {
-    uint32_t base;
     DisplayState *ds;
     QEMUConsole *console;
 
@@ -124,7 +123,7 @@ static void pl110_update_display(void *opaque)
     if (!pl110_enabled(s))
         return;
 
-    switch (s->ds->depth) {
+    switch (ds_get_bits_per_pixel(s->ds)) {
     case 0:
         return;
     case 8:
@@ -190,7 +189,7 @@ static void pl110_update_display(void *opaque)
     if (base > 0x80000000)
         base -= 0x80000000;
     src = phys_ram_base + base;
-    dest = s->ds->data;
+    dest = ds_get_data(s->ds);
     first = -1;
     addr = base;
 
@@ -249,7 +248,7 @@ static void pl110_update_pallette(pl110_state *s, int n)
         b = (raw & 0x1f) << 3;
         /* The I bit is ignored.  */
         raw >>= 6;
-        switch (s->ds->depth) {
+        switch (ds_get_bits_per_pixel(s->ds)) {
         case 8:
             s->pallette[n] = rgb_to_pixel8(r, g, b);
             break;
@@ -289,7 +288,6 @@ static uint32_t pl110_read(void *opaque, target_phys_addr_t offset)
 {
     pl110_state *s = (pl110_state *)opaque;
 
-    offset -= s->base;
     if (offset >= 0xfe0 && offset < 0x1000) {
         if (s->versatile)
             return pl110_versatile_id[(offset - 0xfe0) >> 2];
@@ -344,7 +342,6 @@ static void pl110_write(void *opaque, target_phys_addr_t offset,
     /* For simplicity invalidate the display whenever a control register
        is writen to.  */
     s->invalidate = 1;
-    offset -= s->base;
     if (offset >= 0x200 && offset < 0x400) {
         /* Pallette.  */
         n = (offset - 0x200) >> 2;
@@ -423,7 +420,6 @@ void *pl110_init(DisplayState *ds, uint32_t base, qemu_irq irq,
     iomemtype = cpu_register_io_memory(0, pl110_readfn,
                                        pl110_writefn, s);
     cpu_register_physical_memory(base, 0x00001000, iomemtype);
-    s->base = base;
     s->ds = ds;
     s->versatile = versatile;
     s->irq = irq;

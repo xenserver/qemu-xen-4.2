@@ -53,7 +53,6 @@ typedef struct {
     uint8_t rx_tail;
     uint8_t rx_head;
 
-    target_phys_addr_t base;
     int freq;
     int feat;
     int flags;
@@ -61,11 +60,11 @@ typedef struct {
 
     CharDriverState *chr;
 
-    struct intc_source *eri;
-    struct intc_source *rxi;
-    struct intc_source *txi;
-    struct intc_source *tei;
-    struct intc_source *bri;
+    qemu_irq eri;
+    qemu_irq rxi;
+    qemu_irq txi;
+    qemu_irq tei;
+    qemu_irq bri;
 } sh_serial_state;
 
 static void sh_serial_clear_fifo(sh_serial_state * s)
@@ -82,8 +81,8 @@ static void sh_serial_ioport_write(void *opaque, uint32_t offs, uint32_t val)
     unsigned char ch;
 
 #ifdef DEBUG_SERIAL
-    printf("sh_serial: write base=0x%08lx offs=0x%02x val=0x%02x\n",
-	   (unsigned long) s->base, offs, val);
+    printf("sh_serial: write offs=0x%02x val=0x%02x\n",
+	   offs, val);
 #endif
     switch(offs) {
     case 0x00: /* SMR */
@@ -98,13 +97,10 @@ static void sh_serial_ioport_write(void *opaque, uint32_t offs, uint32_t val)
         if (!(val & (1 << 5)))
             s->flags |= SH_SERIAL_FLAG_TEND;
         if ((s->feat & SH_SERIAL_FEAT_SCIF) && s->txi) {
-            if ((val & (1 << 7)) && !(s->txi->asserted))
-                sh_intc_toggle_source(s->txi, 0, 1);
-            else if (!(val & (1 << 7)) && s->txi->asserted)
-                sh_intc_toggle_source(s->txi, 0, -1);
+	    qemu_set_irq(s->txi, val & (1 << 7));
         }
-        if (!(val & (1 << 6)) && s->rxi->asserted) {
-	    sh_intc_toggle_source(s->rxi, 0, -1);
+        if (!(val & (1 << 6))) {
+	    qemu_set_irq(s->rxi, 0);
         }
         return;
     case 0x0c: /* FTDR / TDR */
@@ -136,8 +132,8 @@ static void sh_serial_ioport_write(void *opaque, uint32_t offs, uint32_t val)
                 s->flags &= ~SH_SERIAL_FLAG_DR;
 
             if (!(val & (1 << 1)) || !(val & (1 << 0))) {
-                if (s->rxi && s->rxi->asserted) {
-                    sh_intc_toggle_source(s->rxi, 0, -1);
+                if (s->rxi) {
+                    qemu_set_irq(s->rxi, 0);
                 }
             }
             return;
@@ -171,19 +167,19 @@ static void sh_serial_ioport_write(void *opaque, uint32_t offs, uint32_t val)
         }
     }
     else {
-#if 0
         switch(offs) {
+#if 0
         case 0x0c:
             ret = s->dr;
             break;
         case 0x10:
             ret = 0;
             break;
-        case 0x1c:
-            ret = s->sptr;
-            break;
-        }
 #endif
+        case 0x1c:
+            s->sptr = val & 0x8f;
+            return;
+        }
     }
 
     fprintf(stderr, "sh_serial: unsupported write to 0x%02x\n", offs);
@@ -263,8 +259,8 @@ static uint32_t sh_serial_ioport_read(void *opaque, uint32_t offs)
         }
     }
     else {
-#if 0
         switch(offs) {
+#if 0
         case 0x0c:
             ret = s->dr;
             break;
@@ -274,15 +270,15 @@ static uint32_t sh_serial_ioport_read(void *opaque, uint32_t offs)
         case 0x14:
             ret = s->rx_fifo[0];
             break;
+#endif
         case 0x1c:
             ret = s->sptr;
             break;
         }
-#endif
     }
 #ifdef DEBUG_SERIAL
-    printf("sh_serial: read base=0x%08lx offs=0x%02x val=0x%x\n",
-	   (unsigned long) s->base, offs, ret);
+    printf("sh_serial: read offs=0x%02x val=0x%x\n",
+	   offs, ret);
 #endif
 
     if (ret & ~((1 << 16) - 1)) {
@@ -309,7 +305,7 @@ static void sh_serial_receive_byte(sh_serial_state *s, int ch)
             if (s->rx_cnt >= s->rtrg) {
                 s->flags |= SH_SERIAL_FLAG_RDF;
                 if (s->scr & (1 << 6) && s->rxi) {
-                    sh_intc_toggle_source(s->rxi, 0, 1);
+                    qemu_set_irq(s->rxi, 1);
                 }
             }
         }
@@ -346,14 +342,14 @@ static void sh_serial_event(void *opaque, int event)
 static uint32_t sh_serial_read (void *opaque, target_phys_addr_t addr)
 {
     sh_serial_state *s = opaque;
-    return sh_serial_ioport_read(s, addr - s->base);
+    return sh_serial_ioport_read(s, addr);
 }
 
 static void sh_serial_write (void *opaque,
                              target_phys_addr_t addr, uint32_t value)
 {
     sh_serial_state *s = opaque;
-    sh_serial_ioport_write(s, addr - s->base, value);
+    sh_serial_ioport_write(s, addr, value);
 }
 
 static CPUReadMemoryFunc *sh_serial_readfn[] = {
@@ -370,11 +366,11 @@ static CPUWriteMemoryFunc *sh_serial_writefn[] = {
 
 void sh_serial_init (target_phys_addr_t base, int feat,
 		     uint32_t freq, CharDriverState *chr,
-		     struct intc_source *eri_source,
-		     struct intc_source *rxi_source,
-		     struct intc_source *txi_source,
-		     struct intc_source *tei_source,
-		     struct intc_source *bri_source)
+		     qemu_irq eri_source,
+		     qemu_irq rxi_source,
+		     qemu_irq txi_source,
+		     qemu_irq tei_source,
+		     qemu_irq bri_source)
 {
     sh_serial_state *s;
     int s_io_memory;
@@ -383,7 +379,6 @@ void sh_serial_init (target_phys_addr_t base, int feat,
     if (!s)
         return;
 
-    s->base = base;
     s->feat = feat;
     s->flags = SH_SERIAL_FLAG_TEND | SH_SERIAL_FLAG_TDE;
     s->rtrg = 1;
@@ -404,7 +399,8 @@ void sh_serial_init (target_phys_addr_t base, int feat,
 
     s_io_memory = cpu_register_io_memory(0, sh_serial_readfn,
 					 sh_serial_writefn, s);
-    cpu_register_physical_memory(base, 0x28, s_io_memory);
+    cpu_register_physical_memory(P4ADDR(base), 0x28, s_io_memory);
+    cpu_register_physical_memory(A7ADDR(base), 0x28, s_io_memory);
 
     s->chr = chr;
 

@@ -14,7 +14,8 @@
  *
  *  You should have received a copy of the GNU General Public License
  *  along with this program; if not, write to the Free Software
- *  Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+ *  Foundation, Inc., 51 Franklin Street - Fifth Floor, Boston,
+ *  MA 02110-1301, USA.
  *
  *      Copyright (C) 2006 CodeSourcery.
  *	Copyright (C) 2000-2003 David McCullough <davidm@snapgear.com>
@@ -102,8 +103,8 @@ static abi_ulong copy_strings(abi_ulong p, int n, char **s)
     return p;
 }
 
-int target_pread(int fd, abi_ulong ptr, abi_ulong len,
-                 abi_ulong offset)
+static int target_pread(int fd, abi_ulong ptr, abi_ulong len,
+                        abi_ulong offset)
 {
     void *buf;
     int ret;
@@ -336,7 +337,7 @@ failed:
 /****************************************************************************/
 
 /* ??? This does not handle endianness correctly.  */
-void old_reloc(struct lib_info *libinfo, uint32_t rl)
+static void old_reloc(struct lib_info *libinfo, uint32_t rl)
 {
 #ifdef DEBUG
 	char *segment[] = { "TEXT", "DATA", "BSS", "*UNKNOWN*" };

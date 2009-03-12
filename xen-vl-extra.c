@@ -100,3 +100,34 @@ static int tap_open(char *ifname, int ifname_size)
 #define DEFAULT_NETWORK_DOWN_SCRIPT ""
 #endif
 
+#ifdef CONFIG_PASSTHROUGH
+void do_pci_del(char *devname)
+{
+    int pci_slot;
+    pci_slot = bdf_to_slot(devname);
+
+    acpi_php_del(pci_slot);
+}
+
+void do_pci_add(char *devname)
+{
+    int pci_slot;
+
+    pci_slot = insert_to_pci_slot(devname);
+
+    acpi_php_add(pci_slot);
+}
+
+static int pci_emulation_add(char *config_text)
+{
+    PCI_EMULATION_INFO *new;
+    if ((new = qemu_mallocz(sizeof(PCI_EMULATION_INFO))) == NULL) {
+        return -1;
+    }
+    parse_pci_emulation_info(config_text, new);
+    new->next = PciEmulationInfoHead;
+    PciEmulationInfoHead = new;
+    return 0;
+}
+
+#endif

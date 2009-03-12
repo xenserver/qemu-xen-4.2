@@ -625,7 +625,7 @@ static inline direntry_t* create_short_and_long_name(BDRVVVFATState* s,
 
     entry=array_get_next(&(s->directory));
     memset(entry->name,0x20,11);
-    strncpy((char*)entry->name,filename,i);
+    memcpy(entry->name, filename, i);
 
     if(j > 0)
 	for (i = 0; i < 3 && filename[j+1+i]; i++)
@@ -890,7 +890,6 @@ static int init_directories(BDRVVVFATState* s,
     s->path = mapping->path;
 
     for (i = 0, cluster = 0; i < s->mapping.next; i++) {
-	int j;
 	/* MS-DOS expects the FAT to be 0 for the root directory
 	 * (except for the media byte). */
 	/* LATER TODO: still true for FAT32? */
@@ -923,19 +922,24 @@ static int init_directories(BDRVVVFATState* s,
 
 	assert(mapping->begin < mapping->end);
 
-	/* fix fat for entry */
-	if (fix_fat) {
-	    for(j = mapping->begin; j < mapping->end - 1; j++)
-		fat_set(s, j, j+1);
-	    fat_set(s, mapping->end - 1, s->max_fat_value);
-	}
-
 	/* next free cluster */
 	cluster = mapping->end;
 
 	if(cluster > s->cluster_count) {
-	    fprintf(stderr,"Directory does not fit in FAT%d\n",s->fat_type);
-	    return -1;
+	    fprintf(stderr,"Directory does not fit in FAT%d (capacity %s)\n",
+		    s->fat_type,
+		    s->fat_type == 12 ? s->sector_count == 2880 ? "1.44 MB"
+								: "2.88 MB"
+				      : "504MB");
+	    return -EINVAL;
+	}
+
+	/* fix fat for entry */
+	if (fix_fat) {
+	    int j;
+	    for(j = mapping->begin; j < mapping->end - 1; j++)
+		fat_set(s, j, j+1);
+	    fat_set(s, mapping->end - 1, s->max_fat_value);
 	}
     }
 
@@ -1052,7 +1056,7 @@ DLOG(if (stderr == NULL) {
 
     i = strrchr(dirname, ':') - dirname;
     assert(i >= 3);
-    if (dirname[i-2] == ':' && CTYPE(isalpha,dirname[i-1]))
+    if (dirname[i-2] == ':' && qemu_isalpha(dirname[i-1]))
 	/* workaround for DOS drive names */
 	dirname += i-1;
     else
@@ -1243,7 +1247,7 @@ static void print_direntry(const direntry_t* direntry)
 	unsigned char* c=(unsigned char*)direntry;
 	int i;
 	for(i=1;i<11 && c[i] && c[i]!=0xff;i+=2)
-#define ADD_CHAR(c) {buffer[j] = (c); if (buffer[j] < ' ') buffer[j] = '°'; j++;}
+#define ADD_CHAR(c) {buffer[j] = (c); if (buffer[j] < ' ') buffer[j] = 0xb0; j++;}
 	    ADD_CHAR(c[i]);
 	for(i=14;i<26 && c[i] && c[i]!=0xff;i+=2)
 	    ADD_CHAR(c[i]);
@@ -1479,7 +1483,7 @@ static int parse_short_name(BDRVVVFATState* s,
 	if (direntry->name[i] <= ' ' || direntry->name[i] > 0x7f)
 	    return -1;
 	else if (s->downcase_short_names)
-	    lfn->name[i] = CTYPE(tolower,direntry->name[i]);
+	    lfn->name[i] = qemu_tolower(direntry->name[i]);
 	else
 	    lfn->name[i] = direntry->name[i];
     }
@@ -1492,7 +1496,7 @@ static int parse_short_name(BDRVVVFATState* s,
 	    if (direntry->extension[j] <= ' ' || direntry->extension[j] > 0x7f)
 		return -2;
 	    else if (s->downcase_short_names)
-		lfn->name[i + j] = CTYPE(tolower,direntry->extension[j]);
+		lfn->name[i + j] = qemu_tolower(direntry->extension[j]);
 	    else
 		lfn->name[i + j] = direntry->extension[j];
 	}
@@ -2842,4 +2846,3 @@ static void checkpoint(void) {
     print_direntry(NULL);
 }
 #endif
-

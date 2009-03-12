@@ -18,7 +18,8 @@ GNU General Public License for more details.
 
 You should have received a copy of the GNU General Public License
 along with this program; if not, write to the Free Software
-Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.  */
+Foundation, Inc., 51 Franklin Street - Fifth Floor, Boston,
+MA 02110-1301, USA.  */
 
 #include "dis-asm.h"
 
@@ -42,29 +43,7 @@ the GNU General Public License for more details.
 
 You should have received a copy of the GNU General Public License
 along with this file; see the file COPYING.  If not, write to the Free
-Software Foundation, 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.  */
-
-/* mips.h.  Mips opcode list for GDB, the GNU debugger.
-   Copyright 1993, 1994, 1995, 1996, 1997, 1998, 1999, 2000, 2001, 2002, 2003
-   Free Software Foundation, Inc.
-   Contributed by Ralph Campbell and OSF
-   Commented and modified by Ian Lance Taylor, Cygnus Support
-
-This file is part of GDB, GAS, and the GNU binutils.
-
-GDB, GAS, and the GNU binutils are free software; you can redistribute
-them and/or modify them under the terms of the GNU General Public
-License as published by the Free Software Foundation; either version
-1, or (at your option) any later version.
-
-GDB, GAS, and the GNU binutils are distributed in the hope that they
-will be useful, but WITHOUT ANY WARRANTY; without even the implied
-warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See
-the GNU General Public License for more details.
-
-You should have received a copy of the GNU General Public License
-along with this file; see the file COPYING.  If not, write to the Free
-Software Foundation, 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.  */
+Software Foundation, 51 Franklin Street - Fifth Floor, Boston, MA 02110-1301, USA.  */
 
 /* These are bit masks and shift counts to use to access the various
    fields of an instruction.  To retrieve the X field of an
@@ -3272,7 +3251,7 @@ choose_arch_by_number (unsigned long mach)
   return c;
 }
 
-void
+static void
 set_default_mips_dis_options (struct disassemble_info *info)
 {
   const struct mips_arch_choice *chosen_arch;
@@ -3321,7 +3300,7 @@ set_default_mips_dis_options (struct disassemble_info *info)
 #endif
 }
 
-void
+static void
 parse_mips_dis_option (const char *option, unsigned int len)
 {
   unsigned int i, optionlen, vallen;
@@ -4809,7 +4788,6 @@ print_mips16_insn_arg (char type,
       abort ();
     }
 }
-#endif
 
 void
 print_mips_disassembler_options (FILE *stream)
@@ -4863,3 +4841,4 @@ with the -M switch (multiple options should be separated by commas):\n"));
 
   fprintf (stream, _("\n"));
 }
+#endif

@@ -5,9 +5,10 @@
 
 #include <inttypes.h>
 
-#ifdef _BSD
+#ifdef HAVE_MACHINE_BSWAP_H
 #include <sys/endian.h>
 #include <sys/types.h>
+#include <machine/bswap.h>
 #else
 
 #ifdef HAVE_BYTESWAP_H
@@ -63,6 +64,8 @@ static inline uint64_t bswap64(uint64_t x)
     return bswap_64(x);
 }
 
+#endif /* ! HAVE_MACHINE_BSWAP_H */
+
 static inline void bswap16s(uint16_t *s)
 {
     *s = bswap16(*s);
@@ -77,8 +80,6 @@ static inline void bswap64s(uint64_t *s)
 {
     *s = bswap64(*s);
 }
-
-#endif /* _BSD */
 
 #if defined(WORDS_BIGENDIAN)
 #define be_bswap(v, size) (v)
@@ -133,7 +134,7 @@ CPU_CONVERT(le, 64, uint64_t)
 
 /* unaligned versions (optimized for frequent unaligned accesses)*/
 
-#if defined(__i386__) || defined(__powerpc__)
+#if defined(__i386__) || defined(_ARCH_PPC)
 
 #define cpu_to_le16wu(p, v) cpu_to_le16w(p, v)
 #define cpu_to_le32wu(p, v) cpu_to_le32w(p, v)

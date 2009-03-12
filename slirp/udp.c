@@ -136,8 +136,7 @@ udp_input(m, iphlen)
 	 * Checksum extended UDP header and data.
 	 */
 	if (UDPCKSUM && uh->uh_sum) {
-	  ((struct ipovly *)ip)->ih_next = 0;
-	  ((struct ipovly *)ip)->ih_prev = 0;
+      memset(&((struct ipovly *)ip)->ih_mbuf, 0, sizeof(struct mbuf_ptr));
 	  ((struct ipovly *)ip)->ih_x1 = 0;
 	  ((struct ipovly *)ip)->ih_len = uh->uh_ulen;
 	  /* keep uh_sum for ICMP reply
@@ -157,6 +156,9 @@ udp_input(m, iphlen)
             bootp_input(m);
             goto bad;
         }
+
+        if (slirp_restrict)
+            goto bad;
 
         /*
          *  handle TFTP
@@ -280,7 +282,7 @@ int udp_output2(struct socket *so, struct mbuf *m,
 	 * and addresses and length put into network format.
 	 */
 	ui = mtod(m, struct udpiphdr *);
-	ui->ui_next = ui->ui_prev = 0;
+    memset(&ui->ui_i.ih_mbuf, 0 , sizeof(struct mbuf_ptr));
 	ui->ui_x1 = 0;
 	ui->ui_pr = IPPROTO_UDP;
 	ui->ui_len = htons(m->m_len - sizeof(struct ip)); /* + sizeof (struct udphdr)); */
@@ -475,14 +477,14 @@ struct cu_header {
 			type = omsg->type;
 			OTOSIN(omsg, ctl_addr)->sin_port = addr.sin_port;
 			OTOSIN(omsg, ctl_addr)->sin_addr = our_addr;
-			strncpy(omsg->l_name, getlogin(), NAME_SIZE_OLD);
+                        pstrcpy(omsg->l_name, NAME_SIZE_OLD, getlogin());
 		} else {		/* new talk */
 			omsg = (CTL_MSG_OLD *) buff;
 			nmsg = mtod(m, CTL_MSG *);
 			type = nmsg->type;
 			OTOSIN(nmsg, ctl_addr)->sin_port = addr.sin_port;
 			OTOSIN(nmsg, ctl_addr)->sin_addr = our_addr;
-			strncpy(nmsg->l_name, getlogin(), NAME_SIZE_OLD);
+                        pstrcpy(nmsg->l_name, NAME_SIZE_OLD, getlogin());
 		}
 
 		if (type == LOOK_UP)

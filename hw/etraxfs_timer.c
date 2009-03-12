@@ -47,7 +47,6 @@ struct fs_timer_t {
 	CPUState *env;
 	qemu_irq *irq;
 	qemu_irq *nmi;
-	target_phys_addr_t base;
 
 	QEMUBH *bh_t0;
 	QEMUBH *bh_t1;
@@ -76,30 +75,20 @@ struct fs_timer_t {
 	uint32_t r_masked_intr;
 };
 
-static uint32_t timer_rinvalid (void *opaque, target_phys_addr_t addr)
-{
-	struct fs_timer_t *t = opaque;
-	CPUState *env = t->env;
-	cpu_abort(env, "Unsupported short access. reg=" TARGET_FMT_plx "\n",
-		  addr);
-	return 0;
-}
-
 static uint32_t timer_readl (void *opaque, target_phys_addr_t addr)
 {
 	struct fs_timer_t *t = opaque;
 	uint32_t r = 0;
 
-	/* Make addr relative to this instances base.  */
-	addr -= t->base;
 	switch (addr) {
 	case R_TMR0_DATA:
+		r = ptimer_get_count(t->ptimer_t0);
 		break;
 	case R_TMR1_DATA:
-		D(printf ("R_TMR1_DATA\n"));
+		r = ptimer_get_count(t->ptimer_t1);
 		break;
 	case R_TIME:
-		r = qemu_get_clock(vm_clock) * 10;
+		r = qemu_get_clock(vm_clock) / 10;
 		break;
 	case RW_INTR_MASK:
 		r = t->rw_intr_mask;
@@ -112,15 +101,6 @@ static uint32_t timer_readl (void *opaque, target_phys_addr_t addr)
 		break;
 	}
 	return r;
-}
-
-static void
-timer_winvalid (void *opaque, target_phys_addr_t addr, uint32_t value)
-{
-	struct fs_timer_t *t = opaque;
-	CPUState *env = t->env;
-	cpu_abort(env, "Unsupported short access. reg=" TARGET_FMT_plx "\n",
-		  addr);
 }
 
 #define TIMER_SLOWDOWN 1
@@ -158,7 +138,7 @@ static void update_ctrl(struct fs_timer_t *t, int tnum)
 	case 4: freq_hz =  29493000; break;
 	case 5: freq_hz =  32000000; break;
 	case 6: freq_hz =  32768000; break;
-	case 7: freq_hz = 100001000; break;
+	case 7: freq_hz = 100000000; break;
 	default:
 		abort();
 		break;
@@ -166,8 +146,8 @@ static void update_ctrl(struct fs_timer_t *t, int tnum)
 
 	D(printf ("freq_hz=%d div=%d\n", freq_hz, div));
 	div = div * TIMER_SLOWDOWN;
-	div >>= 10;
-	freq_hz >>= 10;
+	div /= 1000;
+	freq_hz /= 1000;
 	ptimer_set_freq(timer, freq_hz);
 	ptimer_set_limit(timer, div, 0);
 
@@ -273,8 +253,6 @@ timer_writel (void *opaque, target_phys_addr_t addr, uint32_t value)
 {
 	struct fs_timer_t *t = opaque;
 
-	/* Make addr relative to this instances base.  */
-	addr -= t->base;
 	switch (addr)
 	{
 		case RW_TMR0_DIV:
@@ -314,14 +292,12 @@ timer_writel (void *opaque, target_phys_addr_t addr, uint32_t value)
 }
 
 static CPUReadMemoryFunc *timer_read[] = {
-	&timer_rinvalid,
-	&timer_rinvalid,
+	NULL, NULL,
 	&timer_readl,
 };
 
 static CPUWriteMemoryFunc *timer_write[] = {
-	&timer_winvalid,
-	&timer_winvalid,
+	NULL, NULL,
 	&timer_writel,
 };
 
@@ -357,7 +333,6 @@ void etraxfs_timer_init(CPUState *env, qemu_irq *irqs, qemu_irq *nmi,
 	t->irq = irqs;
 	t->nmi = nmi;
 	t->env = env;
-	t->base = base;
 
 	timer_regs = cpu_register_io_memory(0, timer_read, timer_write, t);
 	cpu_register_physical_memory (base, 0x5c, timer_regs);

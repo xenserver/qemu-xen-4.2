@@ -58,6 +58,7 @@ int qemu_savevm_state_complete(QEMUFile *f);
 int qemu_savevm_state(QEMUFile *f);
 int qemu_loadvm_state(QEMUFile *f);
 
+#ifdef _WIN32
 /* Polling handling */
 
 /* return TRUE if no sleep should be done afterwards */
@@ -66,7 +67,6 @@ typedef int PollingFunc(void *opaque);
 int qemu_add_polling_cb(PollingFunc *func, void *opaque);
 void qemu_del_polling_cb(PollingFunc *func, void *opaque);
 
-#ifdef _WIN32
 /* Wait objects handling */
 typedef void WaitObjectFunc(void *opaque);
 
@@ -75,13 +75,15 @@ void qemu_del_wait_object(HANDLE handle, WaitObjectFunc *func, void *opaque);
 #endif
 
 /* TAP win32 */
-int tap_win32_init(VLANState *vlan, const char *ifname);
+int tap_win32_init(VLANState *vlan, const char *model,
+                   const char *name, const char *ifname);
 
 /* SLIRP */
 void do_info_slirp(void);
 
 extern int bios_size;
 extern int cirrus_vga_enabled;
+extern int std_vga_enabled;
 extern int vmsvga_enabled;
 extern int graphic_width;
 extern int graphic_height;
@@ -89,6 +91,7 @@ extern int graphic_depth;
 extern int nographic;
 extern const char *keyboard_layout;
 extern int win2k_install_hack;
+extern int rtc_td_hack;
 extern int alt_grab;
 extern int usb_enabled;
 extern int smp_cpus;
@@ -98,7 +101,7 @@ extern int no_quit;
 extern int semihosting_enabled;
 extern int old_param;
 extern const char *bootp_filename;
-
+extern DisplayState display_state;
 
 #ifdef USE_KQEMU
 extern int kqemu_allowed;
@@ -108,7 +111,7 @@ extern int kqemu_allowed;
 extern const char *option_rom[MAX_OPTION_ROMS];
 extern int nb_option_roms;
 
-#ifdef TARGET_SPARC
+#if defined(TARGET_SPARC) || defined(TARGET_PPC)
 #define MAX_PROM_ENVS 128
 extern const char *prom_envs[MAX_PROM_ENVS];
 extern unsigned int nb_prom_envs;
@@ -124,7 +127,7 @@ extern unsigned int nb_prom_envs;
 
 typedef enum {
     IF_BLKTAP,
-    IF_IDE, IF_SCSI, IF_FLOPPY, IF_PFLASH, IF_MTD, IF_SD
+    IF_IDE, IF_SCSI, IF_FLOPPY, IF_PFLASH, IF_MTD, IF_SD, IF_VIRTIO
 } BlockInterfaceType;
 
 typedef struct DriveInfo {
@@ -132,6 +135,7 @@ typedef struct DriveInfo {
     BlockInterfaceType type;
     int bus;
     int unit;
+    char serial[21];
 } DriveInfo;
 
 #define MAX_IDE_DEVS	2
@@ -143,6 +147,7 @@ extern DriveInfo drives_table[MAX_DRIVES+1];
 
 extern int drive_get_index(BlockInterfaceType type, int bus, int unit);
 extern int drive_get_max_bus(BlockInterfaceType type);
+extern const char *drive_get_serial(BlockDriverState *bdrv);
 
 /* serial ports */
 
@@ -156,15 +161,24 @@ extern CharDriverState *serial_hds[MAX_SERIAL_PORTS];
 
 extern CharDriverState *parallel_hds[MAX_PARALLEL_PORTS];
 
+/* virtio consoles */
+
+#define MAX_VIRTIO_CONSOLES 1
+
+extern CharDriverState *virtcon_hds[MAX_VIRTIO_CONSOLES];
+
+#define TFR(expr) do { if ((expr) != -1) break; } while (errno == EINTR)
+
 #ifdef NEED_CPU_H
 /* loader.c */
 int get_image_size(const char *filename);
 int load_image(const char *filename, uint8_t *addr); /* deprecated */
 int load_image_targphys(const char *filename, target_phys_addr_t, int max_sz);
-int load_elf(const char *filename, int64_t virt_to_phys_addend,
+int load_elf(const char *filename, int64_t address_offset,
              uint64_t *pentry, uint64_t *lowaddr, uint64_t *highaddr);
 int load_aout(const char *filename, target_phys_addr_t addr, int max_sz);
-int load_uboot(const char *filename, target_ulong *ep, int *is_linux);
+int load_uimage(const char *filename, target_ulong *ep, target_ulong *loadaddr,
+                int *is_linux);
 
 int fread_targphys(target_phys_addr_t dst_addr, size_t nbytes, FILE *f);
 int fread_targphys_ok(target_phys_addr_t dst_addr, size_t nbytes, FILE *f);
@@ -189,5 +203,12 @@ extern struct soundhw soundhw[];
 void do_usb_add(const char *devname);
 void do_usb_del(const char *devname);
 void usb_info(void);
+
+const char *get_opt_name(char *buf, int buf_size, const char *p);
+const char *get_opt_value(char *buf, int buf_size, const char *p);
+int get_param_value(char *buf, int buf_size,
+                    const char *tag, const char *str);
+int check_params(char *buf, int buf_size,
+                 const char * const *params, const char *str);
 
 #endif

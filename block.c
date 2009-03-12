@@ -21,6 +21,12 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
+#include "config-host.h"
+#ifdef _BSD
+/* include native header before sys-queue.h */
+#include <sys/queue.h>
+#endif
+
 #include "qemu-common.h"
 #include "console.h"
 #include "block_int.h"
@@ -29,7 +35,6 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <sys/ioctl.h>
-#include <sys/queue.h>
 #include <sys/disk.h>
 #endif
 
@@ -582,14 +587,6 @@ int bdrv_read(BlockDriverState *bs, int64_t sector_num,
 
     if (bdrv_rw_badreq_sectors(bs, sector_num, nb_sectors))
 	return -EDOM;
-    if (sector_num == 0 && bs->boot_sector_enabled && nb_sectors > 0) {
-            memcpy(buf, bs->boot_sector_data, 512);
-        sector_num++;
-        nb_sectors--;
-        buf += 512;
-        if (nb_sectors == 0)
-            return 0;
-    }
     if (drv->bdrv_pread) {
         int ret, len;
         len = nb_sectors * 512;
@@ -624,25 +621,23 @@ int bdrv_write(BlockDriverState *bs, int64_t sector_num,
         return -EACCES;
     if (bdrv_rw_badreq_sectors(bs, sector_num, nb_sectors))
 	return -EDOM;
-    if (sector_num == 0 && bs->boot_sector_enabled && nb_sectors > 0) {
-        memcpy(bs->boot_sector_data, buf, 512);
-    }
     if (drv->bdrv_pwrite) {
-        int ret, len;
+        int ret, len, count = 0;
         len = nb_sectors * 512;
-        ret = drv->bdrv_pwrite(bs, sector_num * 512, buf, len);
-        if (ret < 0)
-            return ret;
-        else if (ret != len)
-            return -EIO;
-        else {
-	    bs->wr_bytes += (unsigned) len;
-	    bs->wr_ops ++;
-            return 0;
-	}
-    } else {
-        return drv->bdrv_write(bs, sector_num, buf, nb_sectors);
+        do {
+            ret = drv->bdrv_pwrite(bs, sector_num * 512, buf, len - count);
+            if (ret < 0) {
+                printf("bdrv_write ret=%d\n", ret);
+                return ret;
+            }
+            count += ret;
+            buf += ret;
+        } while (count != len);
+        bs->wr_bytes += (unsigned) len;
+        bs->wr_ops ++;
+        return 0;
     }
+    return drv->bdrv_write(bs, sector_num, buf, nb_sectors);
 }
 
 static int bdrv_pread_em(BlockDriverState *bs, int64_t offset,
@@ -811,14 +806,120 @@ void bdrv_get_geometry(BlockDriverState *bs, uint64_t *nb_sectors_ptr)
     *nb_sectors_ptr = length;
 }
 
-/* force a given boot sector. */
-void bdrv_set_boot_sector(BlockDriverState *bs, const uint8_t *data, int size)
+struct partition {
+        uint8_t boot_ind;           /* 0x80 - active */
+        uint8_t head;               /* starting head */
+        uint8_t sector;             /* starting sector */
+        uint8_t cyl;                /* starting cylinder */
+        uint8_t sys_ind;            /* What partition type */
+        uint8_t end_head;           /* end head */
+        uint8_t end_sector;         /* end sector */
+        uint8_t end_cyl;            /* end cylinder */
+        uint32_t start_sect;        /* starting sector counting from 0 */
+        uint32_t nr_sects;          /* nr of sectors in partition */
+} __attribute__((packed));
+
+/* try to guess the disk logical geometry from the MSDOS partition table. Return 0 if OK, -1 if could not guess */
+static int guess_disk_lchs(BlockDriverState *bs,
+                           int *pcylinders, int *pheads, int *psectors)
 {
-    bs->boot_sector_enabled = 1;
-    if (size > 512)
-        size = 512;
-    memcpy(bs->boot_sector_data, data, size);
-    memset(bs->boot_sector_data + size, 0, 512 - size);
+    uint8_t buf[512];
+    int ret, i, heads, sectors, cylinders;
+    struct partition *p;
+    uint32_t nr_sects;
+    uint64_t nb_sectors;
+
+    bdrv_get_geometry(bs, &nb_sectors);
+
+    ret = bdrv_read(bs, 0, buf, 1);
+    if (ret < 0)
+        return -1;
+    /* test msdos magic */
+    if (buf[510] != 0x55 || buf[511] != 0xaa)
+        return -1;
+    for(i = 0; i < 4; i++) {
+        p = ((struct partition *)(buf + 0x1be)) + i;
+        nr_sects = le32_to_cpu(p->nr_sects);
+        if (nr_sects && p->end_head) {
+            /* We make the assumption that the partition terminates on
+               a cylinder boundary */
+            heads = p->end_head + 1;
+            sectors = p->end_sector & 63;
+            if (sectors == 0)
+                continue;
+            cylinders = nb_sectors / (heads * sectors);
+            if (cylinders < 1 || cylinders > 16383)
+                continue;
+            *pheads = heads;
+            *psectors = sectors;
+            *pcylinders = cylinders;
+#if 0
+            printf("guessed geometry: LCHS=%d %d %d\n",
+                   cylinders, heads, sectors);
+#endif
+            return 0;
+        }
+    }
+    return -1;
+}
+
+void bdrv_guess_geometry(BlockDriverState *bs, int *pcyls, int *pheads, int *psecs)
+{
+    int translation, lba_detected = 0;
+    int cylinders, heads, secs;
+    uint64_t nb_sectors;
+
+    /* if a geometry hint is available, use it */
+    bdrv_get_geometry(bs, &nb_sectors);
+    bdrv_get_geometry_hint(bs, &cylinders, &heads, &secs);
+    translation = bdrv_get_translation_hint(bs);
+    if (cylinders != 0) {
+        *pcyls = cylinders;
+        *pheads = heads;
+        *psecs = secs;
+    } else {
+        if (guess_disk_lchs(bs, &cylinders, &heads, &secs) == 0) {
+            if (heads > 16) {
+                /* if heads > 16, it means that a BIOS LBA
+                   translation was active, so the default
+                   hardware geometry is OK */
+                lba_detected = 1;
+                goto default_geometry;
+            } else {
+                *pcyls = cylinders;
+                *pheads = heads;
+                *psecs = secs;
+                /* disable any translation to be in sync with
+                   the logical geometry */
+                if (translation == BIOS_ATA_TRANSLATION_AUTO) {
+                    bdrv_set_translation_hint(bs,
+                                              BIOS_ATA_TRANSLATION_NONE);
+                }
+            }
+        } else {
+        default_geometry:
+            /* if no geometry, use a standard physical disk geometry */
+            cylinders = nb_sectors / (16 * 63);
+
+            if (cylinders > 16383)
+                cylinders = 16383;
+            else if (cylinders < 2)
+                cylinders = 2;
+            *pcyls = cylinders;
+            *pheads = 16;
+            *psecs = 63;
+            if ((lba_detected == 1) && (translation == BIOS_ATA_TRANSLATION_AUTO)) {
+                if ((*pcyls * *pheads) <= 131072) {
+                    bdrv_set_translation_hint(bs,
+                                              BIOS_ATA_TRANSLATION_LARGE);
+                } else {
+                    bdrv_set_translation_hint(bs,
+                                              BIOS_ATA_TRANSLATION_LBA);
+                }
+            }
+        }
+        bdrv_set_geometry_hint(bs, *pcyls, *pheads, *psecs);
+    }
 }
 
 void bdrv_set_geometry_hint(BlockDriverState *bs,
@@ -1226,14 +1327,6 @@ BlockDriverAIOCB *bdrv_aio_read(BlockDriverState *bs, int64_t sector_num,
     if (bdrv_rw_badreq_sectors(bs, sector_num, nb_sectors))
 	return NULL;
 
-    /* XXX: we assume that nb_sectors == 0 is suppored by the async read */
-    if (sector_num == 0 && bs->boot_sector_enabled && nb_sectors > 0) {
-        memcpy(buf, bs->boot_sector_data, 512);
-        sector_num++;
-        nb_sectors--;
-        buf += 512;
-    }
-
     ret = drv->bdrv_aio_read(bs, sector_num, buf, nb_sectors, cb, opaque);
 
     if (ret) {
@@ -1258,9 +1351,6 @@ BlockDriverAIOCB *bdrv_aio_write(BlockDriverState *bs, int64_t sector_num,
         return NULL;
     if (bdrv_rw_badreq_sectors(bs, sector_num, nb_sectors))
 	return NULL;
-    if (sector_num == 0 && bs->boot_sector_enabled && nb_sectors > 0) {
-        memcpy(bs->boot_sector_data, buf, 512);
-    }
 
     ret = drv->bdrv_aio_write(bs, sector_num, buf, nb_sectors, cb, opaque);
 

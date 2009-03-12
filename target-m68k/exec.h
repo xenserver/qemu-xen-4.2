@@ -16,7 +16,7 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston MA  02110-1301 USA
  */
 #include "dyngen-exec.h"
 
@@ -43,8 +43,6 @@ int cpu_m68k_handle_mmu_fault (CPUState *env, target_ulong address, int rw,
 #if !defined(CONFIG_USER_ONLY)
 #include "softmmu_exec.h"
 #endif
-
-void cpu_loop_exit(void);
 
 static inline int cpu_halted(CPUState *env) {
     if (!env->halted)

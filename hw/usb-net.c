@@ -628,14 +628,13 @@ static int ndis_query(USBNetState *s, uint32_t oid,
                       uint8_t *inbuf, unsigned int inlen, uint8_t *outbuf,
                       size_t outlen)
 {
-    unsigned int i, count;
+    unsigned int i;
 
     switch (oid) {
     /* general oids (table 4-1) */
     /* mandatory */
     case OID_GEN_SUPPORTED_LIST:
-        count = sizeof(oid_supported_list) / sizeof(uint32_t);
-        for (i = 0; i < count; i++)
+        for (i = 0; i < ARRAY_SIZE(oid_supported_list); i++)
             ((le32 *) outbuf)[i] = cpu_to_le32(oid_supported_list[i]);
         return sizeof(oid_supported_list);
 
@@ -1454,16 +1453,14 @@ USBDevice *usb_net_init(NICInfo *nd)
 
     pstrcpy(s->dev.devname, sizeof(s->dev.devname),
                     "QEMU USB Network Interface");
-    s->vc = qemu_new_vlan_client(nd->vlan,
+    s->vc = qemu_new_vlan_client(nd->vlan, nd->model, nd->name,
                     usbnet_receive, usbnet_can_receive, s);
+
+    qemu_format_nic_info_str(s->vc, s->mac);
 
     snprintf(s->usbstring_mac, sizeof(s->usbstring_mac),
                     "%02x%02x%02x%02x%02x%02x",
                     0x40, s->mac[1], s->mac[2],
-                    s->mac[3], s->mac[4], s->mac[5]);
-    snprintf(s->vc->info_str, sizeof(s->vc->info_str),
-                    "usbnet macaddr=%02x:%02x:%02x:%02x:%02x:%02x",
-                    s->mac[0], s->mac[1], s->mac[2],
                     s->mac[3], s->mac[4], s->mac[5]);
     fprintf(stderr, "usbnet: initialized mac %02x:%02x:%02x:%02x:%02x:%02x\n",
                     s->mac[0], s->mac[1], s->mac[2],

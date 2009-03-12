@@ -55,7 +55,7 @@ static void update_palette_entries(TCXState *s, int start, int end)
 {
     int i;
     for(i = start; i < end; i++) {
-        switch(s->ds->depth) {
+        switch(ds_get_bits_per_pixel(s->ds)) {
         default:
         case 8:
             s->palette[i] = rgb_to_pixel8(s->r[i], s->g[i], s->b[i]);
@@ -200,18 +200,18 @@ static void tcx_update_display(void *opaque)
     uint8_t *d, *s;
     void (*f)(TCXState *s1, uint8_t *dst, const uint8_t *src, int width);
 
-    if (ts->ds->depth == 0)
+    if (ds_get_bits_per_pixel(ts->ds) == 0)
         return;
     page = ts->vram_offset;
     y_start = -1;
     page_min = 0xffffffff;
     page_max = 0;
-    d = ts->ds->data;
+    d = ds_get_data(ts->ds);
     s = ts->vram;
-    dd = ts->ds->linesize;
+    dd = ds_get_linesize(ts->ds);
     ds = 1024;
 
-    switch (ts->ds->depth) {
+    switch (ds_get_bits_per_pixel(ts->ds)) {
     case 32:
         f = tcx_draw_line32;
         break;
@@ -278,7 +278,7 @@ static void tcx24_update_display(void *opaque)
     uint8_t *d, *s;
     uint32_t *cptr, *s24;
 
-    if (ts->ds->depth != 32)
+    if (ds_get_bits_per_pixel(ts->ds) != 32)
             return;
     page = ts->vram_offset;
     page24 = ts->vram24_offset;
@@ -286,11 +286,11 @@ static void tcx24_update_display(void *opaque)
     y_start = -1;
     page_min = 0xffffffff;
     page_max = 0;
-    d = ts->ds->data;
+    d = ds_get_data(ts->ds);
     s = ts->vram;
     s24 = ts->vram24;
     cptr = ts->cplane;
-    dd = ts->ds->linesize;
+    dd = ds_get_linesize(ts->ds);
     ds = 1024;
 
     for(y = 0; y < ts->height; y += 4, page += TARGET_PAGE_SIZE,
@@ -437,15 +437,13 @@ static uint32_t tcx_dac_readl(void *opaque, target_phys_addr_t addr)
 static void tcx_dac_writel(void *opaque, target_phys_addr_t addr, uint32_t val)
 {
     TCXState *s = opaque;
-    uint32_t saddr;
 
-    saddr = (addr & (TCX_DAC_NREGS - 1)) >> 2;
-    switch (saddr) {
+    switch (addr) {
     case 0:
         s->dac_index = val >> 24;
         s->dac_state = 0;
         break;
-    case 1:
+    case 4:
         switch (s->dac_state) {
         case 0:
             s->r[s->dac_index] = val >> 24;

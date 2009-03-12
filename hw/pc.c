@@ -36,6 +36,10 @@
 
 #include "xen_platform.h"
 #include "fw_cfg.h"
+#include "virtio-blk.h"
+#include "virtio-balloon.h"
+#include "virtio-console.h"
+#include "hpet_emul.h"
 
 /* output Bochs bios info messages */
 //#define DEBUG_BIOS
@@ -452,30 +456,45 @@ static void bochs_bios_init(void)
 
 /* Generate an initial boot sector which sets state and jump to
    a specified vector */
-static void generate_bootsect(uint32_t gpr[8], uint16_t segs[6], uint16_t ip)
+static void generate_bootsect(uint8_t *option_rom,
+                              uint32_t gpr[8], uint16_t segs[6], uint16_t ip)
 {
-    uint8_t bootsect[512], *p;
+    uint8_t rom[512], *p, *reloc;
+    uint8_t sum;
     int i;
-    int hda;
 
-    hda = drive_get_index(IF_IDE, 0, 0);
-    if (hda == -1) {
-	fprintf(stderr, "A disk image must be given for 'hda' when booting "
-		"a Linux kernel\n(if you really don't want it, use /dev/zero)\n");
-	exit(1);
-    }
+    memset(rom, 0, sizeof(rom));
 
-    memset(bootsect, 0, sizeof(bootsect));
+    p = rom;
+    /* Make sure we have an option rom signature */
+    *p++ = 0x55;
+    *p++ = 0xaa;
 
-    /* Copy the MSDOS partition table if possible */
-    bdrv_read(drives_table[hda].bdrv, 0, bootsect, 1);
+    /* ROM size in sectors*/
+    *p++ = 1;
 
-    /* Make sure we have a partition signature */
-    bootsect[510] = 0x55;
-    bootsect[511] = 0xaa;
+    /* Hook int19 */
 
+    *p++ = 0x50;		/* push ax */
+    *p++ = 0x1e;		/* push ds */
+    *p++ = 0x31; *p++ = 0xc0;	/* xor ax, ax */
+    *p++ = 0x8e; *p++ = 0xd8;	/* mov ax, ds */
+
+    *p++ = 0xc7; *p++ = 0x06;   /* movvw _start,0x64 */
+    *p++ = 0x64; *p++ = 0x00;
+    reloc = p;
+    *p++ = 0x00; *p++ = 0x00;
+
+    *p++ = 0x8c; *p++ = 0x0e;   /* mov cs,0x66 */
+    *p++ = 0x66; *p++ = 0x00;
+
+    *p++ = 0x1f;		/* pop ds */
+    *p++ = 0x58;		/* pop ax */
+    *p++ = 0xcb;		/* lret */
+    
     /* Actual code */
-    p = bootsect;
+    *reloc = (p - rom);
+
     *p++ = 0xfa;		/* CLI */
     *p++ = 0xfc;		/* CLD */
 
@@ -505,7 +524,13 @@ static void generate_bootsect(uint32_t gpr[8], uint16_t segs[6], uint16_t ip)
     *p++ = segs[1];		/* CS */
     *p++ = segs[1] >> 8;
 
-    bdrv_set_boot_sector(drives_table[hda].bdrv, bootsect, sizeof(bootsect));
+    /* sign rom */
+    sum = 0;
+    for (i = 0; i < (sizeof(rom) - 1); i++)
+        sum += rom[i];
+    rom[sizeof(rom) - 1] = -sum;
+
+    memcpy(option_rom, rom, sizeof(rom));
 }
 
 static long get_file_size(FILE *f)
@@ -522,23 +547,8 @@ static long get_file_size(FILE *f)
     return size;
 }
 
-static void pstrcpy_targphys(target_phys_addr_t dest, int buf_size,
-			     const char *source)
-{
-    static const char nul_byte;
-    const char *nulp;
-
-    if (buf_size <= 0) return;
-    nulp = memchr(source, 0, buf_size);
-    if (nulp) {
-	cpu_physical_memory_write(dest, source, (nulp - source) + 1);
-    } else {
-	cpu_physical_memory_write(dest, source, buf_size - 1);
-	cpu_physical_memory_write(dest, &nul_byte, 1);
-    }
-}
-
-static void load_linux(const char *kernel_filename,
+static void load_linux(uint8_t *option_rom,
+                       const char *kernel_filename,
 		       const char *initrd_filename,
 		       const char *kernel_cmdline)
 {
@@ -693,7 +703,7 @@ static void load_linux(const char *kernel_filename,
     memset(gpr, 0, sizeof gpr);
     gpr[4] = cmdline_addr-real_addr-16;	/* SP (-16 is paranoia) */
 
-    generate_bootsect(gpr, seg, 0);
+    generate_bootsect(option_rom, gpr, seg, 0);
 #endif
 }
 
@@ -776,7 +786,6 @@ static void pc_init1(ram_addr_t ram_size, int vga_ram_size,
     PCIBus *pci_bus;
     int piix3_devfn = -1;
     CPUState *env;
-    NICInfo *nd;
     qemu_irq *cpu_irq;
     qemu_irq *i8259;
     int index;
@@ -868,22 +877,24 @@ static void pc_init1(ram_addr_t ram_size, int vga_ram_size,
         exit(1);
     }
 
-    /* VGA BIOS load */
-    if (cirrus_vga_enabled) {
-        snprintf(buf, sizeof(buf), "%s/%s", bios_dir, VGABIOS_CIRRUS_FILENAME);
-    } else {
-        snprintf(buf, sizeof(buf), "%s/%s", bios_dir, VGABIOS_FILENAME);
-    }
-    vga_bios_size = get_image_size(buf);
-    if (vga_bios_size <= 0 || vga_bios_size > 65536)
-        goto vga_bios_error;
-    vga_bios_offset = qemu_ram_alloc(65536);
+    if (cirrus_vga_enabled || std_vga_enabled || vmsvga_enabled) {
+        /* VGA BIOS load */
+        if (cirrus_vga_enabled) {
+            snprintf(buf, sizeof(buf), "%s/%s", bios_dir, VGABIOS_CIRRUS_FILENAME);
+        } else {
+            snprintf(buf, sizeof(buf), "%s/%s", bios_dir, VGABIOS_FILENAME);
+        }
+        vga_bios_size = get_image_size(buf);
+        if (vga_bios_size <= 0 || vga_bios_size > 65536)
+            goto vga_bios_error;
+        vga_bios_offset = qemu_ram_alloc(65536);
 
-    ret = load_image_targphys(buf, vga_bios_offset, vga_bios_size);
-    if (ret != vga_bios_size) {
-    vga_bios_error:
-        fprintf(stderr, "qemu: could not load VGA BIOS '%s'\n", buf);
-        exit(1);
+        ret = load_image_targphys(buf, phys_ram_base + vga_bios_offset);
+        if (ret != vga_bios_size) {
+vga_bios_error:
+            fprintf(stderr, "qemu: could not load VGA BIOS '%s'\n", buf);
+            exit(1);
+        }
     }
 
     /* setup basic memory access */
@@ -894,8 +905,6 @@ static void pc_init1(ram_addr_t ram_size, int vga_ram_size,
     isa_bios_size = bios_size;
     if (isa_bios_size > (128 * 1024))
         isa_bios_size = 128 * 1024;
-    cpu_register_physical_memory(0xd0000, (192 * 1024) - isa_bios_size,
-                                 IO_MEM_UNASSIGNED);
     cpu_register_physical_memory(0x100000 - isa_bios_size,
                                  isa_bios_size,
                                  (bios_offset + bios_size - isa_bios_size) | IO_MEM_ROM);
@@ -905,6 +914,15 @@ static void pc_init1(ram_addr_t ram_size, int vga_ram_size,
         int size, offset;
 
         offset = 0;
+        if (linux_boot) {
+            option_rom_offset = qemu_ram_alloc(TARGET_PAGE_SIZE);
+            load_linux(phys_ram_base + option_rom_offset,
+                       kernel_filename, initrd_filename, kernel_cmdline);
+            cpu_register_physical_memory(0xd0000, TARGET_PAGE_SIZE,
+                                         option_rom_offset | IO_MEM_ROM);
+            offset = TARGET_PAGE_SIZE;
+        }
+
         for (i = 0; i < nb_option_roms; i++) {
             size = get_image_size(option_rom[i]);
             if (size < 0) {
@@ -937,9 +955,6 @@ static void pc_init1(ram_addr_t ram_size, int vga_ram_size,
 
     bochs_bios_init();
 
-    if (linux_boot)
-	load_linux(kernel_filename, initrd_filename, kernel_cmdline);
-
     cpu_irq = qemu_allocate_irqs(pic_irq_request, NULL, 1);
     i8259 = i8259_init(cpu_irq[0]);
     ferr_irq = i8259[13];
@@ -971,7 +986,7 @@ static void pc_init1(ram_addr_t ram_size, int vga_ram_size,
                             vga_ram_addr, vga_ram_size);
         else
             fprintf(stderr, "%s: vmware_vga: no PCI bus\n", __FUNCTION__);
-    } else {
+    } else if (std_vga_enabled) {
         if (pci_enabled) {
             pci_vga_init(pci_bus, ds, phys_ram_base + vga_ram_addr,
                          vga_ram_addr, vga_ram_size, 0, 0);
@@ -1009,6 +1024,9 @@ static void pc_init1(ram_addr_t ram_size, int vga_ram_size,
     }
     pit = pit_init(0x40, i8259[0]);
     pcspk_init(pit);
+    if (!no_hpet) {
+        hpet_init(i8259);
+    }
     if (pci_enabled) {
         pic_set_alt_irq_func(isa_pic, ioapic_set_irq, ioapic);
     }
@@ -1031,27 +1049,12 @@ static void pc_init1(ram_addr_t ram_size, int vga_ram_size,
     }
 
     for(i = 0; i < nb_nics; i++) {
-        nd = &nd_table[i];
-        if (!nd->model) {
-            if (pci_enabled) {
-                nd->model = "ne2k_pci";
-            } else {
-                nd->model = "ne2k_isa";
-            }
-        }
-        if (strcmp(nd->model, "ne2k_isa") == 0) {
+        NICInfo *nd = &nd_table[i];
+
+        if (!pci_enabled || (nd->model && strcmp(nd->model, "ne2k_isa") == 0))
             pc_init_ne2k_isa(nd, i8259);
-        } else if (pci_enabled) {
-            if (strcmp(nd->model, "?") == 0)
-                fprintf(stderr, "qemu: Supported ISA NICs: ne2k_isa\n");
-            pci_nic_init(pci_bus, nd, -1);
-        } else if (strcmp(nd->model, "?") == 0) {
-            fprintf(stderr, "qemu: Supported ISA NICs: ne2k_isa\n");
-            exit(1);
-        } else {
-            fprintf(stderr, "qemu: Unsupported NIC: %s\n", nd->model);
-            exit(1);
-        }
+        else
+            pci_nic_init(pci_bus, nd, -1, "ne2k_pci");
     }
 
     if (drive_get_max_bus(IF_IDE) >= MAX_IDE_BUS) {
@@ -1144,6 +1147,29 @@ static void pc_init1(ram_addr_t ram_size, int vga_ram_size,
             pci_emulation_init(pci_bus, p);
         }
     }
+
+    /* Add virtio block devices */
+    if (pci_enabled) {
+        int index;
+        int unit_id = 0;
+
+        while ((index = drive_get_index(IF_VIRTIO, 0, unit_id)) != -1) {
+            virtio_blk_init(pci_bus, drives_table[index].bdrv);
+            unit_id++;
+        }
+    }
+
+    /* Add virtio balloon device */
+    if (pci_enabled)
+        virtio_balloon_init(pci_bus);
+
+    /* Add virtio console devices */
+    if (pci_enabled) {
+        for(i = 0; i < MAX_VIRTIO_CONSOLES; i++) {
+            if (virtcon_hds[i])
+                virtio_console_init(pci_bus, virtcon_hds[i]);
+        }
+    }
 }
 
 static void pc_init_pci(ram_addr_t ram_size, int vga_ram_size,
@@ -1176,6 +1202,14 @@ static void pc_init_isa(ram_addr_t ram_size, int vga_ram_size,
 
 /* set CMOS shutdown status register (index 0xF) as S3_resume(0xFE)
    BIOS will read it and start S3 resume at POST Entry*/
+void cmos_set_s3_resume(void)
+{
+    if (rtc_state)
+        rtc_set_memory(rtc_state, 0xF, 0xFE);
+}
+
+/* set CMOS shutdown status register (index 0xF) as S3_resume(0xFE)
+   BIOS will read it and start S3 resume at POST Entry */
 void cmos_set_s3_resume(void)
 {
     if (rtc_state)

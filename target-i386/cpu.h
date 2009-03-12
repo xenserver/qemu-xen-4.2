@@ -15,7 +15,7 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston MA  02110-1301 USA
  */
 #ifndef CPU_I386_H
 #define CPU_I386_H
@@ -159,9 +159,11 @@
 #define HF_MP_MASK           (1 << HF_MP_SHIFT)
 #define HF_EM_MASK           (1 << HF_EM_SHIFT)
 #define HF_TS_MASK           (1 << HF_TS_SHIFT)
+#define HF_IOPL_MASK         (3 << HF_IOPL_SHIFT)
 #define HF_LMA_MASK          (1 << HF_LMA_SHIFT)
 #define HF_CS64_MASK         (1 << HF_CS64_SHIFT)
 #define HF_OSFXSR_MASK       (1 << HF_OSFXSR_SHIFT)
+#define HF_VM_MASK           (1 << HF_VM_SHIFT)
 #define HF_SMM_MASK          (1 << HF_SMM_SHIFT)
 #define HF_SVME_MASK         (1 << HF_SVME_SHIFT)
 #define HF_SVMI_MASK         (1 << HF_SVMI_SHIFT)
@@ -177,6 +179,9 @@
 #define HF2_HIF_MASK          (1 << HF2_HIF_SHIFT) 
 #define HF2_NMI_MASK          (1 << HF2_NMI_SHIFT)
 #define HF2_VINTR_MASK        (1 << HF2_VINTR_SHIFT)
+
+#define CR0_PE_SHIFT 0
+#define CR0_MP_SHIFT 1
 
 #define CR0_PE_MASK  (1 << 0)
 #define CR0_MP_MASK  (1 << 1)
@@ -196,8 +201,19 @@
 #define CR4_PAE_MASK  (1 << 5)
 #define CR4_PGE_MASK  (1 << 7)
 #define CR4_PCE_MASK  (1 << 8)
-#define CR4_OSFXSR_MASK (1 << 9)
+#define CR4_OSFXSR_SHIFT 9
+#define CR4_OSFXSR_MASK (1 << CR4_OSFXSR_SHIFT)
 #define CR4_OSXMMEXCPT_MASK  (1 << 10)
+
+#define DR6_BD          (1 << 13)
+#define DR6_BS          (1 << 14)
+#define DR6_BT          (1 << 15)
+#define DR6_FIXED_1     0xffff0ff0
+
+#define DR7_GD          (1 << 13)
+#define DR7_TYPE_SHIFT  16
+#define DR7_LEN_SHIFT   18
+#define DR7_FIXED_1     0x00000400
 
 #define PG_PRESENT_BIT	0
 #define PG_RW_BIT	1
@@ -229,6 +245,7 @@
 #define PG_ERROR_RSVD_MASK 0x08
 #define PG_ERROR_I_D_MASK  0x10
 
+#define MSR_IA32_TSC                    0x10
 #define MSR_IA32_APICBASE               0x1b
 #define MSR_IA32_APICBASE_BSP           (1<<8)
 #define MSR_IA32_APICBASE_ENABLE        (1<<11)
@@ -355,7 +372,7 @@
 #define CPUID_MWAIT_EMX     (1 << 0) /* enumeration supported */
 
 #define EXCP00_DIVZ	0
-#define EXCP01_SSTP	1
+#define EXCP01_DB	1
 #define EXCP02_NMI	2
 #define EXCP03_INT3	3
 #define EXCP04_INTO	4
@@ -580,6 +597,8 @@ typedef struct CPUX86State {
     target_ulong kernelgsbase;
 #endif
 
+    uint64_t tsc;
+
     uint64_t pat;
 
     /* exception/interrupt handling */
@@ -587,6 +606,10 @@ typedef struct CPUX86State {
     int exception_is_int;
     target_ulong exception_next_eip;
     target_ulong dr[8]; /* debug registers */
+    union {
+        CPUBreakpoint *cpu_breakpoint[4];
+        CPUWatchpoint *cpu_watchpoint[4];
+    }; /* break/watchpoints for dr[0..3] */
     uint32_t smbase;
     int old_exception;  /* exception in flight */
 
@@ -610,6 +633,10 @@ typedef struct CPUX86State {
     int kqemu_enabled;
     int last_io_time;
 #endif
+
+    /* For KVM */
+    uint64_t interrupt_bitmap[256 / 64];
+
     /* in order to simplify APIC support, we leave this pointer to the
        user */
     struct APICState *apic_state;
@@ -693,10 +720,12 @@ static inline void cpu_x86_set_cpl(CPUX86State *s, int cpl)
 #endif
 }
 
+/* op_helper.c */
 /* used for debug or cpu save/restore */
 void cpu_get_fp80(uint64_t *pmant, uint16_t *pexp, CPU86_LDouble f);
 CPU86_LDouble cpu_set_fp80(uint64_t mant, uint16_t upper);
 
+/* cpu-exec.c */
 /* the following helpers are only usable in user mode simulation as
    they can trigger unexpected exceptions */
 void cpu_x86_load_seg(CPUX86State *s, int seg_reg, int selector);
@@ -708,20 +737,51 @@ void cpu_x86_frstor(CPUX86State *s, target_ulong ptr, int data32);
    is returned if the signal was handled by the virtual CPU.  */
 int cpu_x86_signal_handler(int host_signum, void *pinfo,
                            void *puc);
+
+/* helper.c */
+int cpu_x86_handle_mmu_fault(CPUX86State *env, target_ulong addr,
+                             int is_write, int mmu_idx, int is_softmmu);
 void cpu_x86_set_a20(CPUX86State *env, int a20_state);
+void cpu_x86_cpuid(CPUX86State *env, uint32_t index,
+                   uint32_t *eax, uint32_t *ebx,
+                   uint32_t *ecx, uint32_t *edx);
 
-uint64_t cpu_get_tsc(CPUX86State *env);
+static inline int hw_breakpoint_enabled(unsigned long dr7, int index)
+{
+    return (dr7 >> (index * 2)) & 3;
+}
 
+static inline int hw_breakpoint_type(unsigned long dr7, int index)
+{
+    return (dr7 >> (DR7_TYPE_SHIFT + (index * 2))) & 3;
+}
+
+static inline int hw_breakpoint_len(unsigned long dr7, int index)
+{
+    int len = ((dr7 >> (DR7_LEN_SHIFT + (index * 2))) & 3);
+    return (len == 2) ? 8 : len + 1;
+}
+
+void hw_breakpoint_insert(CPUX86State *env, int index);
+void hw_breakpoint_remove(CPUX86State *env, int index);
+int check_hw_breakpoints(CPUX86State *env, int force_dr6_update);
+
+/* will be suppressed */
+void cpu_x86_update_cr0(CPUX86State *env, uint32_t new_cr0);
+void cpu_x86_update_cr3(CPUX86State *env, target_ulong new_cr3);
+void cpu_x86_update_cr4(CPUX86State *env, uint32_t new_cr4);
+
+/* hw/apic.c */
 void cpu_set_apic_base(CPUX86State *env, uint64_t val);
 uint64_t cpu_get_apic_base(CPUX86State *env);
 void cpu_set_apic_tpr(CPUX86State *env, uint8_t val);
 #ifndef NO_CPU_IO_DEFS
 uint8_t cpu_get_apic_tpr(CPUX86State *env);
 #endif
-void cpu_smm_update(CPUX86State *env);
 
-/* will be suppressed */
-void cpu_x86_update_cr0(CPUX86State *env, uint32_t new_cr0);
+/* hw/pc.c */
+void cpu_smm_update(CPUX86State *env);
+uint64_t cpu_get_tsc(CPUX86State *env);
 
 /* used to debug */
 #define X86_DUMP_FPU  0x0001 /* dump FPU state too */
@@ -756,14 +816,13 @@ static inline int cpu_mmu_index (CPUState *env)
     return (env->hflags & HF_CPL_MASK) == 3 ? 1 : 0;
 }
 
+/* translate.c */
 void optimize_flags_init(void);
 
 typedef struct CCTable {
     int (*compute_all)(void); /* return all the flags */
     int (*compute_c)(void);  /* return the C flag */
 } CCTable;
-
-extern CCTable cc_table[];
 
 #if defined(CONFIG_USER_ONLY)
 static inline void cpu_clone_regs(CPUState *env, target_ulong newsp)
@@ -774,10 +833,22 @@ static inline void cpu_clone_regs(CPUState *env, target_ulong newsp)
 }
 #endif
 
-#define CPU_PC_FROM_TB(env, tb) env->eip = tb->pc - tb->cs_base
-
 #include "cpu-all.h"
+#include "exec-all.h"
 
 #include "svm.h"
+
+static inline void cpu_pc_from_tb(CPUState *env, TranslationBlock *tb)
+{
+    env->eip = tb->pc - tb->cs_base;
+}
+
+static inline void cpu_get_tb_cpu_state(CPUState *env, target_ulong *pc,
+                                        target_ulong *cs_base, int *flags)
+{
+    *cs_base = env->segs[R_CS].base;
+    *pc = *cs_base + env->eip;
+    *flags = env->hflags | (env->eflags & (IOPL_MASK | TF_MASK | VM_MASK));
+}
 
 #endif /* CPU_I386_H */

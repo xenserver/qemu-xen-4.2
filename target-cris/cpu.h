@@ -16,7 +16,7 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston MA  02110-1301 USA
  */
 #ifndef CPU_CRIS_H
 #define CPU_CRIS_H
@@ -167,8 +167,6 @@ void do_interrupt(CPUCRISState *env);
    is returned if the signal was handled by the virtual CPU.  */
 int cpu_cris_signal_handler(int host_signum, void *pinfo,
                            void *puc);
-void do_unassigned_access(target_phys_addr_t addr, int is_write, int is_exec,
-                          int is_asi, int size);
 
 enum {
     CC_OP_DYNAMIC, /* Use env->cc_op  */
@@ -227,6 +225,11 @@ static inline void cpu_clone_regs(CPUState *env, target_ulong newsp)
 }
 #endif
 
+static inline void cpu_set_tls(CPUCRISState *env, target_ulong newtls)
+{
+	env->pregs[PR_PID] = (env->pregs[PR_PID] & 0xff) | newtls;
+}
+
 /* Support function regs.  */
 #define SFR_RW_GC_CFG      0][0
 #define SFR_RW_MM_CFG      env->pregs[PR_SRS]][0
@@ -237,7 +240,21 @@ static inline void cpu_clone_regs(CPUState *env, target_ulong newsp)
 #define SFR_RW_MM_TLB_LO   env->pregs[PR_SRS]][5
 #define SFR_RW_MM_TLB_HI   env->pregs[PR_SRS]][6
 
-#define CPU_PC_FROM_TB(env, tb) env->pc = tb->pc
-
 #include "cpu-all.h"
+#include "exec-all.h"
+
+static inline void cpu_pc_from_tb(CPUState *env, TranslationBlock *tb)
+{
+    env->pc = tb->pc;
+}
+
+static inline void cpu_get_tb_cpu_state(CPUState *env, target_ulong *pc,
+                                        target_ulong *cs_base, int *flags)
+{
+    *pc = env->pc;
+    *cs_base = 0;
+    *flags = env->dslot |
+            (env->pregs[PR_CCS] & (S_FLAG | P_FLAG | U_FLAG | X_FLAG));
+}
+
 #endif

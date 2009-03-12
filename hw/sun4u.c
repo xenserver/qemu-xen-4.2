@@ -57,6 +57,9 @@
 
 #define MAX_PILS 16
 
+#define TICK_INT_DIS         0x8000000000000000ULL
+#define TICK_MAX             0x7fffffffffffffffULL
+
 struct hwdef {
     const char * const default_cpu_model;
     uint16_t machine_id;
@@ -79,7 +82,6 @@ int DMA_write_memory (int nchan, void *buf, int pos, int size)
 void DMA_hold_DREQ (int nchan) {}
 void DMA_release_DREQ (int nchan) {}
 void DMA_schedule(int nchan) {}
-void DMA_run (void) {}
 void DMA_init (int high_page_enable) {}
 void DMA_register_channel (int nchan,
                            DMA_transfer_handler transfer_handler,
@@ -270,11 +272,14 @@ static void main_cpu_reset(void *opaque)
     CPUState *env = s->env;
 
     cpu_reset(env);
-    ptimer_set_limit(env->tick, 0x7fffffffffffffffULL, 1);
+    env->tick_cmpr = TICK_INT_DIS | 0;
+    ptimer_set_limit(env->tick, TICK_MAX, 1);
     ptimer_run(env->tick, 0);
-    ptimer_set_limit(env->stick, 0x7fffffffffffffffULL, 1);
+    env->stick_cmpr = TICK_INT_DIS | 0;
+    ptimer_set_limit(env->stick, TICK_MAX, 1);
     ptimer_run(env->stick, 0);
-    ptimer_set_limit(env->hstick, 0x7fffffffffffffffULL, 1);
+    env->hstick_cmpr = TICK_INT_DIS | 0;
+    ptimer_set_limit(env->hstick, TICK_MAX, 1);
     ptimer_run(env->hstick, 0);
     env->gregs[1] = 0; // Memory start
     env->gregs[2] = ram_size; // Memory size
@@ -287,24 +292,29 @@ static void tick_irq(void *opaque)
 {
     CPUState *env = opaque;
 
-    env->softint |= SOFTINT_TIMER;
-    cpu_interrupt(env, CPU_INTERRUPT_TIMER);
+    if (!(env->tick_cmpr & TICK_INT_DIS)) {
+        env->softint |= SOFTINT_TIMER;
+        cpu_interrupt(env, CPU_INTERRUPT_TIMER);
+    }
 }
 
 static void stick_irq(void *opaque)
 {
     CPUState *env = opaque;
 
-    env->softint |= SOFTINT_TIMER;
-    cpu_interrupt(env, CPU_INTERRUPT_TIMER);
+    if (!(env->stick_cmpr & TICK_INT_DIS)) {
+        env->softint |= SOFTINT_STIMER;
+        cpu_interrupt(env, CPU_INTERRUPT_TIMER);
+    }
 }
 
 static void hstick_irq(void *opaque)
 {
     CPUState *env = opaque;
 
-    env->softint |= SOFTINT_TIMER;
-    cpu_interrupt(env, CPU_INTERRUPT_TIMER);
+    if (!(env->hstick_cmpr & TICK_INT_DIS)) {
+        cpu_interrupt(env, CPU_INTERRUPT_TIMER);
+    }
 }
 
 void cpu_tick_set_count(void *opaque, uint64_t count)
@@ -334,6 +344,48 @@ static const int parallel_irq[MAX_PARALLEL_PORTS] = { 7, 7, 7 };
 
 static fdctrl_t *floppy_controller;
 
+static void ebus_mmio_mapfunc(PCIDevice *pci_dev, int region_num,
+                              uint32_t addr, uint32_t size, int type)
+{
+    DPRINTF("Mapping region %d registers at %08x\n", region_num, addr);
+    switch (region_num) {
+    case 0:
+        isa_mmio_init(addr, 0x1000000);
+        break;
+    case 1:
+        isa_mmio_init(addr, 0x800000);
+        break;
+    }
+}
+
+/* EBUS (Eight bit bus) bridge */
+static void
+pci_ebus_init(PCIBus *bus, int devfn)
+{
+    PCIDevice *s;
+
+    s = pci_register_device(bus, "EBUS", sizeof(*s), devfn, NULL, NULL);
+    s->config[0x00] = 0x8e; // vendor_id : Sun
+    s->config[0x01] = 0x10;
+    s->config[0x02] = 0x00; // device_id
+    s->config[0x03] = 0x10;
+    s->config[0x04] = 0x06; // command = bus master, pci mem
+    s->config[0x05] = 0x00;
+    s->config[0x06] = 0xa0; // status = fast back-to-back, 66MHz, no error
+    s->config[0x07] = 0x03; // status = medium devsel
+    s->config[0x08] = 0x01; // revision
+    s->config[0x09] = 0x00; // programming i/f
+    s->config[0x0A] = 0x80; // class_sub = misc bridge
+    s->config[0x0B] = 0x06; // class_base = PCI_bridge
+    s->config[0x0D] = 0x0a; // latency_timer
+    s->config[0x0E] = 0x00; // header_type
+
+    pci_register_io_region(s, 0, 0x1000000, PCI_ADDRESS_SPACE_MEM,
+                           ebus_mmio_mapfunc);
+    pci_register_io_region(s, 1, 0x800000,  PCI_ADDRESS_SPACE_MEM,
+                           ebus_mmio_mapfunc);
+}
+
 static void sun4uv_init(ram_addr_t RAM_size, int vga_ram_size,
                         const char *boot_devices, DisplayState *ds,
                         const char *kernel_filename, const char *kernel_cmdline,
@@ -345,8 +397,9 @@ static void sun4uv_init(ram_addr_t RAM_size, int vga_ram_size,
     m48t59_t *nvram;
     int ret, linux_boot;
     unsigned int i;
-    long prom_offset, initrd_size, kernel_size;
-    PCIBus *pci_bus;
+    ram_addr_t ram_offset, prom_offset, vga_ram_offset;
+    long initrd_size, kernel_size;
+    PCIBus *pci_bus, *pci_bus2, *pci_bus3;
     QEMUBH *bh;
     qemu_irq *irq;
     int drive_index;
@@ -388,9 +441,10 @@ static void sun4uv_init(ram_addr_t RAM_size, int vga_ram_size,
     env->npc = env->pc + 4;
 
     /* allocate RAM */
-    cpu_register_physical_memory(0, RAM_size, 0);
+    ram_offset = qemu_ram_alloc(RAM_size);
+    cpu_register_physical_memory(0, RAM_size, ram_offset);
 
-    prom_offset = RAM_size + vga_ram_size;
+    prom_offset = qemu_ram_alloc(PROM_SIZE_MAX);
     cpu_register_physical_memory(hwdef->prom_addr,
                                  (PROM_SIZE_MAX + TARGET_PAGE_SIZE) &
                                  TARGET_PAGE_MASK,
@@ -450,10 +504,16 @@ static void sun4uv_init(ram_addr_t RAM_size, int vga_ram_size,
             }
         }
     }
-    pci_bus = pci_apb_init(APB_SPECIAL_BASE, APB_MEM_BASE, NULL);
+    pci_bus = pci_apb_init(APB_SPECIAL_BASE, APB_MEM_BASE, NULL, &pci_bus2,
+                           &pci_bus3);
     isa_mem_base = VGA_BASE;
-    pci_cirrus_vga_init(pci_bus, ds, phys_ram_base + RAM_size, RAM_size,
-                        vga_ram_size);
+    vga_ram_offset = qemu_ram_alloc(vga_ram_size);
+    pci_vga_init(pci_bus, ds, phys_ram_base + vga_ram_offset,
+                 vga_ram_offset, vga_ram_size,
+                 0, 0);
+
+    // XXX Should be pci_bus3
+    pci_ebus_init(pci_bus, -1);
 
     i = 0;
     if (hwdef->console_serial_base) {
@@ -475,11 +535,8 @@ static void sun4uv_init(ram_addr_t RAM_size, int vga_ram_size,
         }
     }
 
-    for(i = 0; i < nb_nics; i++) {
-        if (!nd_table[i].model)
-            nd_table[i].model = "ne2k_pci";
-        pci_nic_init(pci_bus, &nd_table[i], -1);
-    }
+    for(i = 0; i < nb_nics; i++)
+        pci_nic_init(pci_bus, &nd_table[i], -1, "ne2k_pci");
 
     irq = qemu_allocate_irqs(cpu_set_irq, env, MAX_PILS);
     if (drive_get_max_bus(IF_IDE) >= MAX_IDE_BUS) {
@@ -589,7 +646,7 @@ QEMUMachine sun4u_machine = {
     .init = sun4u_init,
     .ram_require = PROM_SIZE_MAX,
     .nodisk_ok = 1,
-    .max_cpus = 16,
+    .max_cpus = 1, // XXX for now
 };
 
 QEMUMachine sun4v_machine = {
@@ -598,7 +655,7 @@ QEMUMachine sun4v_machine = {
     .init = sun4v_init,
     .ram_require = PROM_SIZE_MAX,
     .nodisk_ok = 1,
-    .max_cpus = 16,
+    .max_cpus = 1, // XXX for now
 };
 
 QEMUMachine niagara_machine = {
@@ -607,5 +664,5 @@ QEMUMachine niagara_machine = {
     .init = niagara_init,
     .ram_require = PROM_SIZE_MAX,
     .nodisk_ok = 1,
-    .max_cpus = 16,
+    .max_cpus = 1, // XXX for now
 };

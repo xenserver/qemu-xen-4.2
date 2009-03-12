@@ -15,7 +15,7 @@
  *
  * You should have received a copy of the GNU Lesser General Public
  * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston MA  02110-1301 USA
  */
 #ifndef _EXEC_SH4_H
 #define _EXEC_SH4_H
@@ -43,8 +43,6 @@ static inline int cpu_halted(CPUState *env) {
 #include "softmmu_exec.h"
 #endif
 
-#define RETURN() __asm__ __volatile__("")
-
 static inline void regs_to_env(void)
 {
     /* XXXXX */
@@ -55,16 +53,10 @@ static inline void env_to_regs(void)
     /* XXXXX */
 }
 
-int cpu_sh4_handle_mmu_fault(CPUState * env, target_ulong address, int rw,
-			     int mmu_idx, int is_softmmu);
 void cpu_load_tlb(CPUState * env);
 
 int find_itlb_entry(CPUState * env, target_ulong address,
 		    int use_asid, int update);
 int find_utlb_entry(CPUState * env, target_ulong address, int use_asid);
-
-void do_interrupt(CPUState * env);
-
-void cpu_loop_exit(void);
 
 #endif				/* _EXEC_SH4_H */

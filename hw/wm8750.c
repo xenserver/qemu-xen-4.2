@@ -170,9 +170,9 @@ static void wm8750_vol_update(struct wm8750_s *s)
 static void wm8750_set_format(struct wm8750_s *s)
 {
     int i;
-    audsettings_t in_fmt;
-    audsettings_t out_fmt;
-    audsettings_t monoout_fmt;
+    struct audsettings in_fmt;
+    struct audsettings out_fmt;
+    struct audsettings monoout_fmt;
 
     wm8750_out_flush(s);
 
@@ -723,11 +723,11 @@ uint32_t wm8750_adc_dat(void *opaque)
     return *data;
 }
 
-void wm8750_set_bclk_in(void *opaque, int hz)
+void wm8750_set_bclk_in(void *opaque, int new_hz)
 {
     struct wm8750_s *s = (struct wm8750_s *) opaque;
 
-    s->ext_adc_hz = hz;
-    s->ext_dac_hz = hz;
+    s->ext_adc_hz = new_hz;
+    s->ext_dac_hz = new_hz;
     wm8750_clk_update(s, 1);
 }
