@@ -1,3 +1,6 @@
+#ifndef XEN_CONFIG_HOST_H
+#define XEN_CONFIG_HOST_H
+
 #ifdef __MINIOS__
 #define CONFIG_STUBDOM
 #undef CONFIG_AIO
@@ -41,3 +44,5 @@ void xenstore_store_serial_port_info(int i, struct CharDriverState *chr,
 
 extern unsigned long *logdirty_bitmap;
 extern unsigned long logdirty_bitmap_size;
+
+#endif /*XEN_CONFIG_HOST_H*/

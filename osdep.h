@@ -87,8 +87,6 @@ int qemu_write_ok(int fd, const void *buf, size_t count);
  /* Even more simplified versions which return 1 on success or -1 on
   * failure.  EOF counts as failure but then errno is set to 0. */
 
-void *get_mmap_addr(unsigned long size);
-
 int qemu_create_pidfile(const char *filename);
 
 #ifdef _WIN32

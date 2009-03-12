@@ -9,7 +9,7 @@ rm -f config-host.mak
 
 if test -f config-host.h; then mv config-host.h config-host.h~; fi
 
-./configure --disable-gfx-check --disable-gcc-check --disable-curses --disable-slirp "$@" --prefix=/usr
+./configure --disable-gfx-check --disable-curses --disable-slirp "$@" --prefix=/usr
 
 if [ -n "$CONFIG_STUBDOM" ]
 then
