@@ -8,7 +8,104 @@
 
 extern target_phys_addr_t pci_mem_base;
 
-/* see pci-ids.txt */
+/* Device classes and subclasses */
+
+#define PCI_CLASS_STORAGE_SCSI           0x0100
+#define PCI_CLASS_STORAGE_IDE            0x0101
+#define PCI_CLASS_STORAGE_OTHER          0x0180
+
+#define PCI_CLASS_NETWORK_ETHERNET       0x0200
+
+#define PCI_CLASS_DISPLAY_VGA            0x0300
+#define PCI_CLASS_DISPLAY_OTHER          0x0380
+
+#define PCI_CLASS_MULTIMEDIA_AUDIO       0x0401
+
+#define PCI_CLASS_MEMORY_RAM             0x0500
+
+#define PCI_CLASS_SYSTEM_OTHER           0x0880
+
+#define PCI_CLASS_SERIAL_USB             0x0c03
+
+#define PCI_CLASS_BRIDGE_HOST            0x0600
+#define PCI_CLASS_BRIDGE_ISA             0x0601
+#define PCI_CLASS_BRIDGE_PCI             0x0604
+#define PCI_CLASS_BRIDGE_OTHER           0x0680
+
+#define PCI_CLASS_PROCESSOR_CO           0x0b40
+
+#define PCI_CLASS_OTHERS                 0xff
+
+/* Vendors and devices. */
+
+#define PCI_VENDOR_ID_LSI_LOGIC          0x1000
+#define PCI_DEVICE_ID_LSI_53C895A        0x0012
+
+#define PCI_VENDOR_ID_DEC                0x1011
+#define PCI_DEVICE_ID_DEC_21154          0x0026
+
+#define PCI_VENDOR_ID_CIRRUS             0x1013
+
+#define PCI_VENDOR_ID_IBM                0x1014
+#define PCI_DEVICE_ID_IBM_OPENPIC2       0xffff
+
+#define PCI_VENDOR_ID_AMD                0x1022
+#define PCI_DEVICE_ID_AMD_LANCE          0x2000
+
+#define PCI_VENDOR_ID_HITACHI            0x1054
+
+#define PCI_VENDOR_ID_MOTOROLA           0x1057
+#define PCI_DEVICE_ID_MOTOROLA_MPC106    0x0002
+#define PCI_DEVICE_ID_MOTOROLA_RAVEN     0x4801
+
+#define PCI_VENDOR_ID_APPLE              0x106b
+#define PCI_DEVICE_ID_APPLE_343S1201     0x0010
+#define PCI_DEVICE_ID_APPLE_UNI_N_I_PCI  0x001e
+#define PCI_DEVICE_ID_APPLE_UNI_N_PCI    0x001f
+#define PCI_DEVICE_ID_APPLE_UNI_N_AGP    0x0020
+#define PCI_DEVICE_ID_APPLE_UNI_N_KEYL   0x0022
+
+#define PCI_VENDOR_ID_SUN                0x108e
+#define PCI_DEVICE_ID_SUN_EBUS           0x1000
+#define PCI_DEVICE_ID_SUN_SIMBA          0x5000
+#define PCI_DEVICE_ID_SUN_SABRE          0xa000
+
+#define PCI_VENDOR_ID_CMD                0x1095
+#define PCI_DEVICE_ID_CMD_646            0x0646
+
+#define PCI_VENDOR_ID_REALTEK            0x10ec
+#define PCI_DEVICE_ID_REALTEK_RTL8029    0x8029
+#define PCI_DEVICE_ID_REALTEK_8139       0x8139
+
+#define PCI_VENDOR_ID_XILINX             0x10ee
+
+#define PCI_VENDOR_ID_MARVELL            0x11ab
+
+#define PCI_VENDOR_ID_QEMU               0x1234
+#define PCI_DEVICE_ID_QEMU_VGA           0x1111
+
+#define PCI_VENDOR_ID_ENSONIQ            0x1274
+#define PCI_DEVICE_ID_ENSONIQ_ES1370     0x5000
+
+#define PCI_VENDOR_ID_VMWARE             0x15ad
+#define PCI_DEVICE_ID_VMWARE_SVGA2       0x0405
+#define PCI_DEVICE_ID_VMWARE_SVGA        0x0710
+#define PCI_DEVICE_ID_VMWARE_NET         0x0720
+#define PCI_DEVICE_ID_VMWARE_SCSI        0x0730
+#define PCI_DEVICE_ID_VMWARE_IDE         0x1729
+
+#define PCI_VENDOR_ID_INTEL              0x8086
+#define PCI_DEVICE_ID_INTEL_82441        0x1237
+#define PCI_DEVICE_ID_INTEL_82801AA_5    0x2415
+#define PCI_DEVICE_ID_INTEL_82371SB_0    0x7000
+#define PCI_DEVICE_ID_INTEL_82371SB_1    0x7010
+#define PCI_DEVICE_ID_INTEL_82371SB_2    0x7020
+#define PCI_DEVICE_ID_INTEL_82371AB_0    0x7110
+#define PCI_DEVICE_ID_INTEL_82371AB      0x7111
+#define PCI_DEVICE_ID_INTEL_82371AB_2    0x7112
+#define PCI_DEVICE_ID_INTEL_82371AB_3    0x7113
+
+/* Red Hat / Qumranet (for QEMU) -- see pci-ids.txt */
 #define PCI_VENDOR_ID_REDHAT_QUMRANET    0x1af4
 #define PCI_SUBVENDOR_ID_REDHAT_QUMRANET 0x1af4
 #define PCI_SUBDEVICE_ID_QEMU            0x1100
@@ -16,6 +113,7 @@ extern target_phys_addr_t pci_mem_base;
 #define PCI_DEVICE_ID_VIRTIO_NET         0x1000
 #define PCI_DEVICE_ID_VIRTIO_BLOCK       0x1001
 #define PCI_DEVICE_ID_VIRTIO_BALLOON     0x1002
+#define PCI_DEVICE_ID_VIRTIO_CONSOLE     0x1003
 
 typedef void PCIConfigWriteFunc(PCIDevice *pci_dev,
                                 uint32_t address, uint32_t data, int len);
@@ -131,7 +229,7 @@ int pci_bus_num(PCIBus *s);
 void pci_for_each_device(int bus_num, void (*fn)(PCIDevice *d));
 
 void pci_info(void);
-PCIBus *pci_bridge_init(PCIBus *bus, int devfn, uint32_t id,
+PCIBus *pci_bridge_init(PCIBus *bus, int devfn, uint16_t vid, uint16_t did,
                         pci_map_irq_fn map_irq, const char *name);
 
 /* PCI slot 6~7 support ACPI PCI hot plug */
@@ -155,13 +253,31 @@ int power_off_php_slot(int);
 void do_pci_add(char *devname);
 void do_pci_del(char *devname);
 
+static inline void
+pci_config_set_vendor_id(uint8_t *pci_config, uint16_t val)
+{
+    cpu_to_le16wu((uint16_t *)&pci_config[PCI_VENDOR_ID], val);
+}
+
+static inline void
+pci_config_set_device_id(uint8_t *pci_config, uint16_t val)
+{
+    cpu_to_le16wu((uint16_t *)&pci_config[PCI_DEVICE_ID], val);
+}
+
+static inline void
+pci_config_set_class(uint8_t *pci_config, uint16_t val)
+{
+    cpu_to_le16wu((uint16_t *)&pci_config[PCI_CLASS_DEVICE], val);
+}
+
 /* lsi53c895a.c */
 #define LSI_MAX_DEVS 7
 void lsi_scsi_attach(void *opaque, BlockDriverState *bd, int id);
 void *lsi_scsi_init(PCIBus *bus, int devfn);
 
 /* vmware_vga.c */
-void pci_vmsvga_init(PCIBus *bus, DisplayState *ds, uint8_t *vga_ram_base,
+void pci_vmsvga_init(PCIBus *bus, uint8_t *vga_ram_base,
                      unsigned long vga_ram_offset, int vga_ram_size);
 
 /* usb-uhci.c */

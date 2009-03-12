@@ -1164,7 +1164,7 @@ static int update_basic_params(VGAState *s)
 
 static inline int get_depth_index(DisplayState *s)
 {
-    switch(ds_get_bits_per_pixel(s)) {
+    switch(s->depth) {
     default:
     case 8:
         return 0;
@@ -1173,7 +1173,10 @@ static inline int get_depth_index(DisplayState *s)
     case 16:
         return 2;
     case 32:
-        return 3;
+        if (s->bgr)
+            return 4;
+        else
+            return 3;
     }
 }
 
@@ -1270,18 +1273,18 @@ static void vga_draw_text(VGAState *s, int full_update)
         return;
     }
 
+    s->last_scr_width = width * cw;
+    s->last_scr_height = height * cheight;
     if (width != s->last_width || height != s->last_height ||
         cw != s->last_cw || cheight != s->last_ch || s->last_depth) {
-        s->last_scr_width = width * cw;
-        s->last_scr_height = height * cheight;
-        qemu_console_resize(s->ds, s->last_scr_width, s->last_scr_height);
+        dpy_resize(s->ds, s->last_scr_width, s->last_scr_height);
         s->last_depth = 0;
-        s->last_width = width;
-        s->last_height = height;
-        s->last_ch = cheight;
-        s->last_cw = cw;
         full_update = 1;
     }
+    s->last_width = width;
+    s->last_height = height;
+    s->last_ch = cheight;
+    s->last_cw = cw;
 
     s->rgb_to_pixel = 
         rgb_to_pixel_dup_table[get_depth_index(s->ds)];
@@ -1289,7 +1292,7 @@ static void vga_draw_text(VGAState *s, int full_update)
     full_update |= update_palette16(s);
     palette = s->last_palette;
     
-    x_incr = cw * ds_get_bytes_per_pixel(s->ds);
+    x_incr = cw * ((s->ds->depth + 7) >> 3);
     /* compute font data address (in plane 2) */
     v = s->sr[3];
     offset = (((v >> 4) & 1) | ((v << 1) & 6)) * 8192 * 4 + 2;
@@ -1323,7 +1326,7 @@ static void vga_draw_text(VGAState *s, int full_update)
         cw = 9;
     if (s->sr[1] & 0x08)
         cw = 16; /* NOTE: no 18 pixel wide */
-    x_incr = cw * ds_get_bytes_per_pixel(s->ds);
+    x_incr = cw * ((s->ds->depth + 7) >> 3);
     width = (s->cr[0x01] + 1);
     if (s->cr[0x06] == 100) {
         /* ugly hack for CGA 160x100x16 - explain me the logic */
@@ -1343,7 +1346,7 @@ static void vga_draw_text(VGAState *s, int full_update)
         cw != s->last_cw || cheight != s->last_ch) {
         s->last_scr_width = width * cw;
         s->last_scr_height = height * cheight;
-        qemu_console_resize(s->ds, s->last_scr_width, s->last_scr_height);
+        qemu_console_resize(s->console, s->last_scr_width, s->last_scr_height);
         s->last_width = width;
         s->last_height = height;
         s->last_ch = cheight;
@@ -1373,8 +1376,8 @@ static void vga_draw_text(VGAState *s, int full_update)
         vga_draw_glyph8 = vga_draw_glyph8_table[depth_index];
     vga_draw_glyph9 = vga_draw_glyph9_table[depth_index];
 
-    dest = ds_get_data(s->ds);
-    linesize = ds_get_linesize(s->ds);
+    dest = s->ds->data;
+    linesize = s->ds->linesize;
     ch_attr_ptr = s->last_ch_attr;
     for(cy = 0; cy < height; cy++) {
         d1 = dest;
@@ -1616,43 +1619,31 @@ static void vga_draw_graphic(VGAState *s, int full_update)
         disp_width <<= 1;
     }
 
-    ds_depth = ds_get_bits_per_pixel(s->ds);
+    ds_depth = s->ds->depth;
     depth = s->get_bpp(s);
-    if (s->line_offset != s->last_line_offset || 
-        disp_width != s->last_width ||
-        height != s->last_height ||
-        s->last_depth != depth) {
-#if defined(WORDS_BIGENDIAN) == defined(TARGET_WORDS_BIGENDIAN)
-        if (depth == 16 || depth == 32) {
-#else
-        if (depth == 32) {
-#endif
-            if (is_graphic_console()) {
-                qemu_free_displaysurface(s->ds);
-                s->ds->surface = qemu_create_displaysurface_from(disp_width, height, depth,
-                                                               s->line_offset,
-                                                               s->vram_ptr + (s->start_addr * 4));
-#if defined(WORDS_BIGENDIAN) != defined(TARGET_WORDS_BIGENDIAN)
-                s->ds->surface->pf = qemu_different_endianness_pixelformat(depth);
-#endif
-                dpy_resize(s->ds);
-            } else {
-                qemu_console_resize(s->ds, disp_width, height);
-            }
-        } else {
-            qemu_console_resize(s->ds, disp_width, height);
-        }
+    if (s->ds->dpy_resize_shared) {
+        if (s->line_offset != s->last_line_offset || 
+            disp_width != s->last_width ||
+            height != s->last_height ||
+            s->last_depth != depth) {
+            dpy_resize_shared(s->ds, disp_width, height, depth, s->line_offset, s->vram_ptr + (s->start_addr * 4));
+            s->last_scr_width = disp_width;
+            s->last_scr_height = height;
+            s->last_width = disp_width;
+            s->last_height = height;
+            s->last_line_offset = s->line_offset;
+            s->last_depth = depth;
+            full_update = 1;
+        } else if (s->ds->shared_buf && (full_update || s->ds->data != s->vram_ptr + (s->start_addr * 4)))
+            s->ds->dpy_setdata(s->ds, s->vram_ptr + (s->start_addr * 4));
+    } else if (disp_width != s->last_width ||
+               height != s->last_height) {
+        dpy_resize(s->ds, disp_width, height);
         s->last_scr_width = disp_width;
         s->last_scr_height = height;
         s->last_width = disp_width;
         s->last_height = height;
-        s->last_line_offset = s->line_offset;
-        s->last_depth = depth;
         full_update = 1;
-    } else if (is_graphic_console() && is_buffer_shared(s->ds->surface) &&
-               (full_update || s->ds->surface->data != s->vram_ptr + (s->start_addr * 4))) {
-        s->ds->surface->data = s->vram_ptr + (s->start_addr * 4);
-        dpy_setdata(s->ds);
     }
 
     s->rgb_to_pixel = 
@@ -1707,7 +1698,7 @@ static void vga_draw_graphic(VGAState *s, int full_update)
     }
 
     vga_draw_line = vga_draw_line_table[v * NB_DEPTHS + get_depth_index(s->ds)];
-    if (!is_buffer_shared(s->ds->surface) && s->cursor_invalidate)
+    if (!s->ds->shared_buf && s->cursor_invalidate)
         s->cursor_invalidate(s);
 
     line_offset = s->line_offset;
@@ -1768,8 +1759,8 @@ static void vga_draw_graphic(VGAState *s, int full_update)
     y_start = -1;
     page_min = 0;
     page_max = 0;
-    d = ds_get_data(s->ds);
-    linesize = ds_get_linesize(s->ds);
+    d = s->ds->data;
+    linesize = s->ds->linesize;
     y1 = 0;
     for(y = 0; y < height; y++) {
         addr = addr1;
@@ -1801,7 +1792,7 @@ static void vga_draw_graphic(VGAState *s, int full_update)
                 page_min = page0;
             if (page_max == 0 || page1 > page_max)
                 page_max = page1;
-            if (!is_buffer_shared(s->ds->surface)) {
+            if (!s->ds->shared_buf) {
                 vga_draw_line(s, d, s->vram_ptr + addr, width);
                 if (s->cursor_draw_line)
                     s->cursor_draw_line(s, d, y);
@@ -1856,15 +1847,15 @@ static void vga_draw_blank(VGAState *s, int full_update)
 
     s->rgb_to_pixel =
         rgb_to_pixel_dup_table[get_depth_index(s->ds)];
-    if (ds_get_bits_per_pixel(s->ds) == 8)
+    if (s->ds->depth == 8)
         val = s->rgb_to_pixel(0, 0, 0);
     else
         val = 0;
-    w = s->last_scr_width * ds_get_bytes_per_pixel(s->ds);
-    d = ds_get_data(s->ds);
+    w = s->last_scr_width * ((s->ds->depth + 7) >> 3);
+    d = s->ds->data;
     for(i = 0; i < s->last_scr_height; i++) {
         memset(d, val, w);
-        d += ds_get_linesize(s->ds);
+        d += s->ds->linesize;
     }
     dpy_update(s->ds, 0, 0,
                s->last_scr_width, s->last_scr_height);
@@ -1879,7 +1870,7 @@ static void vga_update_display(void *opaque)
     VGAState *s = (VGAState *)opaque;
     int full_update, graphic_mode;
 
-    if (ds_get_bits_per_pixel(s->ds) == 0) {
+    if (s->ds->depth == 0) {
         /* nothing to do */
     } else {
         full_update = 0;
@@ -1989,9 +1980,7 @@ static void vga_update_text(void *opaque, console_ch_t *chardata)
             cw != s->last_cw || cheight != s->last_ch) {
             s->last_scr_width = width * cw;
             s->last_scr_height = height * cheight;
-            s->ds->surface->width = width;
-            s->ds->surface->height = height;
-            dpy_resize(s->ds);
+            qemu_console_resize(s->console, width, height);
             s->last_width = width;
             s->last_height = height;
             s->last_ch = cheight;
@@ -2072,9 +2061,7 @@ static void vga_update_text(void *opaque, console_ch_t *chardata)
     s->last_width = 60;
     s->last_height = height = 3;
     dpy_cursor(s->ds, -1, -1);
-    s->ds->surface->width = s->last_width;
-    s->ds->surface->height = height;
-    dpy_resize(s->ds);
+    qemu_console_resize(s->console, s->last_width, height);
 
     for (dst = chardata, i = 0; i < s->last_width * height; i ++)
         console_write_ch(dst ++, ' ');
@@ -2497,12 +2484,12 @@ void xen_vga_vram_map(uint64_t vram_addr, uint32_t vga_ram_size)
 
     xen_vga_state->vram_ptr = vram;
 #ifdef CONFIG_STUBDOM
-    xenfb_pv_display_vram(vram);
+    xenfb_pv_display_start(vram);
 #endif
 }
 
 /* when used on xen environment, the vga_ram_base is not used */
-void vga_common_init(VGAState *s, uint8_t *vga_ram_base,
+void vga_common_init(VGAState *s, DisplayState *ds, uint8_t *vga_ram_base,
                      unsigned long vga_ram_offset, int vga_ram_size)
 {
     int i, j, v, b;
@@ -2535,17 +2522,19 @@ void vga_common_init(VGAState *s, uint8_t *vga_ram_base,
     xen_vga_state = s;
     s->vram_offset = vga_ram_offset;
     s->vram_size = vga_ram_size;
+    s->ds = ds;
+    ds->palette = s->last_palette;
     s->get_bpp = vga_get_bpp;
     s->get_offsets = vga_get_offsets;
     s->get_resolution = vga_get_resolution;
-
-    s->ds = graphic_console_init(vga_update_display, vga_invalidate_display,
-                                 vga_screen_dump, vga_update_text, s);
 
     if (!restore) {
         xen_vga_populate_vram(VRAM_RESERVED_ADDRESS, s->vram_size);
         s->vram_gmfn = VRAM_RESERVED_ADDRESS;
     }
+
+    graphic_console_init(s->ds, vga_update_display, vga_invalidate_display,
+                         vga_screen_dump, vga_update_text, s);
 
     vga_bios_init(s);
     switch (vga_retrace_method) {
@@ -2614,7 +2603,7 @@ static void vga_init(VGAState *s)
                                  vga_io_memory);
 }
 
-int isa_vga_init(uint8_t *vga_ram_base,
+int isa_vga_init(DisplayState *ds, uint8_t *vga_ram_base,
                  unsigned long vga_ram_offset, int vga_ram_size)
 {
     VGAState *s;
@@ -2628,7 +2617,7 @@ int isa_vga_init(uint8_t *vga_ram_base,
         vga_ram_size = 16*1024*1024;
     }
 
-    vga_common_init(s, vga_ram_base, vga_ram_offset, vga_ram_size);
+    vga_common_init(s, ds, vga_ram_base, vga_ram_offset, vga_ram_size);
     vga_init(s);
 
 #ifdef CONFIG_BOCHS_VBE
@@ -2639,7 +2628,7 @@ int isa_vga_init(uint8_t *vga_ram_base,
     return 0;
 }
 
-int pci_vga_init(PCIBus *bus, uint8_t *vga_ram_base,
+int pci_vga_init(PCIBus *bus, DisplayState *ds, uint8_t *vga_ram_base,
                  unsigned long vga_ram_offset, int vga_ram_size,
                  unsigned long vga_bios_offset, int vga_bios_size)
 {
@@ -2659,7 +2648,7 @@ int pci_vga_init(PCIBus *bus, uint8_t *vga_ram_base,
         vga_ram_size = 16*1024*1024;
     }
 
-    vga_common_init(s, vga_ram_base, vga_ram_offset, vga_ram_size);
+    vga_common_init(s, ds, vga_ram_base, vga_ram_offset, vga_ram_size);
     vga_init(s);
     s->pci_dev = &d->dev;
 
@@ -2697,52 +2686,49 @@ int pci_vga_init(PCIBus *bus, uint8_t *vga_ram_base,
 /********************************************************/
 /* vga screen dump */
 
+static int vga_save_w, vga_save_h;
+
 static void vga_save_dpy_update(DisplayState *s,
                                 int x, int y, int w, int h)
 {
 }
 
-static void vga_save_dpy_resize(DisplayState *s)
+static void vga_save_dpy_resize(DisplayState *s, int w, int h)
 {
+    s->linesize = w * 4;
+    s->data = qemu_mallocz(h * s->linesize);
+    vga_save_w = w;
+    vga_save_h = h;
 }
 
 static void vga_save_dpy_refresh(DisplayState *s)
 {
 }
 
-int ppm_save(const char *filename, struct DisplaySurface *ds)
+static int ppm_save(const char *filename, uint8_t *data,
+                    int w, int h, int linesize)
 {
     FILE *f;
     uint8_t *d, *d1;
-    uint32_t v;
+    unsigned int v;
     int y, x;
-    uint8_t r, g, b;
 
     f = fopen(filename, "wb");
     if (!f)
         return -1;
     fprintf(f, "P6\n%d %d\n%d\n",
-            ds->width, ds->height, 255);
-    d1 = ds->data;
-    for(y = 0; y < ds->height; y++) {
+            w, h, 255);
+    d1 = data;
+    for(y = 0; y < h; y++) {
         d = d1;
-        for(x = 0; x < ds->width; x++) {
-            if (ds->pf.bits_per_pixel == 32)
-                v = *(uint32_t *)d;
-            else
-                v = (uint32_t) (*(uint16_t *)d);
-            r = ((v >> ds->pf.rshift) & ds->pf.rmax) * 256 /
-                (ds->pf.rmax + 1);
-            g = ((v >> ds->pf.gshift) & ds->pf.gmax) * 256 /
-                (ds->pf.gmax + 1);
-            b = ((v >> ds->pf.bshift) & ds->pf.bmax) * 256 /
-                (ds->pf.bmax + 1);
-            fputc(r, f);
-            fputc(g, f);
-            fputc(b, f);
-            d += ds->pf.bytes_per_pixel;
+        for(x = 0; x < w; x++) {
+            v = *(uint32_t *)d;
+            fputc((v >> 16) & 0xff, f);
+            fputc((v >> 8) & 0xff, f);
+            fputc((v) & 0xff, f);
+            d += 4;
         }
-        d1 += ds->linesize;
+        d1 += linesize;
     }
     fclose(f);
     return 0;
@@ -2754,29 +2740,25 @@ static void vga_screen_dump(void *opaque, const char *filename)
 {
     VGAState *s = (VGAState *)opaque;
     DisplayState *saved_ds, ds1, *ds = &ds1;
-    DisplayChangeListener dcl;
-    int w, h;
-
-    s->get_resolution(s, &w, &h);
 
     /* XXX: this is a little hackish */
     vga_invalidate_display(s);
     saved_ds = s->ds;
 
     memset(ds, 0, sizeof(DisplayState));
-    memset(&dcl, 0, sizeof(DisplayChangeListener));
-    dcl.dpy_update = vga_save_dpy_update;
-    dcl.dpy_resize = vga_save_dpy_resize;
-    dcl.dpy_refresh = vga_save_dpy_refresh;
-    register_displaychangelistener(ds, &dcl);
-    ds->surface = qemu_create_displaysurface(ds, w, h, 32, 4 * w);
- 
+    ds->dpy_update = vga_save_dpy_update;
+    ds->dpy_resize = vga_save_dpy_resize;
+    ds->dpy_refresh = vga_save_dpy_refresh;
+    ds->depth = 32;
+
     s->ds = ds;
     s->graphic_mode = -1;
     vga_update_display(s);
 
-    ppm_save(filename, ds->surface);
-
-    qemu_free_displaysurface(ds);
+    if (ds->data) {
+        ppm_save(filename, ds->data, vga_save_w, vga_save_h,
+                 s->ds->linesize);
+        qemu_free(ds->data);
+    }
     s->ds = saved_ds;
 }

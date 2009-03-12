@@ -43,10 +43,7 @@
 //#define DO_PPC_STATISTICS
 
 #ifdef PPC_DEBUG_DISAS
-#  define LOG_DISAS(...) do {            \
-     if (loglevel & CPU_LOG_TB_IN_ASM)   \
-       fprintf(logfile, ## __VA_ARGS__); \
-   } while (0)
+#  define LOG_DISAS(...) qemu_log_mask(CPU_LOG_TB_IN_ASM, ## __VA_ARGS__)
 #else
 #  define LOG_DISAS(...) do { } while (0)
 #endif
@@ -3900,10 +3897,8 @@ static always_inline void gen_op_mfspr (DisasContext *ctx)
              * allowing userland application to read the PVR
              */
             if (sprn != SPR_PVR) {
-                if (loglevel != 0) {
-                    fprintf(logfile, "Trying to read privileged spr %d %03x at "
+                qemu_log("Trying to read privileged spr %d %03x at "
                             ADDRX "\n", sprn, sprn, ctx->nip);
-                }
                 printf("Trying to read privileged spr %d %03x at " ADDRX "\n",
                        sprn, sprn, ctx->nip);
             }
@@ -3911,10 +3906,8 @@ static always_inline void gen_op_mfspr (DisasContext *ctx)
         }
     } else {
         /* Not defined */
-        if (loglevel != 0) {
-            fprintf(logfile, "Trying to read invalid spr %d %03x at "
+        qemu_log("Trying to read invalid spr %d %03x at "
                     ADDRX "\n", sprn, sprn, ctx->nip);
-        }
         printf("Trying to read invalid spr %d %03x at " ADDRX "\n",
                sprn, sprn, ctx->nip);
         gen_inval_exception(ctx, POWERPC_EXCP_INVAL_SPR);
@@ -4046,20 +4039,16 @@ GEN_HANDLER(mtspr, 0x1F, 0x13, 0x0E, 0x00000001, PPC_MISC)
             (*write_cb)(ctx, sprn, rS(ctx->opcode));
         } else {
             /* Privilege exception */
-            if (loglevel != 0) {
-                fprintf(logfile, "Trying to write privileged spr %d %03x at "
+            qemu_log("Trying to write privileged spr %d %03x at "
                         ADDRX "\n", sprn, sprn, ctx->nip);
-            }
             printf("Trying to write privileged spr %d %03x at " ADDRX "\n",
                    sprn, sprn, ctx->nip);
             gen_inval_exception(ctx, POWERPC_EXCP_PRIV_REG);
         }
     } else {
         /* Not defined */
-        if (loglevel != 0) {
-            fprintf(logfile, "Trying to write invalid spr %d %03x at "
+        qemu_log("Trying to write invalid spr %d %03x at "
                     ADDRX "\n", sprn, sprn, ctx->nip);
-        }
         printf("Trying to write invalid spr %d %03x at " ADDRX "\n",
                sprn, sprn, ctx->nip);
         gen_inval_exception(ctx, POWERPC_EXCP_INVAL_SPR);
@@ -6274,20 +6263,19 @@ GEN_HANDLER(mfvscr, 0x04, 0x2, 0x18, 0x001ff800, PPC_ALTIVEC)
     t = tcg_temp_new_i32();
     tcg_gen_ld_i32(t, cpu_env, offsetof(CPUState, vscr));
     tcg_gen_extu_i32_i64(cpu_avrl[rD(ctx->opcode)], t);
-    tcg_temp_free(t);
+    tcg_temp_free_i32(t);
 }
 
 GEN_HANDLER(mtvscr, 0x04, 0x2, 0x19, 0x03ff0000, PPC_ALTIVEC)
 {
-    TCGv_i32 t;
+    TCGv_ptr p;
     if (unlikely(!ctx->altivec_enabled)) {
         gen_exception(ctx, POWERPC_EXCP_VPU);
         return;
     }
-    t = tcg_temp_new_i32();
-    tcg_gen_trunc_i64_i32(t, cpu_avrl[rD(ctx->opcode)]);
-    tcg_gen_st_i32(t, cpu_env, offsetof(CPUState, vscr));
-    tcg_temp_free_i32(t);
+    p = gen_avr_ptr(rD(ctx->opcode));
+    gen_helper_mtvscr(p);
+    tcg_temp_free_ptr(p);
 }
 
 /* Logical operations */
@@ -6480,6 +6468,11 @@ GEN_VXFORM_NOA(vupklsb, 7, 10);
 GEN_VXFORM_NOA(vupklsh, 7, 11);
 GEN_VXFORM_NOA(vupkhpx, 7, 13);
 GEN_VXFORM_NOA(vupklpx, 7, 15);
+GEN_VXFORM_NOA(vrlogefp, 5, 7);
+GEN_VXFORM_NOA(vrfim, 5, 8);
+GEN_VXFORM_NOA(vrfin, 5, 9);
+GEN_VXFORM_NOA(vrfip, 5, 10);
+GEN_VXFORM_NOA(vrfiz, 5, 11);
 
 #define GEN_VXFORM_SIMM(name, opc2, opc3)                               \
     GEN_HANDLER(name, 0x04, opc2, opc3, 0x00000000, PPC_ALTIVEC)        \
@@ -6518,11 +6511,13 @@ GEN_VXFORM_NOA(vupklpx, 7, 15);
 GEN_VXFORM_UIMM(vspltb, 6, 8);
 GEN_VXFORM_UIMM(vsplth, 6, 9);
 GEN_VXFORM_UIMM(vspltw, 6, 10);
+GEN_VXFORM_UIMM(vcfux, 5, 12);
+GEN_VXFORM_UIMM(vcfsx, 5, 13);
 
 GEN_HANDLER(vsldoi, 0x04, 0x16, 0xFF, 0x00000400, PPC_ALTIVEC)
 {
     TCGv_ptr ra, rb, rd;
-    TCGv sh;
+    TCGv_i32 sh;
     if (unlikely(!ctx->altivec_enabled)) {
         gen_exception(ctx, POWERPC_EXCP_VPU);
         return;
@@ -6535,7 +6530,7 @@ GEN_HANDLER(vsldoi, 0x04, 0x16, 0xFF, 0x00000400, PPC_ALTIVEC)
     tcg_temp_free_ptr(ra);
     tcg_temp_free_ptr(rb);
     tcg_temp_free_ptr(rd);
-    tcg_temp_free(sh);
+    tcg_temp_free_i32(sh);
 }
 
 #define GEN_VAFORM_PAIRED(name0, name1, opc2)                           \
@@ -8267,11 +8262,11 @@ static always_inline void gen_intermediate_code_internal (CPUState *env,
         }
         /* Is opcode *REALLY* valid ? */
         if (unlikely(handler->handler == &gen_invalid)) {
-            if (loglevel != 0) {
-                fprintf(logfile, "invalid/unsupported opcode: "
-                        "%02x - %02x - %02x (%08x) " ADDRX " %d\n",
-                        opc1(ctx.opcode), opc2(ctx.opcode),
-                        opc3(ctx.opcode), ctx.opcode, ctx.nip - 4, (int)msr_ir);
+            if (qemu_log_enabled()) {
+                qemu_log("invalid/unsupported opcode: "
+                          "%02x - %02x - %02x (%08x) " ADDRX " %d\n",
+                          opc1(ctx.opcode), opc2(ctx.opcode),
+                          opc3(ctx.opcode), ctx.opcode, ctx.nip - 4, (int)msr_ir);
             } else {
                 printf("invalid/unsupported opcode: "
                        "%02x - %02x - %02x (%08x) " ADDRX " %d\n",
@@ -8280,12 +8275,12 @@ static always_inline void gen_intermediate_code_internal (CPUState *env,
             }
         } else {
             if (unlikely((ctx.opcode & handler->inval) != 0)) {
-                if (loglevel != 0) {
-                    fprintf(logfile, "invalid bits: %08x for opcode: "
-                            "%02x - %02x - %02x (%08x) " ADDRX "\n",
-                            ctx.opcode & handler->inval, opc1(ctx.opcode),
-                            opc2(ctx.opcode), opc3(ctx.opcode),
-                            ctx.opcode, ctx.nip - 4);
+                if (qemu_log_enabled()) {
+                    qemu_log("invalid bits: %08x for opcode: "
+                              "%02x - %02x - %02x (%08x) " ADDRX "\n",
+                              ctx.opcode & handler->inval, opc1(ctx.opcode),
+                              opc2(ctx.opcode), opc3(ctx.opcode),
+                              ctx.opcode, ctx.nip - 4);
                 } else {
                     printf("invalid bits: %08x for opcode: "
                            "%02x - %02x - %02x (%08x) " ADDRX "\n",
@@ -8343,17 +8338,15 @@ static always_inline void gen_intermediate_code_internal (CPUState *env,
         tb->icount = num_insns;
     }
 #if defined(DEBUG_DISAS)
-    if (loglevel & CPU_LOG_TB_CPU) {
-        fprintf(logfile, "---------------- excp: %04x\n", ctx.exception);
-        cpu_dump_state(env, logfile, fprintf, 0);
-    }
-    if (loglevel & CPU_LOG_TB_IN_ASM) {
+    qemu_log_mask(CPU_LOG_TB_CPU, "---------------- excp: %04x\n", ctx.exception);
+    log_cpu_state_mask(CPU_LOG_TB_CPU, env, 0);
+    if (qemu_loglevel_mask(CPU_LOG_TB_IN_ASM)) {
         int flags;
         flags = env->bfd_mach;
         flags |= ctx.le_mode << 16;
-        fprintf(logfile, "IN: %s\n", lookup_symbol(pc_start));
-        target_disas(logfile, pc_start, ctx.nip - pc_start, flags);
-        fprintf(logfile, "\n");
+        qemu_log("IN: %s\n", lookup_symbol(pc_start));
+        log_target_disas(pc_start, ctx.nip - pc_start, flags);
+        qemu_log("\n");
     }
 #endif
 }

@@ -184,6 +184,11 @@ void cpu_dump_state(CPUState * env, FILE * f,
 
 static void cpu_sh4_reset(CPUSH4State * env)
 {
+    if (qemu_loglevel_mask(CPU_LOG_RESET)) {
+        qemu_log("CPU Reset (CPU %d)\n", env->cpu_index);
+        log_cpu_state(env, 0);
+    }
+
 #if defined(CONFIG_USER_ONLY)
     env->sr = 0;
 #else
@@ -1840,11 +1845,9 @@ gen_intermediate_code_internal(CPUState * env, TranslationBlock * tb,
     ctx.features = env->features;
 
 #ifdef DEBUG_DISAS
-    if (loglevel & CPU_LOG_TB_CPU) {
-	fprintf(logfile,
-		"------------------------------------------------\n");
-	cpu_dump_state(env, logfile, fprintf, 0);
-    }
+    qemu_log_mask(CPU_LOG_TB_CPU,
+                 "------------------------------------------------\n");
+    log_cpu_state_mask(CPU_LOG_TB_CPU, env, 0);
 #endif
 
     ii = -1;
@@ -1937,13 +1940,12 @@ gen_intermediate_code_internal(CPUState * env, TranslationBlock * tb,
 
 #ifdef DEBUG_DISAS
 #ifdef SH4_DEBUG_DISAS
-    if (loglevel & CPU_LOG_TB_IN_ASM)
-	fprintf(logfile, "\n");
+    qemu_log_mask(CPU_LOG_TB_IN_ASM, "\n");
 #endif
-    if (loglevel & CPU_LOG_TB_IN_ASM) {
-	fprintf(logfile, "IN:\n");	/* , lookup_symbol(pc_start)); */
-	target_disas(logfile, pc_start, ctx.pc - pc_start, 0);
-	fprintf(logfile, "\n");
+    if (qemu_loglevel_mask(CPU_LOG_TB_IN_ASM)) {
+	qemu_log("IN:\n");	/* , lookup_symbol(pc_start)); */
+	log_target_disas(pc_start, ctx.pc - pc_start, 0);
+	qemu_log("\n");
     }
 #endif
 }

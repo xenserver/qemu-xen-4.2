@@ -9,6 +9,24 @@
 
 #include "qemu-xen.h"
 
+
+/* Max number of PCI emulation */
+#define MAX_PCI_EMULATION 32
+
+int restore;
+#ifdef CONFIG_OPENGL
+int opengl_enabled = 1;
+#else
+int opengl_enabled = 0;
+#endif
+static const char *direct_pci;
+static int nb_pci_emulation = 0;
+static char pci_emulation_config_text[MAX_PCI_EMULATION][256];
+PCI_EMULATION_INFO *PciEmulationInfoHead = NULL;
+
+int vncunused;
+
+
 /* We use simpler state save/load functions for Xen */
 
 void do_savevm(const char *name)

@@ -83,8 +83,9 @@ void i8042_mm_init(qemu_irq kbd_irq, qemu_irq mouse_irq,
 
 typedef struct RTCState RTCState;
 
-RTCState *rtc_init(int base, qemu_irq irq);
-RTCState *rtc_mm_init(target_phys_addr_t base, int it_shift, qemu_irq irq);
+RTCState *rtc_init(int base, qemu_irq irq, int base_year);
+RTCState *rtc_mm_init(target_phys_addr_t base, int it_shift, qemu_irq irq,
+                      int base_year);
 void rtc_set_memory(RTCState *s, int addr, int val);
 void rtc_set_date(RTCState *s, const struct tm *tm);
 void cmos_set_s3_resume(void);
@@ -130,6 +131,12 @@ enum vga_retrace_method {
 
 extern enum vga_retrace_method vga_retrace_method;
 
+#ifndef TARGET_SPARC
+#define VGA_RAM_SIZE (8192 * 1024)
+#else
+#define VGA_RAM_SIZE (9 * 1024 * 1024)
+#endif
+
 int isa_vga_init(DisplayState *ds, uint8_t *vga_ram_base,
                  unsigned long vga_ram_offset, int vga_ram_size);
 int pci_vga_init(PCIBus *bus, DisplayState *ds, uint8_t *vga_ram_base,
@@ -141,9 +148,9 @@ int isa_vga_mm_init(DisplayState *ds, uint8_t *vga_ram_base,
                     int it_shift);
 
 /* cirrus_vga.c */
-void pci_cirrus_vga_init(PCIBus *bus, DisplayState *ds, uint8_t *vga_ram_base,
+void pci_cirrus_vga_init(PCIBus *bus, uint8_t *vga_ram_base,
                          ram_addr_t vga_ram_offset, int vga_ram_size);
-void isa_cirrus_vga_init(DisplayState *ds, uint8_t *vga_ram_base,
+void isa_cirrus_vga_init(uint8_t *vga_ram_base,
                          ram_addr_t vga_ram_offset, int vga_ram_size);
 
 /* ide.c */

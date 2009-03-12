@@ -77,6 +77,7 @@ QEMUMachine xenpv_machine = {
     xen_init_pv,
     BIOS_SIZE | RAMSIZE_FIXED,
     .max_cpus = 1,
+    .nodisk_ok = 1,
 };
 
 /*

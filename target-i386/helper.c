@@ -55,7 +55,7 @@ static void add_flagname_to_bitmaps(char *flagname, uint32_t *features,
     };
     static const char *ext2_feature_name[] = {
        "fpu", "vme", "de", "pse", "tsc", "msr", "pae", "mce",
-       "cx8" /* AMD CMPXCHG8B */, "apic", NULL, "syscall", "mttr", "pge", "mca", "cmov",
+       "cx8" /* AMD CMPXCHG8B */, "apic", NULL, "syscall", "mtrr", "pge", "mca", "cmov",
        "pat", "pse36", NULL, NULL /* Linux mp */, "nx" /* Intel xd */, NULL, "mmxext", "mmx",
        "fxsr", "fxsr_opt" /* AMD ffxsr */, "pdpe1gb" /* AMD Page1GB */, "rdtscp", NULL, "lm" /* Intel 64 */, "3dnowext", "3dnow",
     };
@@ -135,6 +135,34 @@ static x86_def_t x86_defs[] = {
         .ext3_features = CPUID_EXT3_SVM,
         .xlevel = 0x8000000A,
         .model_id = "QEMU Virtual CPU version " QEMU_VERSION,
+    },
+    {
+        .name = "phenom",
+        .level = 5,
+        .vendor1 = CPUID_VENDOR_AMD_1,
+        .vendor2 = CPUID_VENDOR_AMD_2,
+        .vendor3 = CPUID_VENDOR_AMD_3,
+        .family = 16,
+        .model = 2,
+        .stepping = 3,
+        /* Missing: CPUID_VME, CPUID_HT */
+        .features = PPRO_FEATURES | 
+            CPUID_MTRR | CPUID_CLFLUSH | CPUID_MCA |
+            CPUID_PSE36,
+        /* Missing: CPUID_EXT_CX16, CPUID_EXT_POPCNT */
+        .ext_features = CPUID_EXT_SSE3 | CPUID_EXT_MONITOR,
+        /* Missing: CPUID_EXT2_PDPE1GB, CPUID_EXT2_RDTSCP */
+        .ext2_features = (PPRO_FEATURES & 0x0183F3FF) | 
+            CPUID_EXT2_LM | CPUID_EXT2_SYSCALL | CPUID_EXT2_NX |
+            CPUID_EXT2_3DNOW | CPUID_EXT2_3DNOWEXT | CPUID_EXT2_MMXEXT |
+            CPUID_EXT2_FFXSR,
+        /* Missing: CPUID_EXT3_LAHF_LM, CPUID_EXT3_CMP_LEG, CPUID_EXT3_EXTAPIC,
+                    CPUID_EXT3_CR8LEG, CPUID_EXT3_ABM, CPUID_EXT3_SSE4A,
+                    CPUID_EXT3_MISALIGNSSE, CPUID_EXT3_3DNOWPREFETCH,
+                    CPUID_EXT3_OSVW, CPUID_EXT3_IBS */
+        .ext3_features = CPUID_EXT3_SVM,
+        .xlevel = 0x8000001A,
+        .model_id = "AMD Phenom(tm) 9550 Quad-Core Processor"
     },
     {
         .name = "core2duo",
@@ -417,6 +445,11 @@ static int cpu_x86_register (CPUX86State *env, const char *cpu_model)
 void cpu_reset(CPUX86State *env)
 {
     int i;
+
+    if (qemu_loglevel_mask(CPU_LOG_RESET)) {
+        qemu_log("CPU Reset (CPU %d)\n", env->cpu_index);
+        log_cpu_state(env, X86_DUMP_FPU | X86_DUMP_CCOP);
+    }
 
     memset(env, 0, offsetof(CPUX86State, breakpoints));
 

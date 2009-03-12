@@ -59,7 +59,6 @@ struct vmsvga_state_s {
 
 #ifndef EMBED_STDVGA
     DisplayState *ds;
-    QEMUConsole *console;
     int vram_size;
     ram_addr_t vram_offset;
 #endif
@@ -386,7 +385,7 @@ static inline void vmsvga_copy_rect(struct vmsvga_state_s *s,
 
 # ifdef DIRECT_VRAM
     if (s->ds->dpy_copy)
-        qemu_console_copy(s->console, x0, y0, x1, y1, w, h);
+        qemu_console_copy(s->ds, x0, y0, x1, y1, w, h);
     else
 # endif
     {
@@ -879,7 +878,7 @@ static inline void vmsvga_size(struct vmsvga_state_s *s)
     if (s->new_width != s->width || s->new_height != s->height) {
         s->width = s->new_width;
         s->height = s->new_height;
-        qemu_console_resize(s->console, s->width, s->height);
+        qemu_console_resize(s->ds, s->width, s->height);
         s->invalidated = 1;
     }
 }
@@ -917,7 +916,7 @@ static void vmsvga_reset(struct vmsvga_state_s *s)
     s->width = -1;
     s->height = -1;
     s->svgaid = SVGA_ID;
-    s->depth = ds_get_bits_per_pixel(s->ds) ? ds_get_bits_per_pixel(s->ds) : 24;
+    s->depth = 24;
     s->bypp = (s->depth + 7) >> 3;
     s->cursor.on = 0;
     s->redraw_fifo_first = 0;
@@ -978,7 +977,10 @@ static void vmsvga_screen_dump(void *opaque, const char *filename)
     }
 
     if (s->depth == 32) {
-        ppm_save(filename, s->vram, s->width, s->height, ds_get_linesize(s->ds));
+        DisplaySurface *ds = qemu_create_displaysurface_from(s->width,
+                s->height, 32, ds_get_linesize(s->ds), s->vram);
+        ppm_save(filename, ds);
+        qemu_free(ds);
     }
 }
 
@@ -1112,11 +1114,10 @@ static int vmsvga_load(struct vmsvga_state_s *s, QEMUFile *f)
     return 0;
 }
 
-static void vmsvga_init(struct vmsvga_state_s *s, DisplayState *ds,
+static void vmsvga_init(struct vmsvga_state_s *s,
                 uint8_t *vga_ram_base, unsigned long vga_ram_offset,
                 int vga_ram_size)
 {
-    s->ds = ds;
     s->vram = vga_ram_base;
     s->vram_size = vga_ram_size;
     s->vram_offset = vga_ram_offset;
@@ -1127,15 +1128,15 @@ static void vmsvga_init(struct vmsvga_state_s *s, DisplayState *ds,
     vmsvga_reset(s);
 
 #ifdef EMBED_STDVGA
-    vga_common_init((VGAState *) s, ds,
+    vga_common_init((VGAState *) s,
                     vga_ram_base, vga_ram_offset, vga_ram_size);
     vga_init((VGAState *) s);
 #endif
 
-    s->console = graphic_console_init(ds, vmsvga_update_display,
-                                      vmsvga_invalidate_display,
-                                      vmsvga_screen_dump,
-                                      vmsvga_text_update, s);
+    s->ds = graphic_console_init(vmsvga_update_display,
+                                 vmsvga_invalidate_display,
+                                 vmsvga_screen_dump,
+                                 vmsvga_text_update, s);
 
 #ifdef CONFIG_BOCHS_VBE
     /* XXX: use optimized standard vga accesses */
@@ -1205,17 +1206,9 @@ static void pci_vmsvga_map_mem(PCIDevice *pci_dev, int region_num,
                     iomemtype);
 }
 
-#define PCI_VENDOR_ID_VMWARE		0x15ad
-#define PCI_DEVICE_ID_VMWARE_SVGA2	0x0405
-#define PCI_DEVICE_ID_VMWARE_SVGA	0x0710
-#define PCI_DEVICE_ID_VMWARE_NET	0x0720
-#define PCI_DEVICE_ID_VMWARE_SCSI	0x0730
-#define PCI_DEVICE_ID_VMWARE_IDE	0x1729
-#define PCI_CLASS_BASE_DISPLAY		0x03
-#define PCI_CLASS_SUB_VGA		0x00
 #define PCI_CLASS_HEADERTYPE_00h	0x00
 
-void pci_vmsvga_init(PCIBus *bus, DisplayState *ds, uint8_t *vga_ram_base,
+void pci_vmsvga_init(PCIBus *bus, uint8_t *vga_ram_base,
                      unsigned long vga_ram_offset, int vga_ram_size)
 {
     struct pci_vmsvga_state_s *s;
@@ -1224,13 +1217,10 @@ void pci_vmsvga_init(PCIBus *bus, DisplayState *ds, uint8_t *vga_ram_base,
     s = (struct pci_vmsvga_state_s *)
         pci_register_device(bus, "QEMUware SVGA",
                 sizeof(struct pci_vmsvga_state_s), -1, 0, 0);
-    s->card.config[PCI_VENDOR_ID]	= PCI_VENDOR_ID_VMWARE & 0xff;
-    s->card.config[PCI_VENDOR_ID + 1]	= PCI_VENDOR_ID_VMWARE >> 8;
-    s->card.config[PCI_DEVICE_ID]	= SVGA_PCI_DEVICE_ID & 0xff;
-    s->card.config[PCI_DEVICE_ID + 1]	= SVGA_PCI_DEVICE_ID >> 8;
+    pci_config_set_vendor_id(s->card.config, PCI_VENDOR_ID_VMWARE);
+    pci_config_set_device_id(s->card.config, SVGA_PCI_DEVICE_ID);
     s->card.config[PCI_COMMAND]		= 0x07;		/* I/O + Memory */
-    s->card.config[PCI_CLASS_DEVICE]	= PCI_CLASS_SUB_VGA;
-    s->card.config[0x0b]		= PCI_CLASS_BASE_DISPLAY;
+    pci_config_set_class(s->card.config, PCI_CLASS_DISPLAY_VGA);
     s->card.config[0x0c]		= 0x08;		/* Cache line size */
     s->card.config[0x0d]		= 0x40;		/* Latency timer */
     s->card.config[0x0e]		= PCI_CLASS_HEADERTYPE_00h;
@@ -1245,7 +1235,7 @@ void pci_vmsvga_init(PCIBus *bus, DisplayState *ds, uint8_t *vga_ram_base,
     pci_register_io_region(&s->card, 1, vga_ram_size,
                     PCI_ADDRESS_SPACE_MEM_PREFETCH, pci_vmsvga_map_mem);
 
-    vmsvga_init(&s->chip, ds, vga_ram_base, vga_ram_offset, vga_ram_size);
+    vmsvga_init(&s->chip, vga_ram_base, vga_ram_offset, vga_ram_size);
 
     register_savevm("vmware_vga", 0, 0, pci_vmsvga_save, pci_vmsvga_load, s);
 }
