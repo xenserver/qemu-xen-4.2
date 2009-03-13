@@ -14,15 +14,17 @@ typedef struct XenFBState {
     struct semaphore kbd_sem;
     struct kbdfront_dev *kbd_dev;
     struct fbfront_dev *fb_dev;
-    void *vga_vram, *nonshared_vram;
+    void *nonshared_vram;
     DisplayState *ds;
 } XenFBState;
 
 XenFBState *xs;
 
 static char *kbd_path, *fb_path;
+static void *vga_vram;
 
 static unsigned char linux2scancode[KEY_MAX + 1];
+static DisplayChangeListener *dcl;
 
 extern uint32_t vga_ram_size;
 
@@ -47,53 +49,30 @@ static void xenfb_pv_update(DisplayState *ds, int x, int y, int w, int h)
     fbfront_update(fb_dev, x, y, w, h);
 }
 
-static void xenfb_pv_resize_shared(DisplayState *ds, int w, int h, int depth, int linesize, void *pixels)
+static void xenfb_pv_resize(DisplayState *ds)
 {
     XenFBState *xs = ds->opaque;
     struct fbfront_dev *fb_dev = xs->fb_dev;
     int offset;
 
-    fprintf(stderr,"resize to %dx%d@%d, %d required\n", w, h, depth, linesize);
-    ds->width = w;
-    ds->height = h;
-    if (!depth) {
-        ds->shared_buf = 0;
-        ds->depth = 32;
-    } else {
-        ds->shared_buf = 1;
-        ds->depth = depth;
-    }
-    if (!linesize)
-        ds->shared_buf = 0;
-    if (!ds->shared_buf)
-        linesize = w * 4;
-    ds->linesize = linesize;
+    fprintf(stderr,"resize to %dx%d@%d, %d required\n", ds_get_width(ds), ds_get_height(ds), ds_get_bits_per_pixel(ds), ds_get_linesize(ds));
     if (!fb_dev)
         return;
-    if (ds->shared_buf) {
-        offset = pixels - xs->vga_vram;
-        ds->data = pixels;
-        fbfront_resize(fb_dev, ds->width, ds->height, ds->linesize, ds->depth, offset);
-    } else {
-        ds->data = xs->nonshared_vram;
-        fbfront_resize(fb_dev, w, h, linesize, ds->depth, vga_ram_size);
-    }
+    if (!(ds->surface->flags & QEMU_ALLOCATED_FLAG))
+        offset = ((void *) ds_get_data(ds)) - vga_vram;
+    else
+        offset = vga_ram_size;
+    fbfront_resize(fb_dev, ds_get_width(ds), ds_get_height(ds), ds_get_linesize(ds), ds_get_bits_per_pixel(ds), offset);
 }
 
-static void xenfb_pv_resize(DisplayState *ds, int w, int h)
-{
-    xenfb_pv_resize_shared(ds, w, h, 0, 0, NULL);
-}
-
-static void xenfb_pv_setdata(DisplayState *ds, void *pixels)
+static void xenfb_pv_setdata(DisplayState *ds)
 {
     XenFBState *xs = ds->opaque;
     struct fbfront_dev *fb_dev = xs->fb_dev;
-    int offset = pixels - xs->vga_vram;
-    ds->data = pixels;
+    int offset = ((void *) ds_get_data(ds)) - vga_vram;
     if (!fb_dev)
         return;
-    fbfront_resize(fb_dev, ds->width, ds->height, ds->linesize, ds->depth, offset);
+    fbfront_resize(fb_dev, ds_get_width(ds), ds_get_height(ds), ds_get_linesize(ds), ds_get_bits_per_pixel(ds), offset);
 }
 
 static void xenfb_pv_refresh(DisplayState *ds)
@@ -115,12 +94,12 @@ static void xenfb_fb_handler(void *opaque)
         case XENFB_TYPE_REFRESH_PERIOD:
             if (buf[i].refresh_period.period == XENFB_NO_REFRESH) {
                 /* Sleeping interval */
-                ds->idle = 1;
-                ds->gui_timer_interval = 500;
+                dcl->idle = 1;
+                dcl->gui_timer_interval = 500;
             } else {
                 /* Set interval */
-                ds->idle = 0;
-                ds->gui_timer_interval = buf[i].refresh_period.period;
+                dcl->idle = 0;
+                dcl->gui_timer_interval = buf[i].refresh_period.period;
             }
         default:
             /* ignore unknown events */
@@ -151,14 +130,14 @@ static void xenfb_kbd_handler(void *opaque)
             {
                 int new_x = buf[i].pos.abs_x;
                 int new_y = buf[i].pos.abs_y;
-                if (new_x >= s->width)
-                    new_x = s->width - 1;
-                if (new_y >= s->height)
-                    new_y = s->height - 1;
+                if (new_x >= ds_get_width(s))
+                    new_x = ds_get_width(s) - 1;
+                if (new_y >= ds_get_height(s))
+                    new_y = ds_get_height(s) - 1;
                 if (kbd_mouse_is_absolute()) {
                     kbd_mouse_event(
-                            new_x * 0x7FFF / (s->width - 1),
-                            new_y * 0x7FFF / (s->height - 1),
+                            new_x * 0x7FFF / (ds_get_width(s) - 1),
+                            new_y * 0x7FFF / (ds_get_height(s) - 1),
                             buf[i].pos.rel_z,
                             buttons);
                 } else {
@@ -192,8 +171,8 @@ static void xenfb_kbd_handler(void *opaque)
                         buttons &= ~button;
                     if (kbd_mouse_is_absolute())
                         kbd_mouse_event(
-                                x * 0x7FFF / (s->width - 1),
-                                y * 0x7FFF / (s->height - 1),
+                                x * 0x7FFF / (ds_get_width(s) - 1),
+                                y * 0x7FFF / (ds_get_height(s) - 1),
                                 0,
                                 buttons);
                     else
@@ -236,8 +215,85 @@ static void kbdfront_thread(void *p)
     }
 }
 
+
+static DisplaySurface* xenfb_create_displaysurface(int width, int height, int bpp, int linesize)
+{
+    DisplaySurface *surface = (DisplaySurface*) qemu_mallocz(sizeof(DisplaySurface));
+    if (surface == NULL) {
+        fprintf(stderr, "xenfb_create_displaysurface: malloc failed\n");
+        exit(1);
+    }
+
+    surface->width = width;
+    surface->height = height;
+    surface->linesize = linesize;
+    surface->pf = qemu_default_pixelformat(bpp);
+#ifdef WORDS_BIGENDIAN
+    surface->flags = QEMU_ALLOCATED_FLAG | QEMU_BIG_ENDIAN_FLAG;
+#else
+    surface->flags = QEMU_ALLOCATED_FLAG;
+#endif
+    surface->data = xs->nonshared_vram;
+
+    return surface;
+}
+
+static DisplaySurface* xenfb_resize_displaysurface(DisplaySurface *surface,
+                                          int width, int height, int bpp, int linesize)
+{
+    surface->width = width;
+    surface->height = height;
+    surface->linesize = linesize;
+    surface->pf = qemu_default_pixelformat(bpp);
+#ifdef WORDS_BIGENDIAN
+    surface->flags = QEMU_ALLOCATED_FLAG | QEMU_BIG_ENDIAN_FLAG;
+#else
+    surface->flags = QEMU_ALLOCATED_FLAG;
+#endif
+    surface->data = xs->nonshared_vram;
+
+    return surface;
+}
+
+static void xenfb_free_displaysurface(DisplaySurface *surface)
+{
+    if (surface == NULL)
+        return;
+    qemu_free(surface);
+}
+
+static void xenfb_pv_display_allocator(void)
+{
+    DisplaySurface *ds;
+    DisplayAllocator *da = qemu_mallocz(sizeof(DisplayAllocator));
+    da->create_displaysurface = xenfb_create_displaysurface;
+    da->resize_displaysurface = xenfb_resize_displaysurface;
+    da->free_displaysurface = xenfb_free_displaysurface;
+    if (register_displayallocator(xs->ds, da) != da) {
+        fprintf(stderr, "xenfb_pv_display_allocator: could not register DisplayAllocator\n");
+        exit(1);
+    }
+
+    xs->nonshared_vram = qemu_memalign(PAGE_SIZE, vga_ram_size);
+    if (!xs->nonshared_vram) {
+        fprintf(stderr, "xenfb_pv_display_allocator: could not allocate nonshared_vram\n");
+        exit(1);
+    }
+
+    ds = xenfb_create_displaysurface(ds_get_width(xs->ds), ds_get_height(xs->ds), ds_get_bits_per_pixel(xs->ds), ds_get_linesize(xs->ds));
+    qemu_free_displaysurface(xs->ds);
+    xs->ds->surface = ds;
+}
+
 int xenfb_pv_display_init(DisplayState *ds)
 {
+    struct fbfront_dev *fb_dev;
+    int kbd_fd, fb_fd;
+    unsigned long *mfns;
+    int offset = 0;
+    int i;
+    int n = vga_ram_size / PAGE_SIZE;
+
     if (!fb_path || !kbd_path)
         return -1;
 
@@ -248,46 +304,27 @@ int xenfb_pv_display_init(DisplayState *ds)
     init_SEMAPHORE(&xs->kbd_sem, 0);
     xs->ds = ds;
 
+    xenfb_pv_display_allocator();
+
     create_thread("kbdfront", kbdfront_thread, (void*) xs);
 
-    ds->data = xs->nonshared_vram = qemu_memalign(PAGE_SIZE, vga_ram_size);
-    memset(ds->data, 0, vga_ram_size);
+    dcl = qemu_mallocz(sizeof(DisplayChangeListener));
+    if (!dcl)
+        exit(1);
     ds->opaque = xs;
-    ds->depth = 32;
-    ds->bgr = 0;
-    ds->width = 640;
-    ds->height = 400;
-    ds->linesize = 640 * 4;
-    ds->dpy_update = xenfb_pv_update;
-    ds->dpy_resize = xenfb_pv_resize;
-    ds->dpy_resize_shared = xenfb_pv_resize_shared;
-    ds->dpy_setdata = xenfb_pv_setdata;
-    ds->dpy_refresh = xenfb_pv_refresh;
-    return 0;
-}
+    dcl->dpy_update = xenfb_pv_update;
+    dcl->dpy_resize = xenfb_pv_resize;
+    dcl->dpy_setdata = xenfb_pv_setdata;
+    dcl->dpy_refresh = xenfb_pv_refresh;
+    register_displaychangelistener(ds, dcl);
 
-int xenfb_pv_display_start(void *data)
-{
-    DisplayState *ds;
-    struct fbfront_dev *fb_dev;
-    int kbd_fd, fb_fd;
-    int offset = 0;
-    unsigned long *mfns;
-    int n = vga_ram_size / PAGE_SIZE;
-    int i;
-
-    if (!fb_path || !kbd_path)
-        return 0;
-
-    ds = xs->ds;
-    xs->vga_vram = data;
     mfns = malloc(2 * n * sizeof(*mfns));
     for (i = 0; i < n; i++)
-        mfns[i] = virtual_to_mfn(xs->vga_vram + i * PAGE_SIZE);
+        mfns[i] = virtual_to_mfn(vga_vram + i * PAGE_SIZE);
     for (i = 0; i < n; i++)
         mfns[n + i] = virtual_to_mfn(xs->nonshared_vram + i * PAGE_SIZE);
 
-    fb_dev = init_fbfront(fb_path, mfns, ds->width, ds->height, ds->depth, ds->linesize, 2 * n);
+    fb_dev = init_fbfront(fb_path, mfns, ds_get_width(ds), ds_get_height(ds), ds_get_bits_per_pixel(ds), ds_get_linesize(ds), 2 * n);
     free(mfns);
     if (!fb_dev) {
         fprintf(stderr,"can't open frame buffer\n");
@@ -295,14 +332,13 @@ int xenfb_pv_display_start(void *data)
     }
     free(fb_path);
 
-    if (ds->shared_buf) {
-        offset = (void*) ds->data - xs->vga_vram;
+    if (!(ds->surface->flags & QEMU_ALLOCATED_FLAG)) {
+        offset = (void*) ds_get_data(ds) - vga_vram;
     } else {
         offset = vga_ram_size;
-        ds->data = xs->nonshared_vram;
     }
     if (offset)
-        fbfront_resize(fb_dev, ds->width, ds->height, ds->linesize, ds->depth, offset);
+        fbfront_resize(fb_dev, ds_get_width(ds), ds_get_height(ds), ds_get_linesize(ds), ds_get_bits_per_pixel(ds), offset);
 
     down(&xs->kbd_sem);
     free(kbd_path);
@@ -316,3 +352,9 @@ int xenfb_pv_display_start(void *data)
     xs->fb_dev = fb_dev;
     return 0;
 }
+
+int xenfb_pv_display_vram(void *data)
+{
+    vga_vram = data;
+}
+

@@ -25,8 +25,6 @@
 #include "console.h"
 #include "pci.h"
 
-#ifndef CONFIG_DM
-
 #define VERBOSE
 #define EMBED_STDVGA
 #undef DIRECT_VRAM
@@ -1239,9 +1237,3 @@ void pci_vmsvga_init(PCIBus *bus, uint8_t *vga_ram_base,
 
     register_savevm("vmware_vga", 0, 0, pci_vmsvga_save, pci_vmsvga_load, s);
 }
-
-#else /*CONFIG_DM*/
-void pci_vmsvga_init(PCIBus *bus, DisplayState *ds, uint8_t *vga_ram_base,
-                     unsigned long vga_ram_offset, int vga_ram_size) {
-}
-#endif

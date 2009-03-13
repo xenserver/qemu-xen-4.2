@@ -67,50 +67,201 @@ void kbd_put_keysym(int keysym);
 
 /* in ms */
 #define GUI_REFRESH_INTERVAL 30
+#define QEMU_BIG_ENDIAN_FLAG    0x01
+#define QEMU_ALLOCATED_FLAG     0x02
 
-struct DisplayState {
-    uint8_t *data;
-    int linesize;
-    int depth;
-    int bgr; /* BGR color order instead of RGB. Only valid for depth == 32 */
+struct PixelFormat {
+    uint8_t bits_per_pixel;
+    uint8_t bytes_per_pixel;
+    uint8_t depth; /* color depth in bits */
+    uint32_t rmask, gmask, bmask, amask;
+    uint8_t rshift, gshift, bshift, ashift;
+    uint8_t rmax, gmax, bmax, amax;
+    uint8_t rbits, gbits, bbits, abits;
+};
+
+struct DisplaySurface {
+    uint8_t flags;
     int width;
     int height;
-    void *opaque;
-    uint32_t *palette;
-    struct QEMUTimer *gui_timer;
+    int linesize;        /* bytes per line */
+    uint8_t *data;
+
+    struct PixelFormat pf;
+};
+
+struct DisplayChangeListener {
+    int idle;
     uint64_t gui_timer_interval;
-    int idle; /* there is nothing to update (window invisible), set by vnc/sdl */
-    int shared_buf;
 
     void (*dpy_update)(struct DisplayState *s, int x, int y, int w, int h);
-    void (*dpy_resize)(struct DisplayState *s, int w, int h);
-    void (*dpy_resize_shared)(struct DisplayState *s, int w, int h, int depth, int linesize, void *pixels);
-    void (*dpy_setdata)(DisplayState *s, void *pixels);
+    void (*dpy_resize)(struct DisplayState *s);
+    void (*dpy_setdata)(struct DisplayState *s);
     void (*dpy_refresh)(struct DisplayState *s);
     void (*dpy_copy)(struct DisplayState *s, int src_x, int src_y,
                      int dst_x, int dst_y, int w, int h);
     void (*dpy_fill)(struct DisplayState *s, int x, int y,
                      int w, int h, uint32_t c);
     void (*dpy_text_cursor)(struct DisplayState *s, int x, int y);
+
+    struct DisplayChangeListener *next;
 };
+
+struct DisplayAllocator {
+    DisplaySurface* (*create_displaysurface)(int width, int height, int bpp, int linesize);
+    DisplaySurface* (*resize_displaysurface)(DisplaySurface *surface,
+            int width, int height, int bpp, int linesize);
+    void (*free_displaysurface)(DisplaySurface *surface);
+};
+
+struct DisplayState {
+    struct DisplaySurface *surface;
+    void *opaque;
+    struct QEMUTimer *gui_timer;
+
+    struct DisplayAllocator* allocator;
+    struct DisplayChangeListener* listeners;
+
+    void (*mouse_set)(int x, int y, int on);
+    void (*cursor_define)(int width, int height, int bpp, int hot_x, int hot_y,
+                          uint8_t *image, uint8_t *mask);
+
+    struct DisplayState *next;
+};
+
+void register_displaystate(DisplayState *ds);
+DisplayState *get_displaystate(void);
+DisplaySurface* qemu_create_displaysurface_from(int width, int height, int bpp,
+                                                int linesize, uint8_t *data);
+PixelFormat qemu_different_endianness_pixelformat(int bpp);
+PixelFormat qemu_default_pixelformat(int bpp);
+
+extern struct DisplayAllocator default_allocator;
+DisplayAllocator *register_displayallocator(DisplayState *ds, DisplayAllocator *da);
+DisplaySurface* defaultallocator_create_displaysurface(int width, int height, int bpp, int linesize);
+DisplaySurface* defaultallocator_resize_displaysurface(DisplaySurface *surface,
+        int width, int height, int bpp, int linesize);
+void defaultallocator_free_displaysurface(DisplaySurface *surface);
+
+static inline DisplaySurface* qemu_create_displaysurface(DisplayState *ds, int width, int height, int bpp, int linesize)
+{
+    return ds->allocator->create_displaysurface(width, height, bpp, linesize);    
+}
+
+static inline DisplaySurface* qemu_resize_displaysurface(DisplayState *ds, int width, int height, int bpp, int linesize)
+{
+    return ds->allocator->resize_displaysurface(ds->surface, width, height, bpp, linesize);
+}
+
+static inline void qemu_free_displaysurface(DisplayState *ds)
+{
+    ds->allocator->free_displaysurface(ds->surface);
+}
+
+static inline int is_buffer_shared(DisplaySurface *surface)
+{
+    return (!(surface->flags & QEMU_ALLOCATED_FLAG));
+}
+
+static inline void register_displaychangelistener(DisplayState *ds, DisplayChangeListener *dcl)
+{
+    dcl->next = ds->listeners;
+    ds->listeners = dcl;
+}
 
 static inline void dpy_update(DisplayState *s, int x, int y, int w, int h)
 {
-    s->dpy_update(s, x, y, w, h);
+    struct DisplayChangeListener *dcl = s->listeners;
+    while (dcl != NULL) {
+        dcl->dpy_update(s, x, y, w, h);
+        dcl = dcl->next;
+    }
 }
 
-static inline void dpy_resize(DisplayState *s, int w, int h)
+static inline void dpy_resize(DisplayState *s)
 {
-    s->dpy_resize(s, w, h);
+    struct DisplayChangeListener *dcl = s->listeners;
+    while (dcl != NULL) {
+        dcl->dpy_resize(s);
+        dcl = dcl->next;
+    }
 }
-static inline void dpy_resize_shared(DisplayState *s, int w, int h, int depth, int linesize, void *pixels)
+
+static inline void dpy_setdata(DisplayState *s)
 {
-    s->dpy_resize_shared(s, w, h, depth, linesize, pixels);
+    struct DisplayChangeListener *dcl = s->listeners;
+    while (dcl != NULL) {
+        if (dcl->dpy_setdata) dcl->dpy_setdata(s);
+        dcl = dcl->next;
+    }
 }
-static inline void dpy_cursor(DisplayState *s, int x, int y)
+
+static inline void dpy_refresh(DisplayState *s)
 {
-    if (s->dpy_text_cursor)
-        s->dpy_text_cursor(s, x, y);
+    struct DisplayChangeListener *dcl = s->listeners;
+    while (dcl != NULL) {
+        if (dcl->dpy_refresh) dcl->dpy_refresh(s);
+        dcl = dcl->next;
+    }
+}
+
+static inline void dpy_copy(struct DisplayState *s, int src_x, int src_y,
+                             int dst_x, int dst_y, int w, int h) {
+    struct DisplayChangeListener *dcl = s->listeners;
+    while (dcl != NULL) {
+        if (dcl->dpy_copy)
+            dcl->dpy_copy(s, src_x, src_y, dst_x, dst_y, w, h);
+        else /* TODO */
+            dcl->dpy_update(s, dst_x, dst_y, w, h);
+        dcl = dcl->next;
+    }
+}
+
+static inline void dpy_fill(struct DisplayState *s, int x, int y,
+                             int w, int h, uint32_t c) {
+    struct DisplayChangeListener *dcl = s->listeners;
+    while (dcl != NULL) {
+        if (dcl->dpy_fill) dcl->dpy_fill(s, x, y, w, h, c);
+        dcl = dcl->next;
+    }
+}
+
+static inline void dpy_cursor(struct DisplayState *s, int x, int y) {
+    struct DisplayChangeListener *dcl = s->listeners;
+    while (dcl != NULL) {
+        if (dcl->dpy_text_cursor) dcl->dpy_text_cursor(s, x, y);
+        dcl = dcl->next;
+    }
+}
+
+static inline int ds_get_linesize(DisplayState *ds)
+{
+    return ds->surface->linesize;
+}
+
+static inline uint8_t* ds_get_data(DisplayState *ds)
+{
+    return ds->surface->data;
+}
+
+static inline int ds_get_width(DisplayState *ds)
+{
+    return ds->surface->width;
+}
+
+static inline int ds_get_height(DisplayState *ds)
+{
+    return ds->surface->height;
+}
+
+static inline int ds_get_bits_per_pixel(DisplayState *ds)
+{
+    return ds->surface->pf.bits_per_pixel;
+}
+
+static inline int ds_get_bytes_per_pixel(DisplayState *ds)
+{
+    return ds->surface->pf.bytes_per_pixel;
 }
 
 typedef unsigned long console_ch_t;
@@ -124,7 +275,7 @@ typedef void (*vga_hw_invalidate_ptr)(void *);
 typedef void (*vga_hw_screen_dump_ptr)(void *, const char *);
 typedef void (*vga_hw_text_update_ptr)(void *, console_ch_t *);
 
-TextConsole *graphic_console_init(DisplayState *ds, vga_hw_update_ptr update,
+DisplayState *graphic_console_init(vga_hw_update_ptr update,
                                   vga_hw_invalidate_ptr invalidate,
                                   vga_hw_screen_dump_ptr screen_dump,
                                   vga_hw_text_update_ptr text_update,
@@ -135,11 +286,12 @@ void vga_hw_screen_dump(const char *filename);
 
 int is_graphic_console(void);
 int is_fixedsize_console(void);
-CharDriverState *text_console_init(DisplayState *ds, const char *p);
+CharDriverState *text_console_init(const char *p);
+void text_consoles_set_display(DisplayState *ds);
 void console_select(unsigned int index);
 void console_color_init(DisplayState *ds);
-void qemu_console_resize(QEMUConsole *console, int width, int height);
-void qemu_console_copy(QEMUConsole *console, int src_x, int src_y,
+void qemu_console_resize(DisplayState *ds, int width, int height);
+void qemu_console_copy(DisplayState *ds, int src_x, int src_y,
                 int dst_x, int dst_y, int w, int h);
 
 /* sdl.c */

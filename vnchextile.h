@@ -9,7 +9,7 @@
 
 static void CONCAT(send_hextile_tile_, NAME)(VncState *vs,
                                              int x, int y, int w, int h,
-                                             void *last_bg_, 
+                                             void *last_bg_,
                                              void *last_fg_,
                                              int *has_bg, int *has_fg)
 {
@@ -86,7 +86,7 @@ static void CONCAT(send_hextile_tile_, NAME)(VncState *vs,
 	flags |= 0x08;
 
 	irow = (pixel_t *)row;
-	
+
 	for (j = 0; j < h; j++) {
 	    int min_x = -1;
 	    for (i = 0; i < w; i++) {
