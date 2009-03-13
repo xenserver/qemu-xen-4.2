@@ -617,10 +617,11 @@ static void raw_aio_remove(RawAIOCB *acb)
             break;
         } else if (*pacb == acb) {
             *pacb = acb->next;
+            raw_fd_pool_put(acb);
             qemu_aio_release(acb);
             break;
         }
-        pacb = &acb->next;
+        pacb = &(*pacb)->next;
     }
 }
 

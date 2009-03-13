@@ -24,6 +24,7 @@
 #include "pci/pci.h"
 #include "exec-all.h"
 #include "sys-queue.h"
+#include "qemu-timer.h"
 
 /* Log acesss */
 #define PT_LOGGING_ENABLED
@@ -59,6 +60,12 @@
 #define PCI_CAP_ID_SSVID        0x0D
 #endif
 
+#ifdef PCI_PM_CTRL_NO_SOFT_RESET
+#undef PCI_PM_CTRL_NO_SOFT_RESET
+#endif
+/* No Soft Reset for D3hot->D0 */
+#define PCI_PM_CTRL_NO_SOFT_RESET 0x0008
+
 #ifndef PCI_MSI_FLAGS_MASK_BIT
 /* interrupt masking & reporting supported */
 #define PCI_MSI_FLAGS_MASK_BIT  0x0100
@@ -78,6 +85,39 @@
 /* Root Complex Event Collector */
 #define PCI_EXP_TYPE_ROOT_EC     0xa
 #endif
+
+#ifndef PCI_ERR_UNCOR_MASK
+/* Uncorrectable Error Mask */
+#define PCI_ERR_UNCOR_MASK      8
+#endif
+
+#ifndef PCI_ERR_UNCOR_SEVER
+/* Uncorrectable Error Severity */
+#define PCI_ERR_UNCOR_SEVER     12
+#endif
+
+#ifndef PCI_ERR_COR_MASK
+/* Correctable Error Mask */
+#define PCI_ERR_COR_MASK        20
+#endif
+
+#ifndef PCI_ERR_CAP
+/* Advanced Error Capabilities */
+#define PCI_ERR_CAP             24
+#endif
+
+#ifndef PCI_EXT_CAP_ID
+/* Extended Capabilities (PCI-X 2.0 and PCI Express) */
+#define PCI_EXT_CAP_ID(header)   (header & 0x0000ffff)
+#endif
+
+#ifndef PCI_EXT_CAP_NEXT
+/* Extended Capabilities (PCI-X 2.0 and PCI Express) */
+#define PCI_EXT_CAP_NEXT(header) ((header >> 20) & 0xffc)
+#endif
+
+/* power state transition */
+#define PT_FLAG_TRANSITING 0x0001
 
 #define PT_INVALID_REG          0xFFFFFFFF      /* invalid register value */
 #define PT_BAR_ALLF             0xFFFFFFFF      /* BAR ALLF value */
@@ -102,6 +142,8 @@ enum {
     }\
 } while(0)
 
+#define PT_MERGE_VALUE(value, data, val_mask) \
+    (((value) & (val_mask)) | ((data) & ~(val_mask)))
 
 struct pt_region {
     /* Virtual phys base & size */
@@ -135,6 +177,7 @@ struct msix_entry_info {
 };
 
 struct pt_msix_info {
+    uint32_t ctrl_offset;
     int enabled;
     int total_entries;
     int bar_index;
@@ -142,9 +185,20 @@ struct pt_msix_info {
     uint32_t table_off;
     uint64_t mmio_base_addr;
     int mmio_index;
-    int fd;
     void *phys_iomem_base;
     struct msix_entry_info msix_entry[0];
+};
+
+struct pt_pm_info {
+    QEMUTimer *pm_timer;  /* QEMUTimer struct */
+    int no_soft_reset;    /* No Soft Reset flags */
+    uint16_t flags;       /* power state transition flags */
+    uint16_t pmc_field;   /* Power Management Capabilities field */
+    int pm_delay;         /* power state transition delay */
+    uint16_t cur_state;   /* current power state */
+    uint16_t req_state;   /* requested power state */
+    uint32_t pm_base;     /* Power Management Capability reg base offset */
+    uint32_t aer_base;    /* AER Capability reg base offset */
 };
 
 /*
@@ -163,6 +217,7 @@ struct pt_dev {
     /* Physical MSI to guest INTx translation when possible */
     int msi_trans_cap;
     int msi_trans_en;
+    struct pt_pm_info *pm_state;                /* PM virtualization */
 };
 
 /* Used for formatting PCI BDF into cf8 format */
@@ -196,8 +251,8 @@ struct pt_reg_grp_tbl {
 };
 
 /* emul reg group size initialize method */
-typedef uint8_t (*pt_reg_size_init) (struct pt_dev *ptdev, 
-                                     struct pt_reg_grp_info_tbl *grp_reg, 
+typedef uint8_t (*pt_reg_size_init) (struct pt_dev *ptdev,
+                                     struct pt_reg_grp_info_tbl *grp_reg,
                                      uint32_t base_offset);
 /* emul reg group infomation table */
 struct pt_reg_grp_info_tbl {
@@ -224,42 +279,60 @@ struct pt_reg_tbl {
 };
 
 /* emul reg initialize method */
-typedef uint32_t (*conf_reg_init) (struct pt_dev *ptdev, 
-                                   struct pt_reg_info_tbl *reg, 
+typedef uint32_t (*conf_reg_init) (struct pt_dev *ptdev,
+                                   struct pt_reg_info_tbl *reg,
                                    uint32_t real_offset);
 /* emul reg long write method */
 typedef int (*conf_dword_write) (struct pt_dev *ptdev,
-                                 struct pt_reg_tbl *cfg_entry, 
-                                 uint32_t *value, 
+                                 struct pt_reg_tbl *cfg_entry,
+                                 uint32_t *value,
                                  uint32_t dev_value,
                                  uint32_t valid_mask);
 /* emul reg word write method */
 typedef int (*conf_word_write) (struct pt_dev *ptdev,
-                                struct pt_reg_tbl *cfg_entry, 
-                                uint16_t *value, 
+                                struct pt_reg_tbl *cfg_entry,
+                                uint16_t *value,
                                 uint16_t dev_value,
                                 uint16_t valid_mask);
 /* emul reg byte write method */
 typedef int (*conf_byte_write) (struct pt_dev *ptdev,
-                                struct pt_reg_tbl *cfg_entry, 
-                                uint8_t *value, 
+                                struct pt_reg_tbl *cfg_entry,
+                                uint8_t *value,
                                 uint8_t dev_value,
                                 uint8_t valid_mask);
 /* emul reg long read methods */
 typedef int (*conf_dword_read) (struct pt_dev *ptdev,
-                                struct pt_reg_tbl *cfg_entry, 
+                                struct pt_reg_tbl *cfg_entry,
                                 uint32_t *value,
                                 uint32_t valid_mask);
 /* emul reg word read method */
 typedef int (*conf_word_read) (struct pt_dev *ptdev,
-                               struct pt_reg_tbl *cfg_entry, 
+                               struct pt_reg_tbl *cfg_entry,
                                uint16_t *value,
                                uint16_t valid_mask);
 /* emul reg byte read method */
 typedef int (*conf_byte_read) (struct pt_dev *ptdev,
-                               struct pt_reg_tbl *cfg_entry, 
+                               struct pt_reg_tbl *cfg_entry,
                                uint8_t *value,
                                uint8_t valid_mask);
+/* emul reg long restore method */
+typedef int (*conf_dword_restore) (struct pt_dev *ptdev,
+                                   struct pt_reg_tbl *cfg_entry,
+                                   uint32_t real_offset,
+                                   uint32_t dev_value,
+                                   uint32_t *value);
+/* emul reg word restore method */
+typedef int (*conf_word_restore) (struct pt_dev *ptdev,
+                                  struct pt_reg_tbl *cfg_entry,
+                                  uint32_t real_offset,
+                                  uint16_t dev_value,
+                                  uint16_t *value);
+/* emul reg byte restore method */
+typedef int (*conf_byte_restore) (struct pt_dev *ptdev,
+                                  struct pt_reg_tbl *cfg_entry,
+                                  uint32_t real_offset,
+                                  uint8_t dev_value,
+                                  uint8_t *value);
 
 /* emul reg infomation table */
 struct pt_reg_info_tbl {
@@ -281,18 +354,24 @@ struct pt_reg_info_tbl {
             conf_dword_write write;
             /* emul reg long read method */
             conf_dword_read read;
+            /* emul reg long restore method */
+            conf_dword_restore restore;
         } dw;
         struct {
             /* emul reg word write method */
             conf_word_write write;
             /* emul reg word read method */
             conf_word_read read;
+            /* emul reg word restore method */
+            conf_word_restore restore;
         } w;
         struct {
             /* emul reg byte write method */
             conf_byte_write write;
             /* emul reg byte read method */
             conf_byte_read read;
+            /* emul reg byte restore method */
+            conf_byte_restore restore;
         } b;
     } u;
 };

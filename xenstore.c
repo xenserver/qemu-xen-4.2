@@ -472,7 +472,7 @@ void xenstore_parse_domain_config(int hvm_domid)
 #ifdef CONFIG_STUBDOM
         if (pasprintf(&danger_buf, "%s/device/vbd/%s", danger_path, e_danger[i]) == -1)
             continue;
-	if (bdrv_open2(bs, danger_buf, 0 /* snapshot */, &bdrv_vbd) == 0) {
+	if (bdrv_open2(bs, danger_buf, BDRV_O_CACHE_WB /* snapshot and write-back */, &bdrv_vbd) == 0) {
 	    pstrcpy(bs->filename, sizeof(bs->filename), params);
 	} else
 #endif
@@ -498,7 +498,7 @@ void xenstore_parse_domain_config(int hvm_domid)
 		}
 	    }
             pstrcpy(bs->filename, sizeof(bs->filename), params);
-            if (bdrv_open2(bs, params, 0 /* snapshot */, format) < 0)
+            if (bdrv_open2(bs, params, BDRV_O_CACHE_WB /* snapshot and write-back */, format) < 0)
                 fprintf(stderr, "qemu: could not open vbd '%s' or hard disk image '%s' (drv '%s' format '%s')\n", buf, params, drv ? drv : "?", format ? format->format_name : "0");
         }
 
@@ -1224,6 +1224,8 @@ int xenstore_vm_write(int domid, const char *key, const char *value)
     int rc = -1;
 
     path = xenstore_vm_key_path(domid, key);
+    if (!path)
+        return 0;
 
     rc = xs_write(xsh, XBT_NULL, path, value, strlen(value));
     if (rc == 0) {

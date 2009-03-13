@@ -85,8 +85,23 @@ __get_msi_gflags(uint32_t data, uint64_t addr);
 int
 pt_msi_update(struct pt_dev *d);
 
+void
+pt_msi_disable(struct pt_dev *dev);
+
+int
+pt_enable_msi_translate(struct pt_dev* dev);
+
+void
+pt_disable_msi_translate(struct pt_dev *dev);
+
+int
+pt_msix_update_remap(struct pt_dev *d, int bar_index);
+
 int
 pt_msix_update(struct pt_dev *dev);
+
+void
+pt_msix_disable(struct pt_dev *dev);
 
 int
 remove_msix_mapping(struct pt_dev *dev, int bar_index);

@@ -1270,6 +1270,22 @@ void qemu_get_timer(QEMUFile *f, QEMUTimer *ts)
     }
 }
 
+/* run the specified timer */
+void qemu_run_one_timer(QEMUTimer *ts)
+{
+    uint64_t current_time;
+
+    /* remove timer from the list before calling the callback */
+    qemu_del_timer(ts);
+
+    while ((current_time = qemu_get_clock(rt_clock)) < ts->expire_time)
+        /* sleep until the expire time */
+        usleep((ts->expire_time - current_time) * 1000);
+
+    /* run the callback */
+    ts->cb(ts->opaque);
+}
+
 static void timer_save(QEMUFile *f, void *opaque)
 {
     if (cpu_ticks_enabled) {

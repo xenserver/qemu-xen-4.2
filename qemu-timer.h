@@ -31,6 +31,8 @@ extern int64_t ticks_per_sec;
 void qemu_get_timer(QEMUFile *f, QEMUTimer *ts);
 void qemu_put_timer(QEMUFile *f, QEMUTimer *ts);
 
+void qemu_run_one_timer(QEMUTimer *ts);
+
 /* ptimer.c */
 typedef struct ptimer_state ptimer_state;
 typedef void (*ptimer_cb)(void *opaque);

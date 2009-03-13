@@ -22,6 +22,41 @@
 #include "pt-msi.h"
 #include <sys/mman.h>
 
+static void msi_set_enable(struct pt_dev *dev, int en)
+{
+    uint16_t val = 0;
+    uint32_t address = 0;
+    if (!dev->msi)
+        return;
+
+    address = dev->msi->ctrl_offset;
+    if (!address)
+        return;
+
+    val = pci_read_word(dev->pci_dev, address);
+    val &= ~PCI_MSI_FLAGS_ENABLE;
+    val |= en & PCI_MSI_FLAGS_ENABLE;
+    pci_write_word(dev->pci_dev, address, val);
+}
+
+static void msix_set_enable(struct pt_dev *dev, int en)
+{
+    uint16_t val = 0;
+    uint32_t address = 0;
+    if (!dev->msix)
+        return;
+
+    address = dev->msix->ctrl_offset;
+    if (!address)
+        return;
+
+    val = pci_read_word(dev->pci_dev, address);
+    val &= ~PCI_MSIX_ENABLE;
+    if (en)
+        val |= PCI_MSIX_ENABLE;
+    pci_write_word(dev->pci_dev, address, val);
+}
+
 /* MSI virtuailization functions */
 
 /*
@@ -33,7 +68,7 @@ int pt_msi_setup(struct pt_dev *dev)
 
     if ( !(dev->msi->flags & MSI_FLAG_UNINIT) )
     {
-        PT_LOG("setup physical after initialized?? \n");
+        PT_LOG("Error: setup physical after initialized?? \n");
         return -1;
     }
 
@@ -41,13 +76,13 @@ int pt_msi_setup(struct pt_dev *dev)
                                  dev->pci_dev->dev << 3 | dev->pci_dev->func,
                                  dev->pci_dev->bus, 0, 0) )
     {
-        PT_LOG("error map msi\n");
+        PT_LOG("Error: Mapping of MSI failed.\n");
         return -1;
     }
 
     if ( pirq < 0 )
     {
-        PT_LOG("invalid pirq number\n");
+        PT_LOG("Error: Invalid pirq number\n");
         return -1;
     }
 
@@ -84,15 +119,150 @@ int pt_msi_update(struct pt_dev *d)
     uint8_t gvec = 0;
     uint32_t gflags = 0;
     uint64_t addr = 0;
-    
+
     /* get vector, address, flags info, etc. */
     gvec = d->msi->data & 0xFF;
     addr = (uint64_t)d->msi->addr_hi << 32 | d->msi->addr_lo;
     gflags = __get_msi_gflags(d->msi->data, addr);
-    
-    PT_LOG("now update msi with pirq %x gvec %x\n", d->msi->pirq, gvec);
+
+    PT_LOG("Update msi with pirq %x gvec %x\n", d->msi->pirq, gvec);
     return xc_domain_update_msi_irq(xc_handle, domid, gvec,
-                                     d->msi->pirq, gflags);
+                                     d->msi->pirq, gflags, 0);
+}
+
+void pt_msi_disable(struct pt_dev *dev)
+{
+    PCIDevice *d = &dev->dev;
+    uint8_t gvec = 0;
+    uint32_t gflags = 0;
+    uint64_t addr = 0;
+    uint8_t e_device = 0;
+    uint8_t e_intx = 0;
+
+    msi_set_enable(dev, 0);
+
+    e_device = (dev->dev.devfn >> 3) & 0x1f;
+    /* fix virtual interrupt pin to INTA# */
+    e_intx = 0;
+
+    if (dev->msi_trans_en)
+    {
+        if (xc_domain_unbind_pt_irq(xc_handle, domid, dev->msi->pirq,
+                                    PT_IRQ_TYPE_MSI_TRANSLATE, 0,
+                                    e_device, e_intx, 0))
+        {
+            PT_LOG("Error: Unbinding pt irq for MSI-INTx failed!\n");
+            goto out;
+        }
+    }
+    else if (!(dev->msi->flags & MSI_FLAG_UNINIT))
+    {
+        /* get vector, address, flags info, etc. */
+        gvec = dev->msi->data & 0xFF;
+        addr = (uint64_t)dev->msi->addr_hi << 32 | dev->msi->addr_lo;
+        gflags = __get_msi_gflags(dev->msi->data, addr);
+
+        PT_LOG("Unbind msi with pirq %x, gvec %x\n",
+                dev->msi->pirq, gvec);
+
+        if (xc_domain_unbind_msi_irq(xc_handle, domid, gvec,
+                                        dev->msi->pirq, gflags))
+        {
+            PT_LOG("Error: Unbinding of MSI failed. [%02x:%02x.%x]\n",
+                pci_bus_num(d->bus),
+                ((d->devfn >> 3) & 0x1F), (d->devfn & 0x7));
+            goto out;
+        }
+    }
+
+    if (dev->msi->pirq != -1)
+    {
+        PT_LOG("Unmap msi with pirq %x\n", dev->msi->pirq);
+
+        if (xc_physdev_unmap_pirq(xc_handle, domid, dev->msi->pirq))
+        {
+            PT_LOG("Error: Unmapping of MSI failed. [%02x:%02x.%x]\n",
+               pci_bus_num(d->bus),
+               ((d->devfn >> 3) & 0x1F), (d->devfn & 0x7));
+            goto out;
+        }
+    }
+    /* unbind INTx */
+    if (dev->msi_trans_cap && !dev->msi_trans_en)
+    {
+        if (xc_domain_unbind_pt_irq(xc_handle, domid, dev->machine_irq,
+                        PT_IRQ_TYPE_PCI, 0, e_device, e_intx, 0))
+            PT_LOG("Error: Unbinding of interrupt failed!\n");
+    }
+
+out:
+    /* clear msi info */
+    dev->msi->flags = 0;
+    dev->msi->pirq = -1;
+    dev->msi_trans_en = 0;
+}
+
+/* MSI-INTx translation virtulization functions */
+int pt_enable_msi_translate(struct pt_dev* dev)
+{
+    uint8_t e_device = 0;
+    uint8_t e_intx = 0;
+
+    if (!(dev->msi && dev->msi_trans_cap))
+        return -1;
+
+    msi_set_enable(dev, 0);
+    dev->msi_trans_en = 0;
+
+    if (pt_msi_setup(dev))
+    {
+        PT_LOG("Error: MSI-INTx translation MSI setup failed, fallback\n");
+        return -1;
+    }
+
+    e_device = (dev->dev.devfn >> 3) & 0x1f;
+    /* fix virtual interrupt pin to INTA# */
+    e_intx = 0;
+
+    if (xc_domain_bind_pt_irq(xc_handle, domid, dev->msi->pirq,
+                               PT_IRQ_TYPE_MSI_TRANSLATE, 0,
+                               e_device, e_intx, 0))
+    {
+        PT_LOG("Error: MSI-INTx translation bind failed, fallback\n");
+        return -1;
+    }
+
+    msi_set_enable(dev, 1);
+    dev->msi_trans_en = 1;
+
+    return 0;
+}
+
+void pt_disable_msi_translate(struct pt_dev *dev)
+{
+    uint8_t e_device = 0;
+    uint8_t e_intx = 0;
+
+    /* MSI_ENABLE bit should be disabed until the new handler is set */
+    msi_set_enable(dev, 0);
+
+    e_device = (dev->dev.devfn >> 3) & 0x1f;
+    /* fix virtual interrupt pin to INTA# */
+    e_intx = 0;
+
+    if (xc_domain_unbind_pt_irq(xc_handle, domid, dev->msi->pirq,
+                                 PT_IRQ_TYPE_MSI_TRANSLATE, 0,
+                                 e_device, e_intx, 0))
+        PT_LOG("Error: Unbinding pt irq for MSI-INTx failed!\n");
+
+    if (dev->machine_irq)
+    {
+        if (xc_domain_bind_pt_pci_irq(xc_handle, domid, dev->machine_irq,
+                                       0, e_device, e_intx))
+            PT_LOG("Error: Rebinding of interrupt failed!\n");
+    }
+
+    dev->msi_trans_en = 0;
 }
 
 /* MSI-X virtulization functions */
@@ -125,19 +295,20 @@ static int pt_msix_update_one(struct pt_dev *dev, int entry_nr)
                                 dev->msix->table_base);
         if ( ret )
         {
-            PT_LOG("error map msix entry %x\n", entry_nr);
+            PT_LOG("Error: Mapping msix entry %x\n", entry_nr);
             return ret;
         }
         entry->pirq = pirq;
     }
 
-    PT_LOG("now update msix entry %x with pirq %x gvec %x\n",
+    PT_LOG("Update msix entry %x with pirq %x gvec %x\n",
             entry_nr, pirq, gvec);
 
-    ret = xc_domain_update_msi_irq(xc_handle, domid, gvec, pirq, gflags);
+    ret = xc_domain_update_msi_irq(xc_handle, domid, gvec, pirq, gflags,
+                                   dev->msix->mmio_base_addr);
     if ( ret )
     {
-        PT_LOG("error update msix irq info for entry %d\n", entry_nr);
+        PT_LOG("Error: Updating msix irq info for entry %d\n", entry_nr);
         return ret;
     }
 
@@ -159,10 +330,81 @@ int pt_msix_update(struct pt_dev *dev)
     return 0;
 }
 
+void pt_msix_disable(struct pt_dev *dev)
+{
+    PCIDevice *d = &dev->dev;
+    uint8_t gvec = 0;
+    uint32_t gflags = 0;
+    uint64_t addr = 0;
+    int i = 0;
+    struct msix_entry_info *entry = NULL;
+
+    msix_set_enable(dev, 0);
+
+    for ( i = 0; i < dev->msix->total_entries; i++ )
+    {
+        entry = &dev->msix->msix_entry[i];
+
+        if (entry->pirq == -1)
+            continue;
+
+        gvec = entry->io_mem[2] & 0xff;
+        addr = *(uint64_t *)&entry->io_mem[0];
+        gflags = __get_msi_gflags(entry->io_mem[2], addr);
+
+        PT_LOG("Unbind msix with pirq %x, gvec %x\n",
+                entry->pirq, gvec);
+
+        if (xc_domain_unbind_msi_irq(xc_handle, domid, gvec,
+                                        entry->pirq, gflags))
+            PT_LOG("Error: Unbinding of MSI-X failed. [%02x:%02x.%x]\n",
+                pci_bus_num(d->bus),
+                ((d->devfn >> 3) & 0x1F), (d->devfn & 0x7));
+        else
+        {
+            PT_LOG("Unmap msix with pirq %x\n", entry->pirq);
+
+            if (xc_physdev_unmap_pirq(xc_handle,
+                                         domid, entry->pirq))
+                PT_LOG("Error: Unmapping of MSI-X failed. [%02x:%02x.%x]\n",
+                    pci_bus_num(d->bus),
+                    ((d->devfn >> 3) & 0x1F), (d->devfn & 0x7));
+        }
+        /* clear msi-x info */
+        entry->pirq = -1;
+        entry->flags = 0;
+    }
+}
+
+int pt_msix_update_remap(struct pt_dev *dev, int bar_index)
+{
+    struct msix_entry_info *entry;
+    int i, ret;
+
+    if ( !(dev->msix && dev->msix->bar_index == bar_index) )
+        return 0;
+
+    for ( i = 0; i < dev->msix->total_entries; i++ )
+    {
+        entry = &dev->msix->msix_entry[i];
+        if ( entry->pirq != -1 )
+        {
+            ret = xc_domain_unbind_pt_irq(xc_handle, domid, entry->pirq,
+                                          PT_IRQ_TYPE_MSI, 0, 0, 0, 0);
+            if ( ret )
+                PT_LOG("Error: unbind MSI-X entry %d failed\n", entry->pirq);
+            entry->flags = 1;
+        }
+    }
+    pt_msix_update(dev);
+
+    return 0;
+}
+
 static void pci_msix_invalid_write(void *opaque, target_phys_addr_t addr,
                                    uint32_t val)
 {
-    PT_LOG("invalid write to MSI-X table, \
+    PT_LOG("Error: Invalid write to MSI-X table, \
             only dword access is allowed.\n");
 }
 
@@ -172,11 +414,13 @@ static void pci_msix_writel(void *opaque, target_phys_addr_t addr, uint32_t val)
     struct pt_msix_info *msix = dev->msix;
     struct msix_entry_info *entry;
     int entry_nr, offset;
+    void *phys_off;
+    uint32_t vec_ctrl;
 
     if ( addr % 4 )
     {
-        PT_LOG("unaligned dword access to MSI-X table, addr %016"PRIx64"\n",
-                addr);
+        PT_LOG("Error: Unaligned dword access to MSI-X table, \
+                addr %016"PRIx64"\n", addr);
         return;
     }
 
@@ -184,10 +428,17 @@ static void pci_msix_writel(void *opaque, target_phys_addr_t addr, uint32_t val)
     entry = &msix->msix_entry[entry_nr];
     offset = ((addr - msix->mmio_base_addr) % 16) / 4;
 
-    if ( offset != 3 && msix->enabled && !(entry->io_mem[3] & 0x1) )
+    /*
+     * If Xen intercepts the mask bit access, io_mem[3] may not be
+     * up-to-date. Read from hardware directly.
+     */
+    phys_off = dev->msix->phys_iomem_base + 16 * entry_nr + 12;
+    vec_ctrl = *(uint32_t *)phys_off;
+
+    if ( offset != 3 && msix->enabled && !(vec_ctrl & 0x1) )
     {
-        PT_LOG("can not update msix entry %d since MSI-X is already \
-                function now.\n", entry_nr);
+        PT_LOG("Error: Can't update msix entry %d since MSI-X is already \
+                function.\n", entry_nr);
         return;
     }
 
@@ -211,7 +462,7 @@ static CPUWriteMemoryFunc *pci_msix_write[] = {
 
 static uint32_t pci_msix_invalid_read(void *opaque, target_phys_addr_t addr)
 {
-    PT_LOG("invalid read to MSI-X table, \
+    PT_LOG("Error: Invalid read to MSI-X table, \
             only dword access is allowed.\n");
     return 0;
 }
@@ -224,8 +475,8 @@ static uint32_t pci_msix_readl(void *opaque, target_phys_addr_t addr)
 
     if ( addr % 4 )
     {
-        PT_LOG("unaligned dword access to MSI-X table, addr %016"PRIx64"\n",
-                addr);
+        PT_LOG("Error: Unaligned dword access to MSI-X table, \
+                addr %016"PRIx64"\n", addr);
         return 0;
     }
 
@@ -282,12 +533,13 @@ int pt_msix_init(struct pt_dev *dev, int pos)
     uint16_t control;
     int i, total_entries, table_off, bar_index;
     struct pci_dev *pd = dev->pci_dev;
+    int fd;
 
     id = pci_read_byte(pd, pos + PCI_CAP_LIST_ID);
 
     if ( id != PCI_CAP_ID_MSIX )
     {
-        PT_LOG("error id %x pos %x\n", id, pos);
+        PT_LOG("Error: Invalid id %x pos %x\n", id, pos);
         return -1;
     }
 
@@ -299,7 +551,7 @@ int pt_msix_init(struct pt_dev *dev, int pos)
                        + total_entries*sizeof(struct msix_entry_info));
     if ( !dev->msix )
     {
-        PT_LOG("error allocation pt_msix_info\n");
+        PT_LOG("Error: Allocating pt_msix_info failed.\n");
         return -1;
     }
     memset(dev->msix, 0, sizeof(struct pt_msix_info)
@@ -318,19 +570,31 @@ int pt_msix_init(struct pt_dev *dev, int pos)
     PT_LOG("get MSI-X table bar base %llx\n",
            (unsigned long long)dev->msix->table_base);
 
-    dev->msix->fd = open("/dev/mem", O_RDWR);
+    fd = open("/dev/mem", O_RDWR);
+    if ( fd == -1 )
+    {
+        PT_LOG("Error: Can't open /dev/mem: %s\n", strerror(errno));
+        goto error_out;
+    }
     dev->msix->phys_iomem_base = mmap(0, total_entries * 16,
                           PROT_WRITE | PROT_READ, MAP_SHARED | MAP_LOCKED,
-                          dev->msix->fd, dev->msix->table_base + table_off);
+                          fd, dev->msix->table_base + table_off);
     if ( dev->msix->phys_iomem_base == MAP_FAILED )
     {
-        PT_LOG("Can't map physical MSI-X table: %s\n", strerror(errno));
-        return -1;
+        PT_LOG("Error: Can't map physical MSI-X table: %s\n", strerror(errno));
+        close(fd);
+        goto error_out;
     }
+    close(fd);
 
     PT_LOG("mapping physical MSI-X table to %lx\n",
            (unsigned long)dev->msix->phys_iomem_base);
     return 0;
+
+error_out:
+    free(dev->msix);
+    dev->msix = NULL;
+    return -1;
 }
 
 void pt_msix_delete(struct pt_dev *dev)
