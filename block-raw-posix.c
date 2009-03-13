@@ -694,8 +694,8 @@ static BlockDriverAIOCB *raw_aio_flush(BlockDriverState *bs,
     acb = raw_aio_setup(bs, 0, NULL, 0, cb, opaque);
     if (!acb)
         return NULL;
-    if (aio_fsync(O_SYNC, &acb->aiocb) < 0) {
-        qemu_aio_release(acb);
+    if (qemu_paio_fsync(&acb->aiocb) < 0) {
+        raw_aio_remove(acb);
         return NULL;
     }
     return &acb->common;

@@ -14,6 +14,7 @@
 #include <pthread.h>
 #include <unistd.h>
 #include <errno.h>
+#include <assert.h>
 #include <sys/time.h>
 #include "osdep.h"
 
@@ -67,16 +68,10 @@ static void *aio_thread(void *unused)
         while (offset < aiocb->aio_nbytes) {
             ssize_t len;
 
-            if (aiocb->is_write)
-                len = pwrite(aiocb->aio_fildes,
-                             (const char *)aiocb->aio_buf + offset,
+            len = aiocb->function(aiocb->aio_fildes,
+                             aiocb->aio_buf + offset,
                              aiocb->aio_nbytes - offset,
                              aiocb->aio_offset + offset);
-            else
-                len = pread(aiocb->aio_fildes,
-                            (char *)aiocb->aio_buf + offset,
-                            aiocb->aio_nbytes - offset,
-                            aiocb->aio_offset + offset);
 
             if (len == -1 && errno == EINTR)
                 continue;
@@ -127,9 +122,9 @@ int qemu_paio_init(struct qemu_paioinit *aioinit)
     return 0;
 }
 
-static int qemu_paio_submit(struct qemu_paiocb *aiocb, int is_write)
+static int qemu_paio_submit(struct qemu_paiocb *aiocb, qemu_paio_function fn)
 {
-    aiocb->is_write = is_write;
+    aiocb->function = fn;
     aiocb->ret = -EINPROGRESS;
     aiocb->active = 0;
     pthread_mutex_lock(&lock);
@@ -144,12 +139,26 @@ static int qemu_paio_submit(struct qemu_paiocb *aiocb, int is_write)
 
 int qemu_paio_read(struct qemu_paiocb *aiocb)
 {
-    return qemu_paio_submit(aiocb, 0);
+    return qemu_paio_submit(aiocb, pread);
 }
 
 int qemu_paio_write(struct qemu_paiocb *aiocb)
 {
-    return qemu_paio_submit(aiocb, 1);
+    return qemu_paio_submit(aiocb, (qemu_paio_function*)pwrite);
+}
+
+static ssize_t fsync_like_pwrite(int fd, void *buf,
+                                 size_t count, off_t offset) {
+    assert(count==1);
+    assert(offset==0);
+    return fsync(fd) ? -1 : 1;
+}
+int qemu_paio_fsync(struct qemu_paiocb *aiocb)
+{
+    assert(aiocb->aio_offset==0);
+    assert(aiocb->aio_buf==0);
+    aiocb->aio_nbytes = 1;
+    return qemu_paio_submit(aiocb, fsync_like_pwrite);
 }
 
 ssize_t qemu_paio_return(struct qemu_paiocb *aiocb)

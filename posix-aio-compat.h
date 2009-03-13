@@ -24,6 +24,9 @@
 #define QEMU_PAIO_NOTCANCELED  0x02
 #define QEMU_PAIO_ALLDONE      0x03
 
+typedef ssize_t qemu_paio_function(int fd, void *buf,
+				   size_t count, off_t offset);
+
 struct qemu_paiocb
 {
     int aio_fildes;
@@ -34,7 +37,7 @@ struct qemu_paiocb
 
     /* private */
     TAILQ_ENTRY(qemu_paiocb) node;
-    int is_write;
+    qemu_paio_function *function;
     ssize_t ret;
     int active;
 };
@@ -50,6 +53,7 @@ int qemu_paio_init(struct qemu_paioinit *aioinit);
 int qemu_paio_read(struct qemu_paiocb *aiocb);
 int qemu_paio_write(struct qemu_paiocb *aiocb);
 int qemu_paio_error(struct qemu_paiocb *aiocb);
+int qemu_paio_fsync(struct qemu_paiocb *aiocb);
 ssize_t qemu_paio_return(struct qemu_paiocb *aiocb);
 int qemu_paio_cancel(int fd, struct qemu_paiocb *aiocb);
 
