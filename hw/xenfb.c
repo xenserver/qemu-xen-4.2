@@ -595,14 +595,7 @@ static void xenfb_guest_copy(struct XenFB *xenfb, int x, int y, int w, int h)
 {
     int line;
 
-    /*
-     * TODO: xen's qemu-dm seems to have some patches to
-     *       make the qemu display code avoid unneeded
-     *       work.
-     *        - Port them over.
-     *        - Put ds->shared_buf back into use then.
-     */
-    if (1 /* !xenfb->c.ds->shared_buf */) {
+    if (!is_buffer_shared(xenfb->c.ds->surface)) {
 	if (xenfb->depth == ds_get_bits_per_pixel(xenfb->c.ds)) { /* Perfect match can use fast path */
 	    for (line = y ; line < (y+h) ; line++) {
 		memcpy(ds_get_data(xenfb->c.ds) + (line * ds_get_linesize(xenfb->c.ds)) + (x * ds_get_bytes_per_pixel(xenfb->c.ds)),
@@ -735,10 +728,30 @@ static void xenfb_update(void *opaque)
     }
 
     /* resize if needed */
-    if (xenfb->width != ds_get_width(xenfb->c.ds) || xenfb->height != ds_get_height(xenfb->c.ds)) {
+    if (xenfb->width != ds_get_width(xenfb->c.ds) ||
+        xenfb->height != ds_get_height(xenfb->c.ds) ||
+        xenfb->depth != ds_get_bits_per_pixel(xenfb->c.ds) ||
+        xenfb->row_stride != ds_get_linesize(xenfb->c.ds) ||
+        xenfb->pixels + xenfb->offset != ds_get_data(xenfb->c.ds)) {
+        switch (xenfb->depth) {
+        case 16:
+        case 32:
+            /* console.c supported depth -> buffer can be used directly */
+            qemu_free_displaysurface(xenfb->c.ds);
+            xenfb->c.ds->surface = qemu_create_displaysurface_from
+                (xenfb->width, xenfb->height, xenfb->depth,
+                 xenfb->row_stride, xenfb->pixels + xenfb->offset);
+            dpy_resize(xenfb->c.ds);
+            break;
+        default:
+            /* we must convert stuff */
+            qemu_resize_displaysurface(xenfb->c.ds,
+                                       xenfb->width, xenfb->height,
+                                       xenfb->depth, xenfb->row_stride);
+            break;
+        }
         xen_be_printf(&xenfb->c.xendev, 1, "update: resizing: %dx%d\n",
                       xenfb->width, xenfb->height);
-        qemu_console_resize(xenfb->c.ds, xenfb->width, xenfb->height);
         xenfb->up_fullscreen = 1;
     }
 
