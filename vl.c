@@ -4334,7 +4334,7 @@ static const QEMUOption qemu_options[] = {
     { "S", 0, QEMU_OPTION_S },
     { "s", 0, QEMU_OPTION_s },
     { "p", HAS_ARG, QEMU_OPTION_p },
-    { "d", HAS_ARG, QEMU_OPTION_d },
+//  { "d", HAS_ARG, QEMU_OPTION_d },
     { "hdachs", HAS_ARG, QEMU_OPTION_hdachs },
     { "L", HAS_ARG, QEMU_OPTION_L },
     { "bios", HAS_ARG, QEMU_OPTION_bios },
@@ -4377,7 +4377,7 @@ static const QEMUOption qemu_options[] = {
     { "direct_pci", HAS_ARG, QEMU_OPTION_direct_pci },
     { "pciemulation", HAS_ARG, QEMU_OPTION_pci_emulation },
     { "vncunused", 0, QEMU_OPTION_vncunused },
-    { "vcpus", 0, QEMU_OPTION_vcpus },
+    { "vcpus", HAS_ARG, QEMU_OPTION_vcpus },
 #ifdef CONFIG_XEN
     { "xen-domid", HAS_ARG, QEMU_OPTION_xen_domid },
     { "xen-create", 0, QEMU_OPTION_xen_create },
