@@ -711,7 +711,7 @@ void cpu_physical_memory_write_rom(target_phys_addr_t addr,
 void qemu_register_coalesced_mmio(target_phys_addr_t addr, ram_addr_t size) { }
 void qemu_unregister_coalesced_mmio(target_phys_addr_t addr, ram_addr_t size) { }
 
-
+#if DIRECT_MMAP
 void *cpu_physical_memory_map(target_phys_addr_t addr,
                               target_phys_addr_t *plen,
                               int is_write) {
@@ -729,12 +729,23 @@ void *cpu_physical_memory_map(target_phys_addr_t addr,
 
     xen_pfn_t pfns[count];
 
+fprintf(stderr,"cpu_physical_memory_map tpa=%lx *plen=%lx"
+        "  first=%lx last=%lx count=%lx offset=%lx ",
+        (unsigned long)addr,
+        (unsigned long)*plen,
+        (unsigned long)first,
+        (unsigned long)last,
+        (unsigned long)count,
+        (unsigned long)offset);
+        
     for (i = 0; i < count; i++)
         pfns[i] = first + i;
 
     vaddr = xc_map_foreign_batch(xc_handle, domid,
                                  is_write ? PROT_WRITE : PROT_READ,
                                  pfns, count);
+fprintf(stderr," => vaddr=%p\n", vaddr);
+
     if (!vaddr)
         perror("cpu_physical_memory_map: map failed");
 
@@ -748,9 +759,18 @@ void cpu_physical_memory_unmap(void *buffer, target_phys_addr_t len,
 
     if (!len) return;
 
-    start = (uintptr_t)buffer & (XC_PAGE_SIZE - 1);
-    end = ((uintptr_t)(buffer + len - 1) | (XC_PAGE_SIZE - 1)) + 1;
+    start = (uintptr_t)buffer & ~((uintptr_t)XC_PAGE_SIZE - 1);
+    end = ((uintptr_t)(buffer + len - 1) | ((uintptr_t)XC_PAGE_SIZE - 1)) + 1;
     
+fprintf(stderr,"cpu_physical_memory_unmap buffer=%p len=%lx"
+        "  start=%lx end=%lx  XC_PAGE_SIZE-1=%lx\n",
+        buffer,
+        (unsigned long)len,
+        (unsigned long)start,
+        (unsigned long)end,
+        (unsigned long)((uintptr_t)XC_PAGE_SIZE - 1)
+        );
+
     ret = munmap((void*)start, end - start);
     if (ret)
         perror("cpu_physical_memory_unmap: munmap failed");
@@ -761,6 +781,7 @@ void *cpu_register_map_client(void *opaque, void (*callback)(void *opaque)) {
 }
 void cpu_unregister_map_client(void *cookie) {
 }
+#endif /*DIRECT_MMAP*/
 
 /* stub out various functions for Xen DM */
 void dump_exec_info(FILE *f,
@@ -771,3 +792,124 @@ void monitor_disas(CPUState *env,
 }
 void irq_info(void) { }
 void pic_info(void) { }
+
+
+
+
+/*
+ * This next section was clone-and-hacked from the version in exec.c
+ * :-(.  But the exec.c version is full of tcg-specific stuff and
+ * assumptions about phys_ram_base.
+ */
+
+typedef struct {
+    void *buffer;
+    target_phys_addr_t addr;
+    target_phys_addr_t len;
+} BounceBuffer;
+
+static BounceBuffer bounce;
+
+typedef struct MapClient {
+    void *opaque;
+    void (*callback)(void *opaque);
+    LIST_ENTRY(MapClient) link;
+} MapClient;
+
+static LIST_HEAD(map_client_list, MapClient) map_client_list
+    = LIST_HEAD_INITIALIZER(map_client_list);
+
+void *cpu_register_map_client(void *opaque, void (*callback)(void *opaque))
+{
+    MapClient *client = qemu_malloc(sizeof(*client));
+
+    client->opaque = opaque;
+    client->callback = callback;
+    LIST_INSERT_HEAD(&map_client_list, client, link);
+    return client;
+}
+
+void cpu_unregister_map_client(void *_client)
+{
+    MapClient *client = (MapClient *)_client;
+
+    LIST_REMOVE(client, link);
+}
+
+static void cpu_notify_map_clients(void)
+{
+    MapClient *client;
+
+    while (!LIST_EMPTY(&map_client_list)) {
+        client = LIST_FIRST(&map_client_list);
+        client->callback(client->opaque);
+        LIST_REMOVE(client, link);
+    }
+}
+
+/* Map a physical memory region into a host virtual address.
+ * May map a subset of the requested range, given by and returned in *plen.
+ * May return NULL if resources needed to perform the mapping are exhausted.
+ * Use only for reads OR writes - not for read-modify-write operations.
+ * Use cpu_register_map_client() to know when retrying the map operation is
+ * likely to succeed.
+ */
+void *cpu_physical_memory_map(target_phys_addr_t addr,
+                              target_phys_addr_t *plen,
+                              int is_write)
+{
+    target_phys_addr_t len = *plen;
+    target_phys_addr_t done = 0;
+    int l;
+    uint8_t *ret = NULL;
+    uint8_t *ptr;
+    target_phys_addr_t page;
+    PhysPageDesc *p;
+    unsigned long addr1;
+
+    while (len > 0) {
+        page = addr & TARGET_PAGE_MASK;
+        l = (page + TARGET_PAGE_SIZE) - addr;
+        if (l > len)
+            l = len;
+
+        if (done || bounce.buffer) {
+            break;
+        }
+	bounce.buffer = qemu_memalign(TARGET_PAGE_SIZE, TARGET_PAGE_SIZE);
+        bounce.addr = addr;
+        bounce.len = l;
+        if (!is_write) {
+            cpu_physical_memory_rw(addr, bounce.buffer, l, 0);
+        }
+        ptr = bounce.buffer;
+
+        if (!done) {
+            ret = ptr;
+        } else if (ret + done != ptr) {
+            break;
+        }
+
+        len -= l;
+        addr += l;
+        done += l;
+    }
+    *plen = done;
+    return ret;
+}
+
+/* Unmaps a memory region previously mapped by cpu_physical_memory_map().
+ * Will also mark the memory as dirty if is_write == 1.  access_len gives
+ * the amount of memory that was actually read or written by the caller.
+ */
+void cpu_physical_memory_unmap(void *buffer, target_phys_addr_t len,
+                               int is_write, target_phys_addr_t access_len)
+{
+    assert(buffer == bounce.buffer);
+    if (is_write) {
+        cpu_physical_memory_write(bounce.addr, bounce.buffer, access_len);
+    }
+    qemu_free(bounce.buffer);
+    bounce.buffer = NULL;
+    cpu_notify_map_clients();
+}
