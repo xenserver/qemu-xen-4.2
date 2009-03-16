@@ -217,6 +217,7 @@ struct pt_dev {
     /* Physical MSI to guest INTx translation when possible */
     int msi_trans_cap;
     int msi_trans_en;
+    int power_mgmt;
     struct pt_pm_info *pm_state;                /* PM virtualization */
 };
 

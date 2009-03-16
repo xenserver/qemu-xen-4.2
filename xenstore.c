@@ -303,8 +303,10 @@ const char *xenstore_get_guest_uuid(void)
 
 #define DIRECT_PCI_STR_LEN 512
 #define PT_PCI_MSITRANSLATE_DEFAULT 1
+#define PT_PCI_POWER_MANAGEMENT_DEFAULT 0
 char direct_pci_str[DIRECT_PCI_STR_LEN];
 int direct_pci_msitranslate;
+int direct_pci_power_mgmt;
 void xenstore_parse_domain_config(int hvm_domid)
 {
     char **e_danger = NULL;
@@ -603,15 +605,26 @@ void xenstore_parse_domain_config(int hvm_domid)
 
     /* get the pci pass-through parameter */
     if (pasprintf(&buf, "/local/domain/0/backend/pci/%u/%u/msitranslate",
-                  hvm_domid, pci_devid) == -1)
-        goto out;
+                  hvm_domid, pci_devid) != -1)
+    {
+        free(params);
+        params = xs_read(xsh, XBT_NULL, buf, &len);
+        if (params)
+            direct_pci_msitranslate = atoi(params);
+        else
+            direct_pci_msitranslate = PT_PCI_MSITRANSLATE_DEFAULT;
+    }
 
-    free(params);
-    params = xs_read(xsh, XBT_NULL, buf, &len);
-    if (params)
-        direct_pci_msitranslate = atoi(params);
-    else
-        direct_pci_msitranslate = PT_PCI_MSITRANSLATE_DEFAULT;
+    if (pasprintf(&buf, "/local/domain/0/backend/pci/%u/%u/power_mgmt",
+                  hvm_domid, pci_devid) != -1)
+    {
+        free(params);
+        params = xs_read(xsh, XBT_NULL, buf, &len);
+        if (params)
+            direct_pci_power_mgmt = atoi(params);
+        else
+            direct_pci_power_mgmt = PT_PCI_POWER_MANAGEMENT_DEFAULT;
+    }
 
  out:
     free(danger_type);

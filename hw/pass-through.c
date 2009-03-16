@@ -105,6 +105,9 @@ static int pt_long_reg_read(struct pt_dev *ptdev,
 static int pt_bar_reg_read(struct pt_dev *ptdev,
     struct pt_reg_tbl *cfg_entry,
     uint32_t *value, uint32_t valid_mask);
+static int pt_pmcsr_reg_read(struct pt_dev *ptdev,
+    struct pt_reg_tbl *cfg_entry,
+    uint16_t *value, uint16_t valid_mask);
 static int pt_byte_reg_write(struct pt_dev *ptdev,
     struct pt_reg_tbl *cfg_entry,
     uint8_t *value, uint8_t dev_value, uint8_t valid_mask);
@@ -407,7 +410,7 @@ static struct pt_reg_info_tbl pt_emu_reg_pm_tbl[] = {
         .ro_mask    = 0xE1FC,
         .emu_mask   = 0x8100,
         .init       = pt_pmcsr_reg_init,
-        .u.w.read   = pt_word_reg_read,
+        .u.w.read   = pt_pmcsr_reg_read,
         .u.w.write  = pt_pmcsr_reg_write,
         .u.w.restore  = pt_pmcsr_reg_restore,
     },
@@ -2341,6 +2344,9 @@ static uint32_t pt_pmc_reg_init(struct pt_dev *ptdev,
 {
     PCIDevice *d = &ptdev->dev;
 
+    if (!ptdev->power_mgmt)
+        return reg->init_val;
+
     /* set Power Management Capabilities register */
     ptdev->pm_state->pmc_field = *(uint16_t *)(d->config + real_offset);
 
@@ -2353,6 +2359,9 @@ static uint32_t pt_pmcsr_reg_init(struct pt_dev *ptdev,
 {
     PCIDevice *d = &ptdev->dev;
     uint16_t cap_ver  = 0;
+
+    if (!ptdev->power_mgmt)
+        return reg->init_val;
 
     /* check PCI Power Management support version */
     cap_ver = ptdev->pm_state->pmc_field & PCI_PM_CAP_VER_MASK;
@@ -2553,6 +2562,9 @@ static uint8_t pt_reg_grp_size_init(struct pt_dev *ptdev,
 static uint8_t pt_pm_size_init(struct pt_dev *ptdev,
         struct pt_reg_grp_info_tbl *grp_reg, uint32_t base_offset)
 {
+    if (!ptdev->power_mgmt)
+        return grp_reg->grp_size;
+
     ptdev->pm_state = qemu_mallocz(sizeof(struct pt_pm_info));
     if (!ptdev->pm_state)
     {
@@ -2805,6 +2817,25 @@ static int pt_bar_reg_read(struct pt_dev *ptdev,
 
    return 0;
 }
+
+
+/* read Power Management Control/Status register */
+static int pt_pmcsr_reg_read(struct pt_dev *ptdev,
+        struct pt_reg_tbl *cfg_entry,
+        uint16_t *value, uint16_t valid_mask)
+{
+    struct pt_reg_info_tbl *reg = cfg_entry->reg;
+    uint16_t valid_emu_mask = reg->emu_mask;
+
+    if (!ptdev->power_mgmt)
+        valid_emu_mask |= PCI_PM_CTRL_STATE_MASK;
+
+    valid_emu_mask = valid_emu_mask & valid_mask ;
+    *value = PT_MERGE_VALUE(*value, cfg_entry->data, ~valid_emu_mask);
+
+    return 0;
+}
+
 
 /* write byte size emulate register */
 static int pt_byte_reg_write(struct pt_dev *ptdev,
@@ -3081,6 +3112,24 @@ static int pt_pmcsr_reg_write(struct pt_dev *ptdev,
     uint16_t throughable_mask = 0;
     struct pt_pm_info *pm_state = ptdev->pm_state;
     uint16_t read_val = 0;
+
+    if (!ptdev->power_mgmt) {
+        uint16_t emu_mask = 
+            PCI_PM_CTRL_PME_STATUS | PCI_PM_CTRL_DATA_SCALE_MASK |
+            PCI_PM_CTRL_PME_ENABLE |
+            PCI_PM_CTRL_DATA_SEL_MASK | PCI_PM_CTRL_STATE_MASK;
+        uint16_t ro_mask = PCI_PM_CTRL_DATA_SCALE_MASK;
+
+        /* modify emulate register */
+        writable_mask = emu_mask & ~ro_mask & valid_mask;
+
+        cfg_entry->data = PT_MERGE_VALUE(*value, cfg_entry->data, writable_mask);
+        /* create value for writing to I/O device register */
+        throughable_mask = ~emu_mask & valid_mask;
+        *value = PT_MERGE_VALUE(*value, dev_value, throughable_mask);
+
+        return 0;
+    }
 
     /* modify emulate register */
     writable_mask = reg->emu_mask & ~reg->ro_mask & valid_mask;
@@ -3564,7 +3613,7 @@ struct pt_dev * register_real_device(PCIBus *e_bus,
     struct pci_config_cf8 machine_bdf;
     int free_pci_slot = -1;
     char *key, *val;
-    int msi_translate;
+    int msi_translate, power_mgmt;
 
     PT_LOG("Assigning real physical device %02x:%02x.%x ...\n",
         r_bus, r_dev, r_func);
@@ -3597,6 +3646,7 @@ struct pt_dev * register_real_device(PCIBus *e_bus,
     }
 
     msi_translate = direct_pci_msitranslate;
+    power_mgmt = direct_pci_power_mgmt;
     while (opt) {
         if (get_next_keyval(&opt, &key, &val)) {
             PT_LOG("Error: unrecognized PCI assignment option \"%s\"\n", opt);
@@ -3617,6 +3667,21 @@ struct pt_dev * register_real_device(PCIBus *e_bus,
             }
             else
                 PT_LOG("Error: unrecognized value for msitranslate=\n");
+        }
+        else if (strcmp(key, "power_mgmt") == 0)
+        {
+            if (strcmp(val, "0") == 0)
+            {
+                PT_LOG("Disable power management\n");
+                power_mgmt = 0;
+            }
+            else if (strcmp(val, "1") == 0)
+            {
+                PT_LOG("Enable power management\n");
+                power_mgmt = 1;
+            }
+            else
+                PT_LOG("Error: unrecognized value for power_mgmt=\n");
         }
         else
             PT_LOG("Error: unrecognized PCI assignment option \"%s=%s\"\n", key, val);
@@ -3639,6 +3704,7 @@ struct pt_dev * register_real_device(PCIBus *e_bus,
 
     assigned_device->pci_dev = pci_dev;
     assigned_device->msi_trans_cap = msi_translate;
+    assigned_device->power_mgmt = power_mgmt;
 
     /* Assign device */
     machine_bdf.reg = 0;
