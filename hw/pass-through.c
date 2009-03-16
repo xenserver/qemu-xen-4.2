@@ -3825,20 +3825,14 @@ int unregister_real_device(int php_slot)
                                        e_device, e_intx, 0);
         if ( rc < 0 )
         {
-            /* TBD: unregister device in case of an error */
             PT_LOG("Error: Unbinding of interrupt failed! rc=%d\n", rc);
         }
     }
-    else if (assigned_device->msi_trans_en)
-    {
-        rc = xc_domain_unbind_pt_irq(xc_handle, domid, assigned_device->msi->pirq,
-                                     PT_IRQ_TYPE_MSI_TRANSLATE, 0,
-                                     e_device, e_intx, 0);
-        if (rc < 0)
-            PT_LOG("Error: Unbinding pt irq for MSI-INTx failed! rc=%d\n", rc);
-    }
 
-    /* TODO: unmap passthrough MSI and MSI-X irqs */
+    if (assigned_device->msi)
+        pt_msi_disable(assigned_device);
+    if (assigned_device->msix)
+        pt_msix_disable(assigned_device);
 
     /* delete all emulated config registers */
     pt_config_delete(assigned_device);
