@@ -30,6 +30,7 @@
 #include <string.h>
 #include <errno.h>
 #include <unistd.h>
+#include <assert.h>
 #include <inttypes.h>
 
 #include "cpu.h"
