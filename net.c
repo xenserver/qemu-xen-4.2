@@ -122,18 +122,7 @@
 
 static VLANState *first_vlan;
 
-static TAPState *head_net_tap;
-
-void net_tap_shutdown_all(void)
-{
-    struct IOHandlerRecord **pioh, *ioh;
-
-    while (head_net_tap) {
-        qemu_set_fd_handler2(head_net_tap->fd, 0,0,0,0);
-        close(head_net_tap->fd);
-        head_net_tap = head_net_tap->next;
-    }
-}
+static struct TAPState *head_net_tap;
 
 /***********************************************************/
 /* network device redirectors */
@@ -1692,7 +1681,7 @@ int net_client_init(const char *device, const char *p)
             }
             if (get_param_value(script_arg, sizeof(script_arg), "scriptarg", p) == 0 &&
                 get_param_value(script_arg, sizeof(script_arg), "bridge", p) == 0) { /* deprecated; for xend compatibility */
-+                pstrcpy(script_arg, sizeof(script_arg), "");
+                pstrcpy(script_arg, sizeof(script_arg), "");
             }
             ret = net_tap_init(vlan, device, name, ifname, setup_script, down_script, script_arg);
         }
@@ -1831,7 +1820,8 @@ void net_cleanup(void)
                 TAPState *s = vc->opaque;
 
                 if (s->down_script[0])
-                    launch_script(s->down_script, s->down_script_arg, s->fd);
+                    launch_script(s->down_script, s->down_script_arg,
+				  s->script_arg, s->fd);
             }
 #if defined(CONFIG_VDE)
             if (vc->fd_read == vde_from_qemu) {
@@ -1857,5 +1847,16 @@ void net_client_check(void)
             fprintf(stderr,
                     "Warning: vlan %d is not connected to host network\n",
                     vlan->id);
+    }
+}
+
+void net_tap_shutdown_all(void)
+{
+    struct IOHandlerRecord **pioh, *ioh;
+
+    while (head_net_tap) {
+        qemu_set_fd_handler2(head_net_tap->fd, 0,0,0,0);
+        close(head_net_tap->fd);
+        head_net_tap = head_net_tap->next;
     }
 }

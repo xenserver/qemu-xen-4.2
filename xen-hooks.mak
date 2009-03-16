@@ -7,7 +7,7 @@ ifeq ($(SSE2),-msse2)
 CFLAGS += -DUSE_SSE2=1 -msse2
 endif
 
-QEMU_PROG=qemu-dm
+override QEMU_PROG=qemu-dm
 
 CFLAGS += -Wno-unused -Wno-declaration-after-statement
 
@@ -68,7 +68,7 @@ $(info === PCI passthrough capability has been enabled ===)
 endif
 
 BAD_OBJS += gdbstub.o acpi.o apic.o
-BAD_OBJS += vmmouse.o vmport.o tcg* helper.o
+BAD_OBJS += vmmouse.o vmport.o tcg* helper.o vmware_vga.o virtio-balloon.o
 
 OBJS := $(filter-out $(BAD_OBJS), $(OBJS))
 

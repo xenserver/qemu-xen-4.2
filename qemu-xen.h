@@ -31,8 +31,6 @@ void set_vram_mapping(void *opaque, unsigned long begin, unsigned long end);
 void unset_vram_mapping(void *opaque);
 #endif
 
-void ide_unplug_harddisks(void);
-void net_tap_shutdown_all(void);
 void pci_unplug_netifs(void);
 void destroy_hvm_domain(void);
 void unregister_iomem(target_phys_addr_t start);
@@ -106,5 +104,8 @@ int xenfb_connect_vkbd(const char *path);
 int xenfb_connect_vfb(const char *path);
 
 int has_tpm_device_danger(void);
+
+static void vga_dirty_log_start(void *s) { }
+static void vga_dirty_log_stop(void *s) { }
 
 #endif /*QEMU_XEN_H*/

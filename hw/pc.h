@@ -95,7 +95,6 @@ extern int fd_bootchk;
 
 void ioport_set_a20(int enable);
 int ioport_get_a20(void);
-void cmos_set_s3_resume(void);
 
 /* acpi.c */
 extern int acpi_enabled;
@@ -137,7 +136,7 @@ extern enum vga_retrace_method vga_retrace_method;
 #define VGA_RAM_SIZE (9 * 1024 * 1024)
 #endif
 
-int isa_vga_init(DisplayState *ds, uint8_t *vga_ram_base,
+int isa_vga_init(uint8_t *vga_ram_base,
                  unsigned long vga_ram_offset, int vga_ram_size);
 int pci_vga_init(PCIBus *bus, uint8_t *vga_ram_base,
                  unsigned long vga_ram_offset, int vga_ram_size,

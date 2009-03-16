@@ -185,6 +185,8 @@ int load_uimage(const char *filename, target_ulong *ep, target_ulong *loadaddr,
 int fread_targphys(target_phys_addr_t dst_addr, size_t nbytes, FILE *f);
 int fread_targphys_ok(target_phys_addr_t dst_addr, size_t nbytes, FILE *f);
 int read_targphys(int fd, target_phys_addr_t dst_addr, size_t nbytes);
+void pstrcpy_targphys(target_phys_addr_t dest, int buf_size,
+                      const char *source);
 #endif
 
 #ifdef HAS_AUDIO

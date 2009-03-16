@@ -891,6 +891,11 @@ extern ram_addr_t ram_size;
 typedef void CPUWriteMemoryFunc(void *opaque, target_phys_addr_t addr, uint32_t value);
 typedef uint32_t CPUReadMemoryFunc(void *opaque, target_phys_addr_t addr);
 
+#ifdef CONFIG_DM
+void cpu_register_physical_memory(target_phys_addr_t start_addr,
+				  ram_addr_t size,
+				  ram_addr_t phys_offset);
+#else
 void cpu_register_physical_memory_offset(target_phys_addr_t start_addr,
                                          ram_addr_t size,
                                          ram_addr_t phys_offset,
@@ -901,6 +906,7 @@ static inline void cpu_register_physical_memory(target_phys_addr_t start_addr,
 {
     cpu_register_physical_memory_offset(start_addr, size, phys_offset, 0);
 }
+#endif
 
 ram_addr_t cpu_get_physical_page_desc(target_phys_addr_t addr);
 ram_addr_t qemu_ram_alloc(ram_addr_t);

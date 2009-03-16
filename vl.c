@@ -43,6 +43,12 @@
 #include "kvm.h"
 #include "balloon.h"
 
+#include "hw/pci.h"
+#include "hw/xen.h"
+#include <stdlib.h>
+
+#include "qemu-xen.h"
+
 #include <unistd.h>
 #include <fcntl.h>
 #include <signal.h>
@@ -181,8 +187,8 @@ static IOPortWriteFunc *ioport_write_table[3][MAX_IOPORTS];
    to store the VM snapshots */
 DriveInfo drives_table[MAX_DRIVES+1];
 int nb_drives;
-static int vga_ram_size;
 enum vga_retrace_method vga_retrace_method = VGA_RETRACE_DUMB;
+int vga_ram_size;
 static DisplayState *display_state;
 int nographic;
 static int curses;
@@ -262,6 +268,8 @@ static QEMUTimer *icount_vm_timer;
 static QEMUTimer *nographic_timer;
 
 uint8_t qemu_uuid[16];
+
+#include "xen-vl-extra.c"
 
 /***********************************************************/
 /* x86 ISA bus support */
@@ -490,7 +498,7 @@ void hw_error(const char *fmt, ...)
     fprintf(stderr, "\n");
     for(env = first_cpu; env != NULL; env = env->next_cpu) {
         fprintf(stderr, "CPU #%d:\n", env->cpu_index);
-#ifdef TARGET_I386
+#if defined(TARGET_I386) && !defined(CONFIG_DM)
         cpu_dump_state(env, stderr, fprintf, X86_DUMP_FPU);
 #else
         cpu_dump_state(env, stderr, fprintf, 0);
@@ -924,7 +932,7 @@ static void win32_rearm_timer(struct qemu_alarm_timer *t);
 static int unix_start_timer(struct qemu_alarm_timer *t);
 static void unix_stop_timer(struct qemu_alarm_timer *t);
 
-#ifdef __linux__
+#if defined(__linux__) && !defined(CONFIG_DM)
 
 static int dynticks_start_timer(struct qemu_alarm_timer *t);
 static void dynticks_stop_timer(struct qemu_alarm_timer *t);
@@ -1007,7 +1015,7 @@ static void init_icount_adjust(void)
 
 static struct qemu_alarm_timer alarm_timers[] = {
 #ifndef _WIN32
-#ifdef __linux__
+#if defined(__linux__) && !defined(CONFIG_DM)
     {"dynticks", ALARM_FLAG_DYNTICKS, dynticks_start_timer,
      dynticks_stop_timer, dynticks_rearm_timer, NULL},
     /* HPET - if available - is preferred */
@@ -1140,6 +1148,12 @@ void qemu_del_timer(QEMUTimer *ts)
     }
 }
 
+void qemu_advance_timer(QEMUTimer *ts, int64_t expire_time)
+{
+    if (ts->expire_time > expire_time)
+       qemu_mod_timer(ts, expire_time);
+}
+
 /* modify the current timer so that it will be fired when current_time
    >= expire_time. The corresponding callback will be called. */
 void qemu_mod_timer(QEMUTimer *ts, int64_t expire_time)
@@ -1258,13 +1272,31 @@ void qemu_get_timer(QEMUFile *f, QEMUTimer *ts)
     }
 }
 
+/* run the specified timer */
+void qemu_run_one_timer(QEMUTimer *ts)
+{
+    uint64_t current_time;
+
+    /* remove timer from the list before calling the callback */
+    qemu_del_timer(ts);
+
+    while ((current_time = qemu_get_clock(rt_clock)) < ts->expire_time)
+        /* sleep until the expire time */
+        usleep((ts->expire_time - current_time) * 1000);
+
+    /* run the callback */
+    ts->cb(ts->opaque);
+}
+
 static void timer_save(QEMUFile *f, void *opaque)
 {
     if (cpu_ticks_enabled) {
         hw_error("cannot save state if virtual timers are running");
     }
+#ifndef CONFIG_DM
     qemu_put_be64(f, cpu_ticks_offset);
     qemu_put_be64(f, ticks_per_sec);
+#endif
     qemu_put_be64(f, cpu_clock_offset);
 }
 
@@ -1275,14 +1307,19 @@ static int timer_load(QEMUFile *f, void *opaque, int version_id)
     if (cpu_ticks_enabled) {
         return -EINVAL;
     }
+#ifndef CONFIG_DM
     cpu_ticks_offset=qemu_get_be64(f);
     ticks_per_sec=qemu_get_be64(f);
     if (version_id == 2) {
+#else
+    if (version_id == 1 || version_id == 2) {
+#endif
         cpu_clock_offset=qemu_get_be64(f);
     }
     return 0;
 }
 
+#ifndef CONFIG_DM /* ends just before fcntl_setfl */
 #ifdef _WIN32
 void CALLBACK host_alarm_handler(UINT uTimerID, UINT uMsg,
                                  DWORD_PTR dwUser, DWORD_PTR dw1, DWORD_PTR dw2)
@@ -1391,6 +1428,7 @@ static uint64_t qemu_next_deadline_dyntick(void)
     return delta;
 }
 #endif
+#endif
 
 #ifndef _WIN32
 
@@ -1409,6 +1447,7 @@ static int fcntl_setfl(int fd, int flag)
     return 0;
 }
 
+#ifndef CONFIG_DM /* ends after end of win32_rearm_timer */
 #if defined(__linux__)
 
 #define RTC_FREQ 1024
@@ -1727,6 +1766,7 @@ static void win32_rearm_timer(struct qemu_alarm_timer *t)
 }
 
 #endif /* _WIN32 */
+#endif /* !CONFIG_DM */
 
 static int init_timer_alarm(void)
 {
@@ -2538,6 +2578,8 @@ static int drive_init(struct drive_opt *arg, int snapshot,
     case IF_MTD:
     case IF_VIRTIO:
         break;
+    case IF_BLKTAP:
+        abort();
     }
     if (!file[0])
         return 0;
@@ -2984,6 +3026,11 @@ void qemu_del_wait_object(HANDLE handle, WaitObjectFunc *func, void *opaque)
 /***********************************************************/
 /* ram save/restore */
 
+#ifdef CONFIG_DM
+static int ram_save_live(QEMUFile *f, int stage, void *opaque) { return 1; }
+static int ram_load(QEMUFile *f, void *opaque, int version_id) { return 0; }
+#else /* !CONFIG_DM */
+
 static int ram_get_page(QEMUFile *f, uint8_t *buf, int len)
 {
     int v;
@@ -3254,6 +3301,8 @@ static int ram_load(QEMUFile *f, void *opaque, int version_id)
 
     return 0;
 }
+
+#endif /* !CONFIG_DM */
 
 void qemu_service_io(void)
 {
@@ -3713,7 +3762,9 @@ void main_loop_wait(int timeout)
 
 }
 
-static int main_loop(void)
+#ifndef CONFIG_DM
+
+int main_loop(void)
 {
     int ret, timeout;
 #ifdef CONFIG_PROFILER
@@ -3862,6 +3913,12 @@ static int main_loop(void)
     return ret;
 }
 
+#else /* CONFIG_DM */
+void main_loop_prepare(void) {
+    cur_cpu = first_cpu;
+}
+#endif /* !CONFIG_DM */
+
 static void help(int exitcode)
 {
     /* Please keep in synch with QEMU_OPTION_ enums, qemu_options[]
@@ -3916,6 +3973,9 @@ static void help(int exitcode)
            "-alt-grab       use Ctrl-Alt-Shift to grab mouse (instead of Ctrl-Alt)\n"
            "-no-quit        disable SDL window close capability\n"
            "-sdl            enable SDL\n"
+#ifdef CONFIG_OPENGL
+           "-disable-opengl disable OpenGL rendering, using SDL"
+#endif
 #endif
            "-portrait       rotate graphical output 90 deg left (only PXA LCD)\n"
            "-vga [std|cirrus|vmware|none]\n"
@@ -3938,11 +3998,12 @@ static void help(int exitcode)
            "-net tap[,vlan=n][,name=str],ifname=name\n"
            "                connect the host TAP network interface to VLAN 'n'\n"
 #else
-           "-net tap[,vlan=n][,name=str][,fd=h][,ifname=name][,script=file][,downscript=dfile]\n"
+           "-net tap[,vlan=n][,name=str][,fd=h][,ifname=name][,script=file][,downscript=dfile][,scriptarg=extraargument]\n"
            "                connect the host TAP network interface to VLAN 'n' and use the\n"
            "                network scripts 'file' (default=%s)\n"
            "                and 'dfile' (default=%s);\n"
            "                use '[down]script=no' to disable script execution;\n"
+           "                use 'scriptarg=...' to pass an additional (nonempty) argument;\n"
            "                use 'fd=h' to connect to an already opened TAP interface\n"
 #endif
            "-net socket[,vlan=n][,name=str][,fd=h][,listen=[host]:port][,connect=host:port]\n"
@@ -4044,6 +4105,13 @@ static void help(int exitcode)
            "-tb-size n      set TB size\n"
            "-incoming p     prepare for incoming migration, listen on port p\n"
            "\n"
+	   "Options specific to the Xen version:\n"
+           "-videoram       set amount of memory available to virtual video adapter\n"
+	   "-direct-pci s   specify pci passthrough, with configuration string s\n"
+           "-pciemulation       name:vendorid:deviceid:command:status:revision:classcode:headertype:subvendorid:subsystemid:interruputline:interruputpin\n"
+           "-vncunused      bind the VNC server to an unused port\n"
+           "-std-vga        alias for -vga std\n"
+	   "\n"
            "During emulation, the following keys are useful:\n"
            "ctrl-alt-f      toggle full screen\n"
            "ctrl-alt-n      switch to virtual console 'n'\n"
@@ -4126,6 +4194,18 @@ enum {
     QEMU_OPTION_kernel,
     QEMU_OPTION_append,
     QEMU_OPTION_initrd,
+
+    /* Xen tree: */
+    QEMU_OPTION_disable_opengl,
+    QEMU_OPTION_direct_pci,
+    QEMU_OPTION_pci_emulation,
+    QEMU_OPTION_vncunused,
+    QEMU_OPTION_videoram,
+    QEMU_OPTION_std_vga,
+    QEMU_OPTION_domid,
+    QEMU_OPTION_domainname,
+    QEMU_OPTION_acpi,
+    QEMU_OPTION_vcpus,
 
     /* Debug/Expert options: */
     QEMU_OPTION_serial,
@@ -4283,6 +4363,27 @@ static const QEMUOption qemu_options[] = {
 #if defined(TARGET_ARM) || defined(TARGET_M68K)
     { "semihosting", 0, QEMU_OPTION_semihosting },
 #endif
+
+    /* Xen tree options: */
+    { "std-vga", 0, QEMU_OPTION_std_vga },
+    { "videoram", HAS_ARG, QEMU_OPTION_videoram },
+    { "d", HAS_ARG, QEMU_OPTION_domid }, /* deprecated; for xend compatibility */
+    { "domid", HAS_ARG, QEMU_OPTION_domid },
+    { "domain-name", 1, QEMU_OPTION_domainname },
+#ifdef CONFIG_OPENGL
+    { "disable-opengl", 0, QEMU_OPTION_disable_opengl },
+#endif
+    { "acpi", 0, QEMU_OPTION_acpi }, /* deprecated, for xend compatibility */
+    { "direct_pci", HAS_ARG, QEMU_OPTION_direct_pci },
+    { "pciemulation", HAS_ARG, QEMU_OPTION_pci_emulation },
+    { "vncunused", 0, QEMU_OPTION_vncunused },
+    { "vcpus", 0, QEMU_OPTION_vcpus },
+#ifdef CONFIG_XEN
+    { "xen-domid", HAS_ARG, QEMU_OPTION_xen_domid },
+    { "xen-create", 0, QEMU_OPTION_xen_create },
+    { "xen-attach", 0, QEMU_OPTION_xen_attach },
+#endif
+
 #if defined(TARGET_ARM)
     { "old-param", 0, QEMU_OPTION_old_param },
 #endif
@@ -4333,7 +4434,7 @@ static void read_passwords(void)
 #ifdef HAS_AUDIO
 struct soundhw soundhw[] = {
 #ifdef HAS_AUDIO_CHOICE
-#if defined(TARGET_I386) || defined(TARGET_MIPS)
+#if (defined(TARGET_I386) || defined(TARGET_MIPS)) && !defined(CONFIG_DM)
     {
         "pcspk",
         "PC speaker",
@@ -4600,6 +4701,34 @@ int main(int argc, char **argv, char **envp)
     const char *incoming = NULL;
 
     qemu_cache_utils_init(envp);
+    logfile = stderr; /* initial value */
+
+#if !defined(__sun__) && !defined(CONFIG_STUBDOM)
+    struct rlimit rl;
+    /* Maximise rlimits. Needed where default constraints are tight (*BSD). */
+    if (getrlimit(RLIMIT_STACK, &rl) != 0) {
+       perror("getrlimit(RLIMIT_STACK)");
+       exit(1);
+    }
+    rl.rlim_cur = rl.rlim_max;
+    if (setrlimit(RLIMIT_STACK, &rl) != 0)
+       perror("setrlimit(RLIMIT_STACK)");
+    if (getrlimit(RLIMIT_DATA, &rl) != 0) {
+       perror("getrlimit(RLIMIT_DATA)");
+       exit(1);
+    }
+    rl.rlim_cur = rl.rlim_max;
+    if (setrlimit(RLIMIT_DATA, &rl) != 0)
+       perror("setrlimit(RLIMIT_DATA)");
+    rl.rlim_cur = RLIM_INFINITY;
+    rl.rlim_max = RLIM_INFINITY;
+    if (setrlimit(RLIMIT_RSS, &rl) != 0)
+       perror("setrlimit(RLIMIT_RSS)");
+    rl.rlim_cur = RLIM_INFINITY;
+    rl.rlim_max = RLIM_INFINITY;
+    if (setrlimit(RLIMIT_MEMLOCK, &rl) != 0)
+       perror("setrlimit(RLIMIT_MEMLOCK)");
+#endif
 
     LIST_INIT (&vm_change_state_head);
 #ifndef _WIN32
@@ -4636,8 +4765,7 @@ int main(int argc, char **argv, char **envp)
     machine = first_machine;
     cpu_model = NULL;
     initrd_filename = NULL;
-    ram_size = 0;
-    vga_ram_size = VGA_RAM_SIZE;
+    ram_size = VGA_RAM_SIZE;
 #ifdef CONFIG_GDBSTUB
     use_gdbstub = 0;
     gdbstub_port = DEFAULT_GDBSTUB_PORT;
@@ -5070,6 +5198,7 @@ int main(int argc, char **argv, char **envp)
                 break;
 	    case QEMU_OPTION_loadvm:
 		loadvm = optarg;
+		restore = 1;
 		break;
             case QEMU_OPTION_full_screen:
                 full_screen = 1;
@@ -5088,6 +5217,61 @@ int main(int argc, char **argv, char **envp)
                 sdl = 1;
                 break;
 #endif
+
+            case QEMU_OPTION_pci_emulation:
+                if (nb_pci_emulation >= MAX_PCI_EMULATION) {
+                    fprintf(stderr, "Too many PCI emulations\n");
+                    exit(1);
+                }
+                pstrcpy(pci_emulation_config_text[nb_pci_emulation],
+                        sizeof(pci_emulation_config_text[0]),
+                        optarg);
+                nb_pci_emulation++;
+                break;
+            case QEMU_OPTION_domid: /* depricated, use -xen-* instead */
+                xen_domid = domid = atoi(optarg);
+                xen_mode  = XEN_ATTACH;
+                fprintf(logfile, "domid: %d\n", domid);
+                break;
+            case QEMU_OPTION_videoram:
+                {
+                    char *ptr;
+                    vga_ram_size = strtol(optarg,&ptr,10);
+                    vga_ram_size *= 1024 * 1024;
+                }
+                break;
+            case QEMU_OPTION_std_vga:
+                cirrus_vga_enabled = 0;
+                vmsvga_enabled = 0;
+                break;
+            case QEMU_OPTION_disable_opengl:
+                opengl_enabled = 0;
+                break;
+            case QEMU_OPTION_direct_pci:
+               direct_pci = optarg;
+                break;
+            case QEMU_OPTION_vcpus:
+                vcpus = atoi(optarg);
+                fprintf(logfile, "qemu: the number of cpus is %d\n", vcpus);
+                break;
+            case QEMU_OPTION_acpi:
+                acpi_enabled = 1;
+                break;
+            case QEMU_OPTION_vncunused:
+                vncunused = 1;
+                break;
+#ifdef CONFIG_XEN
+            case QEMU_OPTION_xen_domid:
+                xen_domid = domid = atoi(optarg);
+                break;
+            case QEMU_OPTION_xen_create:
+                xen_mode = XEN_CREATE;
+                break;
+            case QEMU_OPTION_xen_attach:
+                xen_mode = XEN_ATTACH;
+                break;
+#endif
+
             case QEMU_OPTION_pidfile:
                 pid_file = optarg;
                 break;
@@ -5173,7 +5357,10 @@ int main(int argc, char **argv, char **envp)
             case QEMU_OPTION_semihosting:
                 semihosting_enabled = 1;
                 break;
+            case QEMU_OPTION_domainname: /* depricated, use -name instead */
             case QEMU_OPTION_name:
+                snprintf(domain_name, sizeof(domain_name),
+                         "Xen-%s", optarg);
                 qemu_name = optarg;
                 break;
 #if defined(TARGET_SPARC) || defined(TARGET_PPC)
@@ -5421,13 +5608,28 @@ int main(int argc, char **argv, char **envp)
     }
 #endif
 
+#if defined (__ia64__)
+    if (ram_size > VGA_IO_START)
+        ram_size += VGA_IO_SIZE; /* skip VGA I/O hole */
+    if (ram_size > MMIO_START)
+        ram_size += 1 * MEM_G; /* skip 3G-4G MMIO, LEGACY_IO_SPACE etc. */
+#endif
+
     /* init the bluetooth world */
     for (i = 0; i < nb_bt_opts; i++)
         if (bt_parse(bt_opts[i]))
             exit(1);
 
     /* init the memory */
-    phys_ram_size = machine->ram_require & ~RAMSIZE_FIXED;
+
+    /* If we're on cirrus, set vga_ram_size to 4M whatever the videoram option might have set it to */
+    if ( cirrus_vga_enabled && vga_ram_size != 4 * 1024 * 1024 )
+    {
+       fprintf(stderr,"-videoram option does not work with cirrus vga device model. Videoram set to 4M.\n");
+       vga_ram_size = 4 * 1024 * 1024;
+    }
+
+    phys_ram_size = (machine->ram_require + vga_ram_size) & ~RAMSIZE_FIXED;
 
     if (machine->ram_require & RAMSIZE_FIXED) {
         if (ram_size > 0) {
@@ -5447,21 +5649,38 @@ int main(int argc, char **argv, char **envp)
         phys_ram_size += ram_size;
     }
 
+#ifndef CONFIG_DM
     phys_ram_base = qemu_vmalloc(phys_ram_size);
     if (!phys_ram_base) {
         fprintf(stderr, "Could not allocate physical memory\n");
         exit(1);
     }
+#endif
 
     /* init the dynamic translator */
     cpu_exec_init_all(tb_size * 1024 * 1024);
 
     bdrv_init();
 
+    xc_handle = xc_interface_open();
+#ifdef CONFIG_STUBDOM
+    {
+        char *domid_s, *msg;
+        if ((msg = xenbus_read(XBT_NIL, "domid", &domid_s)))
+            fprintf(stderr,"Can not read our own domid: %s\n", msg);
+        else
+            xenstore_parse_domain_config(atoi(domid_s));
+    }
+#else
+    xenstore_parse_domain_config(domid);
+#endif /* CONFIG_STUBDOM */
+
     /* we always create the cdrom drive, even if no disk is there */
 
+#ifndef CONFIG_DM
     if (nb_drives_opt < MAX_DRIVES)
         drive_add(NULL, CDROM_ALIAS);
+#endif
 
     /* we always create at least one floppy */
 
@@ -5483,8 +5702,10 @@ int main(int argc, char **argv, char **envp)
     register_savevm_live("ram", 0, 3, ram_save_live, NULL, ram_load, NULL);
 
 #ifndef _WIN32
+#ifndef CONFIG_DM
     /* must be after terminal init, SDL library changes signal handlers */
     termsig_setup();
+#endif
 #endif
 
     /* Maintain compatibility with multiple stdio monitors */
@@ -5563,7 +5784,8 @@ int main(int argc, char **argv, char **envp)
     }
 
     machine->init(ram_size, vga_ram_size, boot_devices,
-                  kernel_filename, kernel_cmdline, initrd_filename, cpu_model);
+                  kernel_filename, kernel_cmdline, initrd_filename, cpu_model,
+		  direct_pci);
 
     /* Set KVM's vcpu state to qemu's initial CPUState. */
     if (kvm_enabled()) {
@@ -5594,6 +5816,10 @@ int main(int argc, char **argv, char **envp)
     /* just use the first displaystate for the moment */
     ds = display_state;
     /* terminal init */
+#ifdef CONFIG_STUBDOM
+    if (xenfb_pv_display_init(ds) == 0) {
+    } else
+#endif
     if (nographic) {
         if (curses) {
             fprintf(stderr, "fatal: -nographic can't be used with -curses\n");
@@ -5607,14 +5833,20 @@ int main(int argc, char **argv, char **envp)
             } else
 #endif
             {
-                if (vnc_display != NULL) {
+                if (vnc_display != NULL || vncunused != 0) {
+		    int vnc_display_port;
+		    char password[20];
                     vnc_display_init(ds);
-                    if (vnc_display_open(ds, vnc_display) < 0)
+		    xenstore_read_vncpasswd(domid, password, sizeof(password));
+		    vnc_display_password(ds, password);
+                    vnc_display_port = vnc_display_open(ds, vnc_display, vncunused);
+		    if (vnc_display_port < 0)
                         exit(1);
+		    xenstore_write_vncport(vnc_display_port);
                 }
 #if defined(CONFIG_SDL)
                 if (sdl || !vnc_display)
-                    sdl_display_init(ds, full_screen, no_frame);
+                    sdl_display_init(ds, full_screen, no_frame, opengl_enabled);
 #elif defined(CONFIG_COCOA)
                 if (sdl || !vnc_display)
                     cocoa_display_init(ds, full_screen);
@@ -5661,6 +5893,16 @@ int main(int argc, char **argv, char **envp)
                 qemu_chr_printf(parallel_hds[i], "parallel%d console\r\n", i);
         }
     }
+
+    for (i = 0; i < nb_pci_emulation; i++) {
+        if(pci_emulation_add(pci_emulation_config_text[i]) < 0) {
+            fprintf(stderr, "Warning: could not add PCI device %s\n",
+                    pci_emulation_config_text[i]);
+        }
+    }
+
+    if (strlen(direct_pci_str) > 0)
+        direct_pci = direct_pci_str;
 
     for(i = 0; i < MAX_VIRTIO_CONSOLES; i++) {
         const char *devname = virtio_consoles[i];
@@ -5728,3 +5970,6 @@ int main(int argc, char **argv, char **envp)
 
     return 0;
 }
+
+static int unix_start_timer(struct qemu_alarm_timer *t) { return 0; }
+static void unix_stop_timer(struct qemu_alarm_timer *t) { }

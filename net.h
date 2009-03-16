@@ -98,6 +98,7 @@ void net_slirp_redir(const char *redir_str);
 void net_cleanup(void);
 int slirp_is_inited(void);
 void net_client_check(void);
+void net_tap_shutdown_all(void);
 
 #ifndef DEFAULT_NETWORK_SCRIPT
 #define DEFAULT_NETWORK_SCRIPT "/etc/qemu-ifup"

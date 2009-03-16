@@ -7,7 +7,6 @@
 /* There is no need for multiple-inclusion protection since
  * there is only one place where this file is included. */
 
-#include "qemu-xen.h"
 
 
 /* Max number of PCI emulation */
@@ -99,8 +98,6 @@ void do_loadvm(const char *name)
 }
 
 struct qemu_alarm_timer;
-static int unix_start_timer(struct qemu_alarm_timer *t) { return 0; }
-static void unix_stop_timer(struct qemu_alarm_timer *t) { }
 
 #ifdef CONFIG_STUBDOM
 #include <netfront.h>

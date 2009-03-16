@@ -87,6 +87,7 @@ int cpu_get_pic_interrupt(CPUX86State *s);
 void cpu_set_ferr(CPUX86State *s);
 
 void cpu_x86_set_a20(CPUX86State *env, int a20_state);
+uint64_t cpu_get_tsc(CPUX86State *env);
 
 /* used to debug */
 #define X86_DUMP_FPU  0x0001 /* dump FPU state too */

@@ -2304,7 +2304,7 @@ static void vga_map(PCIDevice *pci_dev, int region_num,
 }
 
 /* do the same job as vgabios before vgabios get ready - yeah */
-void vga_bios_init(VGAState *s)
+static void vga_bios_init(VGAState *s)
 {
     uint8_t palette_model[192] = {
         0,   0,   0,   0,   0, 170,   0, 170,

@@ -68,7 +68,7 @@ struct RTCState {
     int64_t next_periodic_time;
     /* second update */
     int64_t next_second_time;
-#ifdef TARGET_I386
+#ifdef IRQ_COALESCE_HACK
     uint32_t irq_coalesced;
     uint32_t period;
 #endif
@@ -109,7 +109,7 @@ static void rtc_timer_update(RTCState *s, int64_t current_time)
             period_code += 7;
         /* period in 32 Khz cycles */
         period = 1 << (period_code - 1);
-#ifdef TARGET_I386
+#ifdef IRQ_COALESCE_HACK
         if(period != s->period)
             s->irq_coalesced = (s->irq_coalesced * s->period) / period;
         s->period = period;
@@ -120,7 +120,7 @@ static void rtc_timer_update(RTCState *s, int64_t current_time)
         s->next_periodic_time = muldiv64(next_irq_clock, ticks_per_sec, 32768) + 1;
         qemu_mod_timer(s->periodic_timer, s->next_periodic_time);
     } else {
-#ifdef TARGET_I386
+#ifdef IRQ_COALESCE_HACK
         s->irq_coalesced = 0;
 #endif
         qemu_del_timer(s->periodic_timer);
@@ -132,7 +132,7 @@ static void rtc_periodic_timer(void *opaque)
     RTCState *s = opaque;
 
     rtc_timer_update(s, s->next_periodic_time);
-#ifdef TARGET_I386
+#ifdef IRQ_COALESCE_HACK
     if ((s->cmos_data[RTC_REG_C] & 0xc0) && rtc_td_hack) {
         s->irq_coalesced++;
         return;
@@ -402,7 +402,7 @@ static uint32_t cmos_ioport_read(void *opaque, uint32_t addr)
         case RTC_REG_C:
             ret = s->cmos_data[s->cmos_index];
             qemu_irq_lower(s->irq);
-#ifdef TARGET_I386
+#ifdef IRQ_COALESCE_HACK
             if(s->irq_coalesced) {
                 apic_reset_irq_delivered();
                 qemu_irq_raise(s->irq);
@@ -505,7 +505,7 @@ static int rtc_load(QEMUFile *f, void *opaque, int version_id)
     return 0;
 }
 
-#ifdef TARGET_I386
+#ifdef IRQ_COALESCE_HACK
 static void rtc_save_td(QEMUFile *f, void *opaque)
 {
     RTCState *s = opaque;
@@ -558,7 +558,7 @@ RTCState *rtc_init(int base, qemu_irq irq, int base_year)
     register_ioport_read(base, 2, 1, cmos_ioport_read, s);
 
     register_savevm("mc146818rtc", base, 1, rtc_save, rtc_load, s);
-#ifdef TARGET_I386
+#ifdef IRQ_COALESCE_HACK
     if (rtc_td_hack)
         register_savevm("mc146818rtc-td", base, 1, rtc_save_td, rtc_load_td, s);
 #endif
@@ -670,7 +670,7 @@ RTCState *rtc_mm_init(target_phys_addr_t base, int it_shift, qemu_irq irq,
     cpu_register_physical_memory(base, 2 << it_shift, io_memory);
 
     register_savevm("mc146818rtc", base, 1, rtc_save, rtc_load, s);
-#ifdef TARGET_I386
+#ifdef IRQ_COALESCE_HACK
     if (rtc_td_hack)
         register_savevm("mc146818rtc-td", base, 1, rtc_save_td, rtc_load_td, s);
 #endif

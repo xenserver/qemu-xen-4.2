@@ -4,4 +4,3 @@
 #define TARGET_I386 1
 #define CONFIG_SOFTMMU 1
 #define CONFIG_SOFTFLOAT 1
-#define CONFIG_DM 1

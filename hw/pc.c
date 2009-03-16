@@ -980,12 +980,14 @@ vga_bios_error:
             isa_cirrus_vga_init(phys_ram_base + vga_ram_addr,
                                 vga_ram_addr, vga_ram_size);
         }
+#ifndef CONFIG_DM
     } else if (vmsvga_enabled) {
         if (pci_enabled)
             pci_vmsvga_init(pci_bus, phys_ram_base + vga_ram_addr,
                             vga_ram_addr, vga_ram_size);
         else
             fprintf(stderr, "%s: vmware_vga: no PCI bus\n", __FUNCTION__);
+#endif
     } else if (std_vga_enabled) {
         if (pci_enabled) {
             pci_vga_init(pci_bus, phys_ram_base + vga_ram_addr,
@@ -1148,6 +1150,7 @@ vga_bios_error:
         }
     }
 
+#ifndef CONFIG_DM
     /* Add virtio block devices */
     if (pci_enabled) {
         int index;
@@ -1170,6 +1173,7 @@ vga_bios_error:
                 virtio_console_init(pci_bus, virtcon_hds[i]);
         }
     }
+#endif
 }
 
 static void pc_init_pci(ram_addr_t ram_size, int vga_ram_size,
@@ -1202,14 +1206,6 @@ static void pc_init_isa(ram_addr_t ram_size, int vga_ram_size,
 
 /* set CMOS shutdown status register (index 0xF) as S3_resume(0xFE)
    BIOS will read it and start S3 resume at POST Entry*/
-void cmos_set_s3_resume(void)
-{
-    if (rtc_state)
-        rtc_set_memory(rtc_state, 0xF, 0xFE);
-}
-
-/* set CMOS shutdown status register (index 0xF) as S3_resume(0xFE)
-   BIOS will read it and start S3 resume at POST Entry */
 void cmos_set_s3_resume(void)
 {
     if (rtc_state)

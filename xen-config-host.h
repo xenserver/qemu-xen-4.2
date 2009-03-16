@@ -8,6 +8,8 @@
 #define NO_BLUETOOTH_PASSTHROUGH 1
 #endif
 
+#define CONFIG_DM
+
 extern char domain_name[64];
 extern int domid, domid_backend;
 
@@ -33,8 +35,6 @@ extern int vcpus;
 #define DEFAULT_NETWORK_SCRIPT "/etc/xen/qemu-ifup"
 #define DEFAULT_NETWORK_DOWN_SCRIPT "/etc/xen/qemu-ifdown"
 
-void xenstore_parse_domain_config(int domid);
-void xenstore_read_vncpasswd(int domid, char *pwbuf, size_t pwbuflen);
 #ifdef CONFIG_STUBDOM
 extern struct BlockDriver bdrv_vbd;
 #endif

@@ -28,6 +28,7 @@
 #include "pci.h"
 #include "irq.h"
 #include "qemu-xen.h"
+#include "net.h"
 
 #include <assert.h>
 #include <xenguest.h>
@@ -361,7 +362,7 @@ struct pci_config_header {
     uint8_t  max_lat;
 };
 
-void xen_pci_save(QEMUFile *f, void *opaque)
+static void xen_pci_save(QEMUFile *f, void *opaque)
 {
     PCIXenPlatformState *d = opaque;
     uint64_t t = 0;
@@ -371,7 +372,7 @@ void xen_pci_save(QEMUFile *f, void *opaque)
     qemu_put_be64s(f, &t);
 }
 
-int xen_pci_load(QEMUFile *f, void *opaque, int version_id)
+static int xen_pci_load(QEMUFile *f, void *opaque, int version_id)
 {
     PCIXenPlatformState *d = opaque;
     int ret;

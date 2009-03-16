@@ -33,8 +33,11 @@
 #include <inttypes.h>
 
 #include "cpu.h"
+#include "cpu-all.h"
 #include "exec-all.h"
 #include "hw.h"
+#include "pc.h"
+#include "disas.h"
 #include "qemu-xen.h"
 
 //#define DEBUG_TB_INVALIDATE
@@ -283,8 +286,8 @@ unsigned long mmio_cnt;
    page size. If (phys_offset & ~TARGET_PAGE_MASK) != 0, then it is an
    io memory page */
 void cpu_register_physical_memory(target_phys_addr_t start_addr, 
-                                  unsigned long size,
-                                  unsigned long phys_offset)
+				  ram_addr_t size,
+				  ram_addr_t phys_offset)
 {
     int i;
 
@@ -401,7 +404,7 @@ void cpu_physical_memory_rw(target_phys_addr_t addr, uint8_t *buf,
 }
 #else
 
-int iomem_index(target_phys_addr_t addr)
+static int iomem_index(target_phys_addr_t addr)
 {
         int i;
 
@@ -422,8 +425,9 @@ void unregister_iomem(target_phys_addr_t start)
 {
     int index = iomem_index(start);
     if (index) {
-        fprintf(logfile, "squash iomem [%lx, %lx).\n", mmio[index].start,
-                mmio[index].start + mmio[index].size);
+        fprintf(logfile, "squash iomem [%lx, %lx).\n",
+		(unsigned long)(mmio[index].start),
+                (unsigned long)(mmio[index].start + mmio[index].size));
         mmio[index].start = mmio[index].size = 0;
     }
 }
@@ -702,6 +706,60 @@ uint32_t ldl_phys(target_phys_addr_t addr)
 void cpu_physical_memory_write_rom(target_phys_addr_t addr, 
                                    const uint8_t *buf, int len) {
     return cpu_physical_memory_write(addr,buf,len);
+}
+
+void qemu_register_coalesced_mmio(target_phys_addr_t addr, ram_addr_t size) { }
+void qemu_unregister_coalesced_mmio(target_phys_addr_t addr, ram_addr_t size) { }
+
+
+void *cpu_physical_memory_map(target_phys_addr_t addr,
+                              target_phys_addr_t *plen,
+                              int is_write) {
+    xen_pfn_t first, last, count, i;
+    target_phys_addr_t offset;
+    void *vaddr;
+
+    if (!*plen)
+        return NULL;
+
+    first = addr >> XC_PAGE_SHIFT;
+    last = (addr + *plen - 1) >> XC_PAGE_SHIFT;
+    count = last - first + 1;
+    offset = addr & (XC_PAGE_SIZE-1);
+
+    xen_pfn_t pfns[count];
+
+    for (i = 0; i < count; i++)
+        pfns[i] = first + i;
+
+    vaddr = xc_map_foreign_batch(xc_handle, domid,
+                                 is_write ? PROT_WRITE : PROT_READ,
+                                 pfns, count);
+    if (!vaddr)
+        perror("cpu_physical_memory_map: map failed");
+
+    return vaddr;
+}
+
+void cpu_physical_memory_unmap(void *buffer, target_phys_addr_t len,
+                               int is_write, target_phys_addr_t access_len) {
+    uintptr_t start, end;
+    int ret;
+
+    if (!len) return;
+
+    start = (uintptr_t)buffer & (XC_PAGE_SIZE - 1);
+    end = ((uintptr_t)(buffer + len - 1) | (XC_PAGE_SIZE - 1)) + 1;
+    
+    ret = munmap((void*)start, end - start);
+    if (ret)
+        perror("cpu_physical_memory_unmap: munmap failed");
+}
+
+void *cpu_register_map_client(void *opaque, void (*callback)(void *opaque)) {
+    return 0;
+}
+void cpu_unregister_map_client(void *cookie) {
 }
 
 /* stub out various functions for Xen DM */

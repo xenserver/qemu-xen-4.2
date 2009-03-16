@@ -1121,7 +1121,7 @@ static uint32_t read_u32(uint8_t *data, size_t offset)
 }
 
 #ifdef CONFIG_VNC_TLS
-ssize_t vnc_tls_push(gnutls_transport_ptr_t transport,
+static ssize_t vnc_tls_push(gnutls_transport_ptr_t transport,
 		     const void *data,
 		     size_t len) {
     struct VncState *vs = (struct VncState *)transport;
@@ -1138,7 +1138,7 @@ ssize_t vnc_tls_push(gnutls_transport_ptr_t transport,
 }
 
 
-ssize_t vnc_tls_pull(gnutls_transport_ptr_t transport,
+static ssize_t vnc_tls_pull(gnutls_transport_ptr_t transport,
 		     void *data,
 		     size_t len) {
     struct VncState *vs = (struct VncState *)transport;
@@ -2402,8 +2402,6 @@ static void vnc_listen_read(void *opaque)
     }
 }
 
-extern int parse_host_port(struct sockaddr_in *saddr, const char *str);
-
 void vnc_display_init(DisplayState *ds)
 {
     VncState *vs;
@@ -2533,10 +2531,6 @@ void vnc_display_close(DisplayState *ds)
     vs->x509verify = 0;
 #endif
 }
-
-int parse_host_port(struct sockaddr_in *saddr, const char *str);
-
-
 
 int vnc_display_password(DisplayState *ds, const char *password)
 {
@@ -2758,34 +2752,3 @@ int vnc_display_open(DisplayState *ds, const char *display, int find_unused)
 
     return ntohs(iaddr.sin_port);
 }
-
-#ifndef CONFIG_STUBDOM
-int vnc_start_viewer(int port)
-{
-    int pid, i, open_max;
-    char s[16];
-
-    sprintf(s, ":%d", port);
-
-    switch (pid = fork()) {
-    case -1:
-	fprintf(stderr, "vncviewer failed fork\n");
-	exit(1);
-
-    case 0:	/* child */
-	open_max = sysconf(_SC_OPEN_MAX);
-	for (i = 0; i < open_max; i++)
-	    if (i != STDIN_FILENO &&
-		i != STDOUT_FILENO &&
-		i != STDERR_FILENO)
-		close(i);
-	execlp("vncviewer", "vncviewer", s, NULL);
-	fprintf(stderr, "vncviewer execlp failed\n");
-	exit(1);
-
-    default:
-	return pid;
-    }
-}
-#endif
-
