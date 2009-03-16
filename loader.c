@@ -124,8 +124,6 @@ int read_targphys(int fd, target_phys_addr_t dst_addr, size_t nbytes)
     return dst_addr - dst_begin;
 }
 
-#ifndef CONFIG_DM
-
 /* return the size or -1 if error */
 int load_image_targphys(const char *filename,
 			target_phys_addr_t addr, int max_sz)
@@ -159,6 +157,8 @@ void pstrcpy_targphys(target_phys_addr_t dest, int buf_size,
 	cpu_physical_memory_write_rom(dest, &nul_byte, 1);
     }
 }
+
+#ifndef CONFIG_DM
 
 /* A.OUT loader */
 
