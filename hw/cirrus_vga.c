@@ -3174,7 +3174,8 @@ static void cirrus_reset(void *opaque)
 {
     CirrusVGAState *s = opaque;
 
-    memset(s, 0, sizeof(*s));
+    vga_reset(s);
+
     s->graphic_mode = -1; /* force full update */
 
     s->sr[0x06] = 0x0f;
