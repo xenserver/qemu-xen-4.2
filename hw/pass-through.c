@@ -2037,6 +2037,7 @@ out:
     pm_state->flags &= ~PT_FLAG_TRANSITING;
 
     qemu_free_timer(pm_state->pm_timer);
+    pm_state->pm_timer = NULL;
 }
 
 void pt_default_power_transition(void *opaque)
@@ -2051,6 +2052,7 @@ void pt_default_power_transition(void *opaque)
     pm_state->flags &= ~PT_FLAG_TRANSITING;
 
     qemu_free_timer(pm_state->pm_timer);
+    pm_state->pm_timer = NULL;
 }
 
 /* initialize emulate register */
@@ -2184,7 +2186,11 @@ static void pt_config_delete(struct pt_dev *ptdev)
     if (ptdev->pm_state)
     {
         if (ptdev->pm_state->pm_timer)
+        {
+            qemu_del_timer(ptdev->pm_state->pm_timer);
             qemu_free_timer(ptdev->pm_state->pm_timer);
+            ptdev->pm_state->pm_timer = NULL;
+        }
 
         free(ptdev->pm_state);
     }
