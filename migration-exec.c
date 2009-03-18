@@ -60,6 +60,11 @@ MigrationState *exec_start_outgoing_migration(const char *command,
     FdMigrationState *s;
     FILE *f;
 
+#ifdef CONFIG_STUBDOM
+    dprintf("stubdom migration? no popen!");
+    return 0;
+#else
+
     s = qemu_mallocz(sizeof(*s));
     if (s == NULL) {
         dprintf("Unable to allocate FdMigrationState\n");
@@ -111,6 +116,7 @@ err_after_alloc:
     qemu_free(s);
 err:
     return NULL;
+#endif /*!CONFIG_STUBDOM*/
 }
 
 int exec_start_incoming_migration(const char *command)

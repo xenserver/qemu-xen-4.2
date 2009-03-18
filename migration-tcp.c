@@ -40,7 +40,7 @@ static int socket_write(FdMigrationState *s, const void * buf, size_t size)
     return send(s->fd, buf, size, 0);
 }
 
-static int tcp_close(FdMigrationState *s)
+static int tcp_close_qemu(FdMigrationState *s)
 {
     dprintf("tcp_close\n");
     if (s->fd != -1) {
@@ -94,7 +94,7 @@ MigrationState *tcp_start_outgoing_migration(const char *host_port,
 
     s->get_error = socket_errno;
     s->write = socket_write;
-    s->close = tcp_close;
+    s->close = tcp_close_qemu;
     s->mig_state.cancel = migrate_fd_cancel;
     s->mig_state.get_status = migrate_fd_get_status;
     s->mig_state.release = migrate_fd_release;

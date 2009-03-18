@@ -135,8 +135,6 @@ default: all
 kvm.o: CFLAGS+=$(KVM_CFLAGS)
 kvm-all.o: CFLAGS+=$(KVM_CFLAGS)
 
-all: $(PROGS)
-
 #########################################################
 # cpu emulator library
 LIBOBJS=exec.o kqemu.o translate-all.o cpu-exec.o\

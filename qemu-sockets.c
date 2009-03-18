@@ -22,6 +22,8 @@
 #include "qemu_socket.h"
 #include "qemu-common.h" /* for qemu_isdigit */
 
+#ifndef CONFIG_STUBDOM
+
 #ifndef AI_ADDRCONFIG
 # define AI_ADDRCONFIG 0
 #endif
@@ -311,6 +313,23 @@ int inet_connect(const char *str, int socktype)
     freeaddrinfo(res);
     return -1;
 }
+
+#else /*!CONFIG_STUBDOM*/
+
+int inet_listen(const char *str, char *ostr, int olen,
+                int socktype, int port_offset)
+{
+    fprintf(stderr, "ip sockets are not available on stubdom\n");
+    return -1;
+}
+
+int inet_connect(const char *str, int socktype)
+{
+    fprintf(stderr, "ip sockets are not available on stubdom\n");
+    return -1;
+}
+
+#endif /*!CONFIG_STUBDOM*/
 
 #ifndef NO_UNIX_SOCKETS
 

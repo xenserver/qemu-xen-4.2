@@ -712,7 +712,7 @@ void cpu_physical_memory_write_rom(target_phys_addr_t addr,
 void qemu_register_coalesced_mmio(target_phys_addr_t addr, ram_addr_t size) { }
 void qemu_unregister_coalesced_mmio(target_phys_addr_t addr, ram_addr_t size) { }
 
-#if DIRECT_MMAP
+#ifdef DIRECT_MMAP
 void *cpu_physical_memory_map(target_phys_addr_t addr,
                               target_phys_addr_t *plen,
                               int is_write) {

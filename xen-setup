@@ -11,14 +11,7 @@ if test -f config-host.h; then mv config-host.h config-host.h~; fi
 
 ./configure --disable-gfx-check --disable-curses --disable-slirp "$@" --prefix=/usr
 
-if [ -n "$CONFIG_STUBDOM" ]
-then
-        target=i386-stubdom
-        ln -sf ../i386-dm/hookslib.mak $target/
-        (cd $target ; ln -sf ../i386-dm/*.[ch] .)
-else
-        target=i386-dm
-fi
+target=i386-dm
 
 if [ "x$XEN_ROOT" != x ]; then
 	echo "XEN_ROOT=$XEN_ROOT" >>config-host.mak

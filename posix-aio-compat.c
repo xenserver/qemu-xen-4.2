@@ -18,6 +18,10 @@
 #include <sys/time.h>
 #include "osdep.h"
 
+#include "qemu-common.h"
+
+#ifndef CONFIG_STUBDOM
+
 #include "posix-aio-compat.h"
 
 static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
@@ -201,3 +205,5 @@ int qemu_paio_cancel(int fd, struct qemu_paiocb *aiocb)
 
     return ret;
 }
+
+#endif CONFIG_STUBDOM

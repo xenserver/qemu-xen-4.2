@@ -26,6 +26,9 @@
 #include "qemu-char.h"
 #include "block_int.h"
 #include <assert.h>
+
+#ifndef CONFIG_STUBDOM
+
 #ifdef CONFIG_AIO
 #include "posix-aio-compat.h"
 #endif
@@ -1228,3 +1231,5 @@ BlockDriver bdrv_host_device = {
     /* generic scsi device */
     .bdrv_ioctl = raw_ioctl,
 };
+
+#endif CONFIG_STUBDOM

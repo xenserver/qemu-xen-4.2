@@ -1,8 +1,7 @@
 #ifndef XEN_CONFIG_HOST_H
 #define XEN_CONFIG_HOST_H
 
-#ifdef __MINIOS__
-#define CONFIG_STUBDOM
+#ifdef CONFIG_STUBDOM
 #undef CONFIG_AIO
 #define NO_UNIX_SOCKETS 1
 #define NO_BLUETOOTH_PASSTHROUGH 1
@@ -36,7 +35,7 @@ extern int vcpus;
 #define DEFAULT_NETWORK_DOWN_SCRIPT "/etc/xen/qemu-ifdown"
 
 #ifdef CONFIG_STUBDOM
-extern struct BlockDriver bdrv_vbd;
+#define bdrv_host_device bdrv_raw
 #endif
 struct CharDriverState;
 void xenstore_store_serial_port_info(int i, struct CharDriverState *chr,
@@ -44,5 +43,9 @@ void xenstore_store_serial_port_info(int i, struct CharDriverState *chr,
 
 extern unsigned long *logdirty_bitmap;
 extern unsigned long logdirty_bitmap_size;
+
+#ifdef CONFIG_STUBDOM
+#undef HAVE_IOVEC
+#endif
 
 #endif /*XEN_CONFIG_HOST_H*/

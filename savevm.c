@@ -208,6 +208,11 @@ QEMUFile *qemu_popen(FILE *popen_file, const char *mode)
 {
     QEMUFilePopen *s;
 
+#ifdef CONFIG_STUBDOM
+    errno = ENOSYS;
+    return NULL;
+#else
+
     if (popen_file == NULL || mode == NULL || (mode[0] != 'r' && mode[0] != 'w') || mode[1] != 0) {
         fprintf(stderr, "qemu_popen: Argument validity check failed\n");
         return NULL;
@@ -228,11 +233,18 @@ QEMUFile *qemu_popen(FILE *popen_file, const char *mode)
     }
     fprintf(stderr, "qemu_popen: returning result of qemu_fopen_ops\n");
     return s->file;
+
+#endif /*!CONFIG_STUBDOM*/
 }
 
 QEMUFile *qemu_popen_cmd(const char *command, const char *mode)
 {
     FILE *popen_file;
+
+#ifdef CONFIG_STUBDOM
+    errno = ENOSYS;
+    return NULL;
+#else
 
     popen_file = popen(command, mode);
     if(popen_file == NULL) {
@@ -240,6 +252,7 @@ QEMUFile *qemu_popen_cmd(const char *command, const char *mode)
     }
 
     return qemu_popen(popen_file, mode);
+#endif /*!CONFIG_STUBDOM*/
 }
 
 QEMUFile *qemu_fopen_socket(int fd)

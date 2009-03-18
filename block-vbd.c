@@ -335,7 +335,7 @@ static int vbd_set_locked(BlockDriverState *bs, int locked)
     return -ENOTSUP;
 }
 
-BlockDriver bdrv_vbd = {
+BlockDriver bdrv_raw = {
     "vbd",
     sizeof(BDRVVbdState),
     vbd_probe,

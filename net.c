@@ -674,6 +674,7 @@ typedef struct TAPState {
     char script_arg[1024];
 } TAPState;
 
+#ifndef CONFIG_STUBDOM
 #ifdef HAVE_IOVEC
 static ssize_t tap_receive_iov(void *opaque, const struct iovec *iov,
                                int iovcnt)
@@ -688,6 +689,7 @@ static ssize_t tap_receive_iov(void *opaque, const struct iovec *iov,
     return len;
 }
 #endif
+#endif /*!CONFIG_STUBDOM*/
 
 static void tap_receive(void *opaque, const uint8_t *buf, int size)
 {
@@ -738,8 +740,10 @@ static TAPState *net_tap_fd_init(VLANState *vlan,
     s->vc = qemu_new_vlan_client(vlan, model, name, tap_receive, NULL, s);
     s->next = head_net_tap;
     head_net_tap = s;
+#ifndef CONFIG_STUBDOM
 #ifdef HAVE_IOVEC
     s->vc->fd_readv = tap_receive_iov;
+#endif
 #endif
     qemu_set_fd_handler(s->fd, tap_send, NULL, s);
     snprintf(s->vc->info_str, sizeof(s->vc->info_str), "fd=%d", fd);
@@ -991,6 +995,10 @@ static int net_tap_init(VLANState *vlan, const char *model,
                         const char *setup_script, const char *down_script,
                         const char *script_arg)
 {
+#ifdef CONFIG_STUBDOM
+    errno = ENOSYS;
+    return -1;
+#else
     TAPState *s;
     int fd;
     char ifname[128];
@@ -1024,6 +1032,7 @@ static int net_tap_init(VLANState *vlan, const char *model,
     else
         s->script_arg[0] = '\0';
     return 0;
+#endif
 }
 
 #endif /* !_WIN32 */
