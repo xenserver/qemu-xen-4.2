@@ -5726,6 +5726,7 @@ int main(int argc, char **argv, char **envp)
     cpu_exec_init_all(tb_size * 1024 * 1024);
 
     bdrv_init();
+    dma_helper_init();
 
     xc_handle = xc_interface_open();
 #ifdef CONFIG_STUBDOM
