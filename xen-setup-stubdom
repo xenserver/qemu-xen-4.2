@@ -73,7 +73,6 @@ TARGET_DIRS=$target
 BUILD_DOCS=no
 CONFIG_AIO=no
 TOOLS=
-XEN_ROOT=/volatile/iwj/builds/work/2/build/xen-unstable.hg/
 QEMU_ROOT ?= `pwd`
 XEN_ROOT ?= \$(QEMU_ROOT)/../xen-unstable.hg
 include \$(XEN_ROOT)/tools/Rules.mk
@@ -88,7 +87,7 @@ CPPFLAGS += $TARGET_CPPFLAGS -DCONFIG_STUBDOM
 CFLAGS= $TARGET_CFLAGS
 LDFLAGS= $TARGET_LDFLAGS
 
-SUBDIR_RULES=subdir-$(TARGET_DIRS)
+SUBDIR_RULES=subdir-\$(TARGET_DIRS)
 subdir-\$(TARGET_DIRS): libqemu_common.a
 -include \$(QEMU_ROOT)/xen-hooks.mak
 
