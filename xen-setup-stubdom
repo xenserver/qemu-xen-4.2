@@ -74,7 +74,17 @@ BUILD_DOCS=no
 CONFIG_AIO=no
 TOOLS=
 QEMU_ROOT ?= `pwd`
+END
+
+if [ "x$XEN_ROOT" != x ]; then
+	echo "XEN_ROOT=$XEN_ROOT" >>config-host.mak.new
+else
+	cat >>config-host.mak.new <<END
 XEN_ROOT ?= \$(QEMU_ROOT)/../xen-unstable.hg
+END
+fi
+
+cat <<END >>config-host.mak.new
 include \$(XEN_ROOT)/tools/Rules.mk
 SUBDIR_RULES=subdir-\$(TARGET_DIRS)
 subdir-\$(TARGET_DIRS): libqemu_common.a
