@@ -198,10 +198,12 @@ static int popen_get_buffer(void *opaque, uint8_t *buf, int64_t pos, int size)
 
 static int popen_close(void *opaque)
 {
+#ifndef CONFIG_STUBDOM
     QEMUFilePopen *s = opaque;
     pclose(s->popen_file);
     qemu_free(s);
     return 0;
+#endif
 }
 
 QEMUFile *qemu_popen(FILE *popen_file, const char *mode)
