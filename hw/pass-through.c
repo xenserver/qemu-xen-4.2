@@ -836,7 +836,7 @@ static int __insert_to_pci_slot(int bus, int dev, int func, int slot,
     if ( slot >= PHP_SLOT_START && slot < PHP_SLOT_END )
     {
         php_slot = PCI_TO_PHP_SLOT(slot);
-        if ( !dpci_infos.php_devs[php_slot].valid )
+        if ( !test_pci_slot(slot) )
         {
             goto found;
         }
@@ -850,7 +850,7 @@ static int __insert_to_pci_slot(int bus, int dev, int func, int slot,
     /* slot == 0, pick up a free one */
     for ( i = 0; i < PHP_SLOT_LEN; i++ )
     {
-        if ( !dpci_infos.php_devs[i].valid )
+        if ( !test_pci_slot(PHP_TO_PCI_SLOT(i)) )
         {
             php_slot = i;
             goto found;
@@ -3800,13 +3800,13 @@ int unregister_real_device(int php_slot)
     uint32_t bdf = 0;
     int rc = -1;
 
-    if ( php_slot < 0 || php_slot >= PHP_SLOT_LEN )
+    if ( test_pci_slot(PHP_TO_PCI_SLOT(php_slot)) != 1 )
        return -1;
 
     php_dev = &dpci_infos.php_devs[php_slot];
     assigned_device = php_dev->pt_dev;
 
-    if ( !assigned_device || !php_dev->valid )
+    if ( !assigned_device )
         return -1;
 
     pci_dev = assigned_device->pci_dev;

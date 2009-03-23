@@ -454,7 +454,7 @@ void acpi_php_del(int pci_slot)
     GPEState *s = &gpe_state;
     int php_slot = PCI_TO_PHP_SLOT(pci_slot);
 
-    if ( pci_slot < PHP_SLOT_START || pci_slot >= PHP_SLOT_END ) {
+    if ( test_pci_slot(pci_slot) < 0 ) {
         fprintf(logfile, "not find the pci slot %d when hot remove.\n", pci_slot);
 
         return;
