@@ -143,6 +143,11 @@ static int pci_set_default_subsystem_id(PCIDevice *pci_dev)
     return 0;
 }
 
+int pci_devfn_in_use(PCIBus *bus, int devfn)
+{
+        return bus->devices[devfn] ? 1 : 0;
+}
+
 /* -1 for devfn means auto assign */
 PCIDevice *pci_register_device(PCIBus *bus, const char *name,
                                int instance_size, int devfn,
@@ -153,8 +158,7 @@ PCIDevice *pci_register_device(PCIBus *bus, const char *name,
 
     if (devfn < 0) {
         for(devfn = bus->devfn_min ; devfn < 256; devfn += 8) {
-            if ( !bus->devices[devfn] &&
-                 !( devfn >= PHP_DEVFN_START && devfn < PHP_DEVFN_END ) )
+            if ( !pci_devfn_in_use(bus, devfn) )
                 goto found;
         }
         return NULL;

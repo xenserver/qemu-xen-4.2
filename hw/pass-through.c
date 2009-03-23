@@ -39,7 +39,7 @@ struct php_dev {
 };
 struct dpci_infos {
 
-    struct php_dev php_devs[PHP_SLOT_LEN];
+    struct php_dev php_devs[NR_PCI_DEV];
 
     PCIBus *e_bus;
     struct pci_access *pci_access;
@@ -822,51 +822,41 @@ static int get_next_keyval(char **option, char **key, char **val)
 }
 
 /* Insert a new pass-through device into a specific pci slot.
- * input  dom:bus:dev.func@slot, chose free one if slot == 0
- * return -1: required slot not available
- *         0: no free hotplug slots, but normal slot should okay
- *        >0: the new hotplug slot
+ * input  dom:bus:dev.func@slot, chose free one if slot == AUTO_PHP_SLOT
+ * return -2: requested slot not available
+ *        -1: no free slots
+ *        >=0: the new hotplug slot
  */
 static int __insert_to_pci_slot(int bus, int dev, int func, int slot,
                                 char *opt)
 {
-    int i, php_slot;
+    PCIBus *e_bus = dpci_infos.e_bus;
 
     /* preferred virt pci slot */
-    if ( slot >= PHP_SLOT_START && slot < PHP_SLOT_END )
+    if ( slot != AUTO_PHP_SLOT)
     {
-        php_slot = PCI_TO_PHP_SLOT(slot);
-        if ( !test_pci_slot(slot) )
-        {
+        if ( !test_pci_slot(slot) && !pci_devfn_in_use(e_bus, slot << 3) )
             goto found;
-        }
-        else
-            return -1;
+        return -2;
     }
 
-    if ( slot != 0 )
-        return -1;
-
     /* slot == 0, pick up a free one */
-    for ( i = 0; i < PHP_SLOT_LEN; i++ )
+    for ( slot = 0; slot < NR_PCI_DEV; slot++ )
     {
-        if ( !test_pci_slot(PHP_TO_PCI_SLOT(i)) )
-        {
-            php_slot = i;
+        if ( !test_pci_slot(slot) && !pci_devfn_in_use(e_bus, slot << 3) )
             goto found;
-        }
     }
 
     /* not found */
-    return 0;
+    return -1;
 
 found:
-    dpci_infos.php_devs[php_slot].valid  = 1;
-    dpci_infos.php_devs[php_slot].r_bus  = bus;
-    dpci_infos.php_devs[php_slot].r_dev  = dev;
-    dpci_infos.php_devs[php_slot].r_func = func;
-    dpci_infos.php_devs[php_slot].opt = opt;
-    return PHP_TO_PCI_SLOT(php_slot);
+    dpci_infos.php_devs[slot].valid  = 1;
+    dpci_infos.php_devs[slot].r_bus  = bus;
+    dpci_infos.php_devs[slot].r_dev  = dev;
+    dpci_infos.php_devs[slot].r_func = func;
+    dpci_infos.php_devs[slot].opt = opt;
+    return slot;
 }
 
 /* Insert a new pass-through device into a specific pci slot.
@@ -875,7 +865,7 @@ found:
 int insert_to_pci_slot(char *bdf_slt)
 {
     int seg, bus, dev, func, slot;
-    char *bdf_str, *slt_str, *opt;
+    char *bdf_str, *slt_str, *opt, *endptr;
     const char *delim="@";
 
     bdf_str = strsep(&bdf_slt, delim);
@@ -891,23 +881,20 @@ int insert_to_pci_slot(char *bdf_slt)
 
 }
 
-/* Test if a pci slot has a device
+/* Test if a pci slot has a PHP device
  * 1:  present
  * 0:  not present
- * -1: invalide pci slot input
+ * -1: invalid pci slot input
  */
 int test_pci_slot(int slot)
 {
-    int php_slot;
-
-    if ( slot < PHP_SLOT_START || slot >= PHP_SLOT_END )
+    if ( slot < 0 || slot >= NR_PCI_DEV )
         return -1;
 
-    php_slot = PCI_TO_PHP_SLOT(slot);
-    if ( dpci_infos.php_devs[php_slot].valid )
+    if ( dpci_infos.php_devs[slot].valid )
         return 1;
-    else
-        return 0;
+
+    return 0;
 }
 
 /* find the pci slot for pass-through dev with specified BDF */
@@ -922,15 +909,13 @@ int bdf_to_slot(char *bdf_str)
     }
 
     /* locate the virtual pci slot for this VTd device */
-    for ( i = 0; i < PHP_SLOT_LEN; i++ )
+    for ( i = 0; i < NR_PCI_DEV; i++ )
     {
         if ( dpci_infos.php_devs[i].valid &&
            dpci_infos.php_devs[i].r_bus == bus &&
            dpci_infos.php_devs[i].r_dev  == dev &&
            dpci_infos.php_devs[i].r_func == func )
-        {
-            return PHP_TO_PCI_SLOT(i);
-        }
+            return i;
     }
 
     return -1;
@@ -3617,7 +3602,7 @@ struct pt_dev * register_real_device(PCIBus *e_bus,
     struct pci_dev *pci_dev;
     uint8_t e_device, e_intx;
     struct pci_config_cf8 machine_bdf;
-    int free_pci_slot = -1;
+    int free_slot = -1;
     char *key, *val;
     int msi_translate, power_mgmt;
 
@@ -3642,13 +3627,13 @@ struct pt_dev * register_real_device(PCIBus *e_bus,
 
     if ( e_devfn == PT_VIRT_DEVFN_AUTO ) {
         /*indicate a static assignment(not hotplug), so find a free PCI hot plug slot */
-        free_pci_slot = __insert_to_pci_slot(r_bus, r_dev, r_func, 0, NULL);
-        if ( free_pci_slot > 0 )
-            e_devfn = free_pci_slot  << 3;
-        else {
+        free_slot = __insert_to_pci_slot(r_bus, r_dev, r_func,
+                                         AUTO_PHP_SLOT, NULL);
+        if ( free_slot < 0 ) {
             PT_LOG("Error: no free virtual PCI hot plug slot, thus no live migration.\n");
             return NULL;
         }
+        e_devfn = free_slot << 3;
     }
 
     msi_translate = direct_pci_msitranslate;
@@ -3705,8 +3690,8 @@ struct pt_dev * register_real_device(PCIBus *e_bus,
         return NULL;
     }
 
-    if ( free_pci_slot > 0 )
-        dpci_infos.php_devs[PCI_TO_PHP_SLOT(free_pci_slot)].pt_dev = assigned_device;
+    if ( free_slot > 0 )
+        dpci_infos.php_devs[free_slot].pt_dev = assigned_device;
 
     assigned_device->pci_dev = pci_dev;
     assigned_device->msi_trans_cap = msi_translate;
@@ -3790,7 +3775,7 @@ out:
     return assigned_device;
 }
 
-int unregister_real_device(int php_slot)
+int unregister_real_device(int slot)
 {
     struct php_dev *php_dev;
     struct pci_dev *pci_dev;
@@ -3800,10 +3785,10 @@ int unregister_real_device(int php_slot)
     uint32_t bdf = 0;
     int rc = -1;
 
-    if ( test_pci_slot(PHP_TO_PCI_SLOT(php_slot)) != 1 )
+    if ( test_pci_slot(slot) != 1 )
        return -1;
 
-    php_dev = &dpci_infos.php_devs[php_slot];
+    php_dev = &dpci_infos.php_devs[slot];
     assigned_device = php_dev->pt_dev;
 
     if ( !assigned_device )
@@ -3855,15 +3840,14 @@ int unregister_real_device(int php_slot)
     return 0;
 }
 
-int power_on_php_slot(int php_slot)
+int power_on_php_slot(int slot)
 {
-    struct php_dev *php_dev = &dpci_infos.php_devs[php_slot];
-    int pci_slot = php_slot + PHP_SLOT_START;
+    struct php_dev *php_dev = &dpci_infos.php_devs[slot];
     struct pt_dev *pt_dev;
     pt_dev =
         register_real_device(dpci_infos.e_bus,
             "DIRECT PCI",
-            pci_slot << 3,
+            slot << 3,
             php_dev->r_bus,
             php_dev->r_dev,
             php_dev->r_func,
@@ -3886,7 +3870,7 @@ int power_off_php_slot(int php_slot)
 
 int pt_init(PCIBus *e_bus, const char *direct_pci)
 {
-    int seg, b, d, f, php_slot = 0, status = -1;
+    int seg, b, d, f, slot, status = -1;
     struct pt_dev *pt_dev;
     struct pci_access *pci_access;
     char *vslots;
@@ -3922,7 +3906,9 @@ int pt_init(PCIBus *e_bus, const char *direct_pci)
     vslots = qemu_mallocz ( strlen(direct_pci) / 3 );
 
     /* Assign given devices to guest */
-    while ( next_bdf(&direct_pci_p, &seg, &b, &d, &f, &opt) )
+    for ( slot = 0;
+          slot < NR_PCI_DEV && next_bdf(&direct_pci_p, &seg, &b, &d, &f, &opt);
+          slot++ )
     {
         /* Register real device with the emulated bus */
         pt_dev = register_real_device(e_bus, "DIRECT PCI", PT_VIRT_DEVFN_AUTO,
@@ -3934,16 +3920,11 @@ int pt_init(PCIBus *e_bus, const char *direct_pci)
         }
 
         /* Record the virtual slot info */
-        if ( php_slot < PHP_SLOT_LEN &&
-              dpci_infos.php_devs[php_slot].pt_dev == pt_dev )
-        {
-            sprintf(slot_str, "0x%x;", PHP_TO_PCI_SLOT(php_slot));
-        }
-        else
-            sprintf(slot_str, "0x%x;", 0);
+        sprintf(slot_str, "0x%02x;",
+                dpci_infos.php_devs[slot].pt_dev == pt_dev ? slot :
+                AUTO_PHP_SLOT);
 
         strcat(vslots, slot_str);
-        php_slot++;
     }
 
     /* Write virtual slots info to xenstore for Control panel use */

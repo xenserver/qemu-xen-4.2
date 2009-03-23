@@ -197,6 +197,8 @@ extern char direct_pci_str[];
 extern int direct_pci_msitranslate;
 extern int direct_pci_power_mgmt;
 
+int pci_devfn_in_use(PCIBus *bus, int devfn);
+
 PCIDevice *pci_register_device(PCIBus *bus, const char *name,
                                int instance_size, int devfn,
                                PCIConfigReadFunc *config_read,
@@ -233,14 +235,8 @@ void pci_info(void);
 PCIBus *pci_bridge_init(PCIBus *bus, int devfn, uint16_t vid, uint16_t did,
                         pci_map_irq_fn map_irq, const char *name);
 
-/* PCI slot 6~7 support ACPI PCI hot plug */
-#define PHP_SLOT_START  (6)
-#define PHP_SLOT_END    (8)
-#define PHP_SLOT_LEN    (PHP_SLOT_END - PHP_SLOT_START)
-#define PHP_TO_PCI_SLOT(x) (x + PHP_SLOT_START)
-#define PCI_TO_PHP_SLOT(x) (x - PHP_SLOT_START)
-#define PHP_DEVFN_START (PHP_SLOT_START << 3)
-#define PHP_DEVFN_END   (PHP_SLOT_END << 3)
+#define NR_PCI_DEV 32
+#define AUTO_PHP_SLOT NR_PCI_DEV
 
 int insert_to_pci_slot(char*);
 int test_pci_slot(int);
