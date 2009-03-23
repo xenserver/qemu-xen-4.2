@@ -41,8 +41,6 @@ static void xen_init_pv(ram_addr_t ram_size, int vga_ram_size,
 			const char *cpu_model,
 			const char *direct_pci)
 {
-    struct xenfb *xenfb;
-    extern int domid;
     CPUState *env;
 
 #ifndef CONFIG_STUBDOM
