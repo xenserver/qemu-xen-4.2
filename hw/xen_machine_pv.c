@@ -51,7 +51,15 @@ static void xen_init_pv(ram_addr_t ram_size, int vga_ram_size,
 #endif
 
     /* Initialize a dummy CPU */
-    env = cpu_init(NULL);
+    if (cpu_model == NULL) {
+#ifdef TARGET_X86_64
+        cpu_model = "qemu64";
+#else
+        cpu_model = "qemu32";
+#endif
+    }
+    env = cpu_init(cpu_model);
+    env->halted = 1;
 
     /* Initialize backend core & drivers */
     if (-1 == xen_be_init()) {
