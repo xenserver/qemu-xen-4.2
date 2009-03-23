@@ -138,7 +138,7 @@ typedef struct TPMState {
 
 
 /* local prototypes */
-static int TPM_Send(tpmState *s, tpmBuffer *buffer, uint8_t locty, char *msg);
+static int TPM_Send(tpmState *s, tpmBuffer *buffer, uint8_t locty, const char *msg);
 static int TPM_Receive(tpmState *s, tpmBuffer *buffer);
 static uint32_t vtpm_instance_from_xenstore(void);
 static void tis_poll_timer(void *opaque);
@@ -860,6 +860,9 @@ typedef struct LPCtpmState {
 /*
  * initialize TIS interface
  */
+
+void tpm_tis_init(SetIRQFunc *set_irq, void *opaque, int irq);
+
 void tpm_tis_init(SetIRQFunc *set_irq, void *opaque, int irq)
 {
     LPCtpmState *d;
@@ -952,7 +955,7 @@ const static unsigned char tpm_failure[] = {
 /*
  * Send a TPM request.
  */
-static int TPM_Send(tpmState *s, tpmBuffer *buffer, uint8_t locty, char *msg)
+static int TPM_Send(tpmState *s, tpmBuffer *buffer, uint8_t locty, const char *msg)
 {
     int len;
     uint32_t size = tpm_get_size_from_buffer(buffer->buf);
@@ -1073,7 +1076,7 @@ static uint32_t vtpm_instance_from_xenstore(void)
     unsigned int num;
     uint32_t number = VTPM_BAD_INSTANCE;
     int end = 0;
-    char *token = "tok";
+    const char *token = "tok";
     int subscribed = 0;
     int ctr = 0;
     fd_set readfds;

@@ -56,6 +56,10 @@
 
 #define MAX_IDE_BUS 2
 
+#ifdef HAS_TPM
+void tpm_tis_init(SetIRQFunc *set_irq, void *opaque, int irq);
+#endif
+
 static fdctrl_t *floppy_controller;
 static RTCState *rtc_state;
 static PITState *pit;

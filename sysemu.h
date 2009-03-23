@@ -44,6 +44,10 @@ void do_loadvm(const char *name);
 void do_delvm(const char *name);
 void do_info_snapshots(void);
 
+#ifdef CONFIG_PASSTHROUGH
+int pci_emulation_add(char *config_text);
+#endif
+
 void qemu_announce_self(void);
 
 void main_loop_wait(int timeout);

@@ -28,13 +28,15 @@
 #include "boards.h"
 #include "xen_backend.h"
 
+#ifndef CONFIG_STUBDOM
+#include <hw/xen_blktap.h>
+#endif
+
 uint32_t xen_domid;
 enum xen_mode xen_mode = XEN_EMULATE;
 
-extern void init_blktap(void);
-
 static void xen_init_pv(ram_addr_t ram_size, int vga_ram_size,
-			const char *boot_device, DisplayState *ds,
+			const char *boot_device,
 			const char *kernel_filename,
 			const char *kernel_cmdline,
 			const char *initrd_filename,

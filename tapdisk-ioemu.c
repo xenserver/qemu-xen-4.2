@@ -8,8 +8,8 @@
 #include <sys/time.h>
 
 #include <assert.h>
+#include <hw/xen_blktap.h>
 
-extern int init_blktap(void);
 extern void qemu_aio_init(void);
 extern void qemu_aio_poll(void);
 extern void bdrv_init(void);

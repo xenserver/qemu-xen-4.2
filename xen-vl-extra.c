@@ -7,7 +7,7 @@
 /* There is no need for multiple-inclusion protection since
  * there is only one place where this file is included. */
 
-
+#include "sysemu.h"
 
 /* Max number of PCI emulation */
 #define MAX_PCI_EMULATION 32
@@ -134,7 +134,7 @@ void do_pci_add(char *devname)
 }
 #endif
 
-static int pci_emulation_add(char *config_text)
+int pci_emulation_add(char *config_text)
 {
     PCI_EMULATION_INFO *new;
     if ((new = qemu_mallocz(sizeof(PCI_EMULATION_INFO))) == NULL) {

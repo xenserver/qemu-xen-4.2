@@ -61,8 +61,6 @@
 #endif 
 
 
-extern int domid;
-
 int read_fd;
 int write_fd;
 

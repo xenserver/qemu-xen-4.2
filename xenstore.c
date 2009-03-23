@@ -247,7 +247,7 @@ static void xenstore_get_backend_path(char **backend, const char *devtype,
     free(frontend_doublecheck);
 }
 
-const char *xenstore_get_guest_uuid(void)
+static const char *xenstore_get_guest_uuid(void)
 {
     static char *already_computed = NULL;
 
@@ -646,7 +646,7 @@ int xenstore_fd(void)
     return -1;
 }
 
-void xenstore_process_logdirty_event(void)
+static void xenstore_process_logdirty_event(void)
 {
     char *act;
     static char *active_path = NULL;
@@ -1266,7 +1266,7 @@ char *xenstore_device_model_read(int domid, char *key, unsigned int *len)
     return value;
 }
 
-char *xenstore_extended_power_mgmt_read(const char *key, unsigned int *len)
+static char *xenstore_extended_power_mgmt_read(const char *key, unsigned int *len)
 {
     char *path = NULL, *value = NULL;
     
@@ -1281,7 +1281,7 @@ char *xenstore_extended_power_mgmt_read(const char *key, unsigned int *len)
     return value;
 }
 
-int xenstore_extended_power_mgmt_write(const char *key, const char *value)
+static int xenstore_extended_power_mgmt_write(const char *key, const char *value)
 {
     int ret;
     char *path = NULL;
@@ -1294,7 +1294,8 @@ int xenstore_extended_power_mgmt_write(const char *key, const char *value)
     return ret;
 }
 
-int xenstore_extended_power_mgmt_event_trigger(const char *key, const char *value)
+static int
+xenstore_extended_power_mgmt_event_trigger(const char *key, const char *value)
 {
     int ret;
     char *path = NULL;

@@ -82,7 +82,6 @@ int vcpus = 1;
 int xc_handle = -1;
 
 char domain_name[64] = "Xen-no-name";
-int domid;
 
 int domid_backend = 0;
   /* 0 for now.  If we ever have non-dom0 backend domains, this
@@ -313,9 +312,6 @@ static void do_outp(CPUState *env, unsigned long addr,
     }
 }
 
-extern void cpu_physical_memory_rw(target_phys_addr_t addr, uint8_t *buf,
-                                   int len, int is_write);
-
 static inline void read_physical(uint64_t addr, unsigned long size, void *val)
 {
     return cpu_physical_memory_rw((target_phys_addr_t)addr, val, size, 0);
@@ -505,7 +501,6 @@ static void handle_buffered_io(void *opaque)
 
 static void cpu_handle_ioreq(void *opaque)
 {
-    extern int vm_running;
     extern int shutdown_requested;
     CPUState *env = opaque;
     ioreq_t *req = cpu_get_ioreq();
@@ -552,7 +547,6 @@ int xen_pause_requested;
 
 int main_loop(void)
 {
-    extern int vm_running;
     CPUState *env = cpu_single_env;
     int evtchn_fd = xce_handle == -1 ? -1 : xc_evtchn_fd(xce_handle);
     char *qemu_file;

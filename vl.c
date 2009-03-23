@@ -5894,12 +5894,14 @@ int main(int argc, char **argv, char **envp)
         }
     }
 
+#ifdef CONFIG_PASSTHROUGH
     for (i = 0; i < nb_pci_emulation; i++) {
-        if(pci_emulation_add(pci_emulation_config_text[i]) < 0) {
+        if (pci_emulation_add(pci_emulation_config_text[i]) < 0) {
             fprintf(stderr, "Warning: could not add PCI device %s\n",
                     pci_emulation_config_text[i]);
         }
     }
+#endif
 
     if (strlen(direct_pci_str) > 0)
         direct_pci = direct_pci_str;

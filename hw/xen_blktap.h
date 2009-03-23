@@ -50,4 +50,6 @@ typedef struct fd_list_entry {
 	struct fd_list_entry **pprev, *next;
 } fd_list_entry_t;
 
+int init_blktap(void);
+
 #endif /*XEN_BLKTAP_H_*/

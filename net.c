@@ -757,6 +757,8 @@ static int tap_open(char *ifname, int ifname_size)
 #ifndef TAPGIFNAME
     char *dev;
     struct stat s;
+#else
+    struct ifreq ifr;
 #endif
 
     TFR(fd = open("/dev/tap", O_RDWR));
