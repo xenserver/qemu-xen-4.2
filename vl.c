@@ -1773,7 +1773,7 @@ static int init_timer_alarm(void)
     struct qemu_alarm_timer *t = NULL;
     int i, err = -1;
 
-#ifndef _WIN32
+#if !defined(_WIN32) && !defined(CONFIG_STUBDOM)
     int fds[2];
 
     err = pipe(fds);
@@ -1805,7 +1805,7 @@ static int init_timer_alarm(void)
         goto fail;
     }
 
-#ifndef _WIN32
+#if !defined(_WIN32) && !defined(CONFIG_STUBDOM)
     qemu_set_fd_handler2(alarm_timer_rfd, NULL,
                          try_to_rearm_timer, NULL, t);
 #endif
@@ -1815,7 +1815,7 @@ static int init_timer_alarm(void)
     return 0;
 
 fail:
-#ifndef _WIN32
+#if !defined(_WIN32) && !defined(CONFIG_STUBDOM)
     close(fds[0]);
     close(fds[1]);
 #endif
