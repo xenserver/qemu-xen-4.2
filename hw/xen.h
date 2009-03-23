@@ -14,7 +14,7 @@ enum xen_mode {
     XEN_ATTACH        // attach to xen domain created by xend
 };
 
-extern int xen_domid;
+extern uint32_t xen_domid;
 extern enum xen_mode xen_mode;
 
 #endif /* QEMU_HW_XEN_H */

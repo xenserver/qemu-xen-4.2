@@ -28,7 +28,7 @@
 #include "boards.h"
 #include "xen_backend.h"
 
-int xen_domid;
+uint32_t xen_domid;
 enum xen_mode xen_mode = XEN_EMULATE;
 
 extern void init_blktap(void);
