@@ -72,10 +72,10 @@ static void xen_init_pv(ram_addr_t ram_size, int vga_ram_size,
 }
 
 QEMUMachine xenpv_machine = {
-    "xenpv",
-    "Xen Para-virtualized PC",
-    xen_init_pv,
-    BIOS_SIZE | RAMSIZE_FIXED,
+    .name = "xenpv",
+    .desc = "Xen Para-virtualized PC",
+    .init = xen_init_pv,
+    .ram_require = BIOS_SIZE | RAMSIZE_FIXED,
     .max_cpus = 1,
     .nodisk_ok = 1,
 };
