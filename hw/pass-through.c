@@ -102,6 +102,9 @@ static int pt_word_reg_read(struct pt_dev *ptdev,
 static int pt_long_reg_read(struct pt_dev *ptdev,
     struct pt_reg_tbl *cfg_entry,
     uint32_t *value, uint32_t valid_mask);
+static int pt_cmd_reg_read(struct pt_dev *ptdev,
+    struct pt_reg_tbl *cfg_entry,
+    uint16_t *value, uint16_t valid_mask);
 static int pt_bar_reg_read(struct pt_dev *ptdev,
     struct pt_reg_tbl *cfg_entry,
     uint32_t *value, uint32_t valid_mask);
@@ -207,7 +210,7 @@ static struct pt_reg_info_tbl pt_emu_reg_header0_tbl[] = {
         .ro_mask    = 0xF880,
         .emu_mask   = 0x0340,
         .init       = pt_common_reg_init,
-        .u.w.read   = pt_word_reg_read,
+        .u.w.read   = pt_cmd_reg_read,
         .u.w.write  = pt_cmd_reg_write,
         .u.w.restore  = pt_cmd_reg_restore,
     },
@@ -1493,6 +1496,23 @@ static void pt_libpci_fixup(struct pci_dev *dev)
 #endif /* PCI_LIB_VERSION < 0x030100 */
 }
 
+static int pt_dev_is_virtfn(struct pci_dev *dev)
+{
+    int rc;
+    char path[PATH_MAX];
+    struct stat buf;
+
+    sprintf(path, "/sys/bus/pci/devices/%04x:%02x:%02x.%x/physfn",
+            dev->domain, dev->bus, dev->dev, dev->func);
+
+    rc = !stat(path, &buf);
+    if ( rc )
+        PT_LOG("%04x:%02x:%02x.%x is a SR-IOV Virtual Function\n",
+               dev->domain, dev->bus, dev->dev, dev->func);
+
+    return rc;
+}
+
 static int pt_register_regions(struct pt_dev *assigned_device)
 {
     int i = 0;
@@ -2773,6 +2793,25 @@ static int pt_long_reg_read(struct pt_dev *ptdev,
    return 0;
 }
 
+/* read Command register */
+static int pt_cmd_reg_read(struct pt_dev *ptdev,
+        struct pt_reg_tbl *cfg_entry,
+        uint16_t *value, uint16_t valid_mask)
+{
+    struct pt_reg_info_tbl *reg = cfg_entry->reg;
+    uint16_t valid_emu_mask = 0;
+    uint16_t emu_mask = reg->emu_mask;
+
+    if ( ptdev->is_virtfn )
+        emu_mask |= PCI_COMMAND_MEMORY;
+
+    /* emulate word register */
+    valid_emu_mask = emu_mask & valid_mask;
+    *value = PT_MERGE_VALUE(*value, cfg_entry->data, ~valid_emu_mask);
+
+    return 0;
+}
+
 /* read BAR */
 static int pt_bar_reg_read(struct pt_dev *ptdev,
         struct pt_reg_tbl *cfg_entry,
@@ -2907,13 +2946,17 @@ static int pt_cmd_reg_write(struct pt_dev *ptdev,
     uint16_t writable_mask = 0;
     uint16_t throughable_mask = 0;
     uint16_t wr_value = *value;
+    uint16_t emu_mask = reg->emu_mask;
+
+    if ( ptdev->is_virtfn )
+        emu_mask |= PCI_COMMAND_MEMORY;
 
     /* modify emulate register */
-    writable_mask = reg->emu_mask & ~reg->ro_mask & valid_mask;
+    writable_mask = emu_mask & ~reg->ro_mask & valid_mask;
     cfg_entry->data = PT_MERGE_VALUE(*value, cfg_entry->data, writable_mask);
 
     /* create value for writing to I/O device register */
-    throughable_mask = ~reg->emu_mask & valid_mask;
+    throughable_mask = ~emu_mask & valid_mask;
     *value = PT_MERGE_VALUE(*value, dev_value, throughable_mask);
 
     /* mapping BAR */
@@ -3706,6 +3749,7 @@ struct pt_dev * register_real_device(PCIBus *e_bus,
     assigned_device->pci_dev = pci_dev;
     assigned_device->msi_trans_cap = msi_translate;
     assigned_device->power_mgmt = power_mgmt;
+    assigned_device->is_virtfn = pt_dev_is_virtfn(pci_dev);
 
     /* Assign device */
     machine_bdf.reg = 0;

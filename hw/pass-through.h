@@ -216,9 +216,10 @@ struct pt_dev {
     int machine_irq;                            /* saved pirq */
     /* Physical MSI to guest INTx translation when possible */
     int msi_trans_cap;
-    int msi_trans_en;
-    int power_mgmt;
+    unsigned msi_trans_en:1;
+    unsigned power_mgmt:1;
     struct pt_pm_info *pm_state;                /* PM virtualization */
+    unsigned is_virtfn:1;
 };
 
 /* Used for formatting PCI BDF into cf8 format */
