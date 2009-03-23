@@ -924,7 +924,7 @@ int bdf_to_slot(char *bdf_str)
     /* locate the virtual pci slot for this VTd device */
     for ( i = 0; i < NR_PCI_DEV; i++ )
     {
-        if ( pci_slot_match(bus, dev, func, slot) )
+        if ( pci_slot_match(bus, dev, func, i) )
             return i;
     }
 
