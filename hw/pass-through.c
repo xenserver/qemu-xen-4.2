@@ -821,6 +821,16 @@ static int get_next_keyval(char **option, char **key, char **val)
     return 0;
 }
 
+static int pci_slot_match(int bus, int dev, int func, int slot)
+{
+    if (test_pci_slot(slot) == 1 &&
+        dpci_infos.php_devs[slot].r_bus == bus &&
+        dpci_infos.php_devs[slot].r_dev  == dev &&
+        dpci_infos.php_devs[slot].r_func == func )
+        return 1;
+    return 0;
+}
+
 /* Insert a new pass-through device into a specific pci slot.
  * input  dom:bus:dev.func@slot, chose free one if slot == AUTO_PHP_SLOT
  * return -2: requested slot not available
@@ -837,6 +847,9 @@ static int __insert_to_pci_slot(int bus, int dev, int func, int slot,
     {
         if ( !test_pci_slot(slot) && !pci_devfn_in_use(e_bus, slot << 3) )
             goto found;
+        if ( pci_slot_match(bus, dev, func, slot) )
+            /* The slot is already here, just return */
+            return slot;
         return -2;
     }
 
@@ -911,10 +924,7 @@ int bdf_to_slot(char *bdf_str)
     /* locate the virtual pci slot for this VTd device */
     for ( i = 0; i < NR_PCI_DEV; i++ )
     {
-        if ( dpci_infos.php_devs[i].valid &&
-           dpci_infos.php_devs[i].r_bus == bus &&
-           dpci_infos.php_devs[i].r_dev  == dev &&
-           dpci_infos.php_devs[i].r_func == func )
+        if ( pci_slot_match(bus, dev, func, slot) )
             return i;
     }
 
