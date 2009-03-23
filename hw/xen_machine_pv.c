@@ -33,11 +33,6 @@ enum xen_mode xen_mode = XEN_EMULATE;
 
 extern void init_blktap(void);
 
-
-/* The Xen PV machine currently provides
- *   - a virtual framebuffer
- *   - ....
- */
 static void xen_init_pv(ram_addr_t ram_size, int vga_ram_size,
 			const char *boot_device, DisplayState *ds,
 			const char *kernel_filename,
