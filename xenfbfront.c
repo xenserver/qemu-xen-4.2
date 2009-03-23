@@ -279,9 +279,11 @@ static void xenfb_pv_display_allocator(void)
         fprintf(stderr, "xenfb_pv_display_allocator: could not allocate nonshared_vram\n");
         exit(1);
     }
+    /* Touch the pages before sharing them */
+    memset(xs->nonshared_vram, 0xff, vga_ram_size);
 
     ds = xenfb_create_displaysurface(ds_get_width(xs->ds), ds_get_height(xs->ds), ds_get_bits_per_pixel(xs->ds), ds_get_linesize(xs->ds));
-    qemu_free_displaysurface(xs->ds);
+    defaultallocator_free_displaysurface(xs->ds->surface);
     xs->ds->surface = ds;
 }
 

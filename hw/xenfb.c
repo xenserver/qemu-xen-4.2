@@ -741,7 +741,6 @@ static void xenfb_update(void *opaque)
             xenfb->c.ds->surface = qemu_create_displaysurface_from
                 (xenfb->width, xenfb->height, xenfb->depth,
                  xenfb->row_stride, xenfb->pixels + xenfb->offset);
-            dpy_resize(xenfb->c.ds);
             break;
         default:
             /* we must convert stuff */
@@ -750,6 +749,7 @@ static void xenfb_update(void *opaque)
                                        xenfb->depth, xenfb->row_stride);
             break;
         }
+        dpy_resize(xenfb->c.ds);
         xen_be_printf(&xenfb->c.xendev, 1, "update: resizing: %dx%d\n",
                       xenfb->width, xenfb->height);
         xenfb->up_fullscreen = 1;
