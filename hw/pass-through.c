@@ -3880,7 +3880,7 @@ int power_off_php_slot(int php_slot)
 
 int pt_init(PCIBus *e_bus, const char *direct_pci)
 {
-    int seg, b, d, f, slot, status = -1;
+    int seg, b, d, f, status = -1;
     struct pt_dev *pt_dev;
     struct pci_access *pci_access;
     char *vslots;
@@ -3916,9 +3916,7 @@ int pt_init(PCIBus *e_bus, const char *direct_pci)
     vslots = qemu_mallocz ( strlen(direct_pci) / 3 );
 
     /* Assign given devices to guest */
-    for ( slot = 0;
-          slot < NR_PCI_DEV && next_bdf(&direct_pci_p, &seg, &b, &d, &f, &opt);
-          slot++ )
+    while ( next_bdf(&direct_pci_p, &seg, &b, &d, &f, &opt) )
     {
         /* Register real device with the emulated bus */
         pt_dev = register_real_device(e_bus, "DIRECT PCI", PT_VIRT_DEVFN_AUTO,
@@ -3930,9 +3928,7 @@ int pt_init(PCIBus *e_bus, const char *direct_pci)
         }
 
         /* Record the virtual slot info */
-        sprintf(slot_str, "0x%02x;",
-                dpci_infos.php_devs[slot].pt_dev == pt_dev ? slot :
-                AUTO_PHP_SLOT);
+        sprintf(slot_str, "0x%02x;", PCI_SLOT(pt_dev->dev.devfn));
 
         strcat(vslots, slot_str);
     }
