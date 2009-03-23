@@ -639,6 +639,27 @@ void xenstore_parse_domain_config(int hvm_domid)
     return;
 }
 
+int xenstore_parse_disable_pf_config ()
+{
+    char *params = NULL, *buf = NULL;
+    int disable_pf = 0;
+    unsigned int len;
+
+    if (pasprintf(&buf, "/local/domain/0/device-model/%u/disable_pf",domid) == -1)
+        goto out;
+
+    params = xs_read(xsh, XBT_NULL, buf, &len);
+    if (params == NULL)
+        goto out;
+
+    disable_pf = atoi(params);
+
+ out:
+    free(buf);
+    free(params);
+    return disable_pf;
+}
+
 int xenstore_fd(void)
 {
     if (xsh)

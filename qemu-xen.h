@@ -48,6 +48,7 @@ void handle_buffered_pio(void);
 
 /* xenstore.c */
 void xenstore_parse_domain_config(int domid);
+int xenstore_parse_disable_pf_config(void);
 int xenstore_fd(void);
 void xenstore_process_event(void *opaque);
 void xenstore_record_dm(const char *subpath, const char *state);

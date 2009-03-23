@@ -33,6 +33,7 @@
 #include "boards.h"
 #include "console.h"
 #include "exec-all.h"
+#include "qemu-xen.h"
 
 #include "xen_platform.h"
 #include "fw_cfg.h"
@@ -784,6 +785,7 @@ static void pc_init1(ram_addr_t ram_size, int vga_ram_size,
 {
     char buf[1024];
     int ret, linux_boot, i;
+    int disable_pf;
     ram_addr_t ram_addr, vga_ram_addr, bios_offset, vga_bios_offset;
     ram_addr_t below_4g_mem_size, above_4g_mem_size = 0;
     int bios_size, isa_bios_size, vga_bios_size;
@@ -1037,8 +1039,12 @@ vga_bios_error:
         pic_set_alt_irq_func(isa_pic, ioapic_set_irq, ioapic);
     }
 #endif /* !CONFIG_DM */
-    if (pci_enabled)
-        pci_xen_platform_init(pci_bus);
+    if (pci_enabled) {
+        disable_pf = xenstore_parse_disable_pf_config();
+        if (disable_pf != 1)
+            pci_xen_platform_init(pci_bus);
+        platform_fixed_ioport_init();
+    }
 
     for(i = 0; i < MAX_SERIAL_PORTS; i++) {
         if (serial_hds[i]) {

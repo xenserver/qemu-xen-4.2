@@ -40,12 +40,13 @@ extern FILE *logfile;
 static char log_buffer[4096];
 static int log_buffer_off;
 
+static uint8_t platform_flags;
+
 #define PFFLAG_ROM_LOCK 1 /* Sets whether ROM memory area is RW or RO */
 
 typedef struct PCIXenPlatformState
 {
   PCIDevice  pci_dev;
-  uint8_t    platform_flags;
 } PCIXenPlatformState;
 
 /* We throttle access to dom0 syslog, to avoid DOS attacks.  This is
@@ -130,33 +131,182 @@ static void throttle(unsigned count)
     available -= count;
 }
 
-static uint32_t xen_platform_ioport_readb(void *opaque, uint32_t addr)
+#define UNPLUG_ALL_IDE_DISKS 1
+#define UNPLUG_ALL_NICS 2
+#define UNPLUG_AUX_IDE_DISKS 4
+
+static void platform_fixed_ioport_write2(void *opaque, uint32_t addr, uint32_t val)
 {
-    PCIXenPlatformState *s = opaque;
-
-    addr &= 0xff;
-
-    return (addr == 0) ? s->platform_flags : ~0u;
+    switch (addr - 0x10) {
+    case 0:
+        /* Unplug devices.  Value is a bitmask of which devices to
+           unplug, with bit 0 the IDE devices, bit 1 the network
+           devices, and bit 2 the non-primary-master IDE devices. */
+        if (val & UNPLUG_ALL_IDE_DISKS)
+            ide_unplug_harddisks();
+        if (val & UNPLUG_ALL_NICS) {
+            pci_unplug_netifs();
+            net_tap_shutdown_all();
+        }
+        if (val & UNPLUG_AUX_IDE_DISKS) {
+            ide_unplug_aux_harddisks();
+        }
+        break;
+    case 2:
+        switch (val) {
+        case 1:
+            fprintf(logfile, "Citrix Windows PV drivers loaded in guest\n");
+            break;
+        case 0:
+            fprintf(logfile, "Guest claimed to be running PV product 0?\n");
+            break;
+        default:
+            fprintf(logfile, "Unknown PV product %d loaded in guest\n", val);
+            break;
+        }
+        driver_product_version = val;
+        break;
+    }
 }
-                              
-static void xen_platform_ioport_writeb(void *opaque, uint32_t addr, uint32_t val)
+
+static void platform_fixed_ioport_write4(void *opaque, uint32_t addr,
+                                         uint32_t val)
 {
-    PCIXenPlatformState *d = opaque;
+    switch (addr - 0x10) {
+    case 0:
+        /* PV driver version */
+        if (driver_product_version == 0) {
+            fprintf(logfile,
+                    "Drivers tried to set their version number (%d) before setting the product number?\n",
+                    val);
+            return;
+        }
+        fprintf(logfile, "PV driver build %d\n", val);
+        if (xenstore_pv_driver_build_blacklisted(driver_product_version,
+                                                 val)) {
+            fprintf(logfile, "Drivers are blacklisted!\n");
+            drivers_blacklisted = 1;
+        }
+        break;
+    }
+}
 
-    addr &= 0xff;
-    val  &= 0xff;
-
-    switch (addr) {
+static void platform_fixed_ioport_write1(void *opaque, uint32_t addr, uint32_t val)
+{
+    switch (addr - 0x10) {
     case 0: /* Platform flags */ {
         hvmmem_type_t mem_type = (val & PFFLAG_ROM_LOCK) ?
             HVMMEM_ram_ro : HVMMEM_ram_rw;
         if (xc_hvm_set_mem_type(xc_handle, domid, mem_type, 0xc0, 0x40))
-            fprintf(logfile,"xen_platform: unable to change ro/rw "
+            fprintf(logfile,"platform_fixed_ioport: unable to change ro/rw "
                     "state of ROM memory area!\n");
-        else
-            d->platform_flags = val & PFFLAG_ROM_LOCK;
+        else {
+            platform_flags = val & PFFLAG_ROM_LOCK;
+            fprintf(logfile,"platform_fixed_ioport: changed ro/rw "
+                    "state of ROM memory area. now is %s state.\n",
+                    (mem_type == HVMMEM_ram_ro ? "ro":"rw"));
+        }
         break;
     }
+    case 2:
+        /* Send bytes to syslog */
+        if (val == '\n' || log_buffer_off == sizeof(log_buffer) - 1) {
+            /* Flush buffer */
+            log_buffer[log_buffer_off] = 0;
+            throttle(log_buffer_off);
+            fprintf(logfile, "%s\n", log_buffer);
+            log_buffer_off = 0;
+            break;
+        }
+        log_buffer[log_buffer_off++] = val;
+        break;
+    }
+}
+
+static uint32_t platform_fixed_ioport_read2(void *opaque, uint32_t addr)
+{
+    switch (addr - 0x10) {
+    case 0:
+        if (drivers_blacklisted) {
+            /* The drivers will recognise this magic number and refuse
+             * to do anything. */
+            return 0xd249;
+        } else {
+            /* Magic value so that you can identify the interface. */
+            return 0x49d2;
+        }
+    default:
+        return 0xffff;
+    }
+}
+
+static uint32_t platform_fixed_ioport_read1(void *opaque, uint32_t addr)
+{
+    switch (addr - 0x10) {
+    case 0:
+        /* Platform flags */
+        return platform_flags;
+    case 2:
+        /* Version number */
+        return 1;
+    default:
+        return 0xff;
+    }
+}
+
+void platform_fixed_ioport_save(QEMUFile *f, void *opaque)
+{
+    qemu_put_8s(f, &platform_flags);
+}
+
+int platform_fixed_ioport_load(QEMUFile *f, void *opaque, int version_id)
+{
+    uint8_t flags;
+
+    if (version_id > 1)
+        return -EINVAL;
+
+    qemu_get_8s(f, &flags);
+    platform_fixed_ioport_write1(NULL, 0x10, flags);
+
+    return 0;
+}
+
+void platform_fixed_ioport_init(void)
+{
+    struct stat stbuf;
+
+    register_savevm("platform_fixed_ioport", 0, 1, platform_fixed_ioport_save,
+                    platform_fixed_ioport_load, NULL);
+
+    register_ioport_write(0x10, 16, 4, platform_fixed_ioport_write4, NULL);
+    register_ioport_write(0x10, 16, 2, platform_fixed_ioport_write2, NULL);
+    register_ioport_write(0x10, 16, 1, platform_fixed_ioport_write1, NULL);
+    register_ioport_read(0x10, 16, 2, platform_fixed_ioport_read2, NULL);
+    register_ioport_read(0x10, 16, 1, platform_fixed_ioport_read1, NULL);
+
+    if (stat("/etc/disable-guest-log-throttle", &stbuf) == 0)
+        throttling_disabled = 1;
+
+    platform_fixed_ioport_write1(NULL, 0x10, 0);
+}
+
+static uint32_t xen_platform_ioport_readb(void *opaque, uint32_t addr)
+{
+    addr &= 0xff;
+
+    return (addr == 0) ? platform_fixed_ioport_read1(NULL, 0x10) : ~0u;
+}
+
+static void xen_platform_ioport_writeb(void *opaque, uint32_t addr, uint32_t val)
+{
+    addr &= 0xff;
+    val  &= 0xff;
+
+    switch (addr) {
+    case 0: /* Platform flags */
+        platform_fixed_ioport_write1(NULL, 0x10, val);
+        break;
     case 8:
         {
             if (val == '\n' || log_buffer_off == sizeof(log_buffer) - 1) {
@@ -229,113 +379,6 @@ static void platform_mmio_map(PCIDevice *d, int region_num,
     cpu_register_physical_memory(addr, 0x1000000, mmio_io_addr);
 }
 
-#define UNPLUG_ALL_IDE_DISKS 1
-#define UNPLUG_ALL_NICS 2
-#define UNPLUG_AUX_IDE_DISKS 4
-
-static void platform_fixed_ioport_write2(void *opaque, uint32_t addr, uint32_t val)
-{
-    switch (addr - 0x10) {
-    case 0:
-        /* Unplug devices.  Value is a bitmask of which devices to
-           unplug, with bit 0 the IDE devices, bit 1 the network
-           devices, and bit 2 the non-primary-master IDE devices. */
-        if (val & UNPLUG_ALL_IDE_DISKS)
-            ide_unplug_harddisks();
-        if (val & UNPLUG_ALL_NICS) {
-            pci_unplug_netifs();
-            net_tap_shutdown_all();
-        }
-        if (val & UNPLUG_AUX_IDE_DISKS) {
-            ide_unplug_aux_harddisks();
-        }
-        break;
-    case 2:
-        switch (val) {
-        case 1:
-            fprintf(logfile, "Citrix Windows PV drivers loaded in guest\n");
-            break;
-        case 0:
-            fprintf(logfile, "Guest claimed to be running PV product 0?\n");
-            break;
-        default:
-            fprintf(logfile, "Unknown PV product %d loaded in guest\n", val);
-            break;
-        }
-        driver_product_version = val;
-        break;
-    }
-}
-
-static void platform_fixed_ioport_write4(void *opaque, uint32_t addr,
-                                         uint32_t val)
-{
-    switch (addr - 0x10) {
-    case 0:
-        /* PV driver version */
-        if (driver_product_version == 0) {
-            fprintf(logfile,
-                    "Drivers tried to set their version number (%d) before setting the product number?\n",
-                    val);
-            return;
-        }
-        fprintf(logfile, "PV driver build %d\n", val);
-        if (xenstore_pv_driver_build_blacklisted(driver_product_version,
-                                                 val)) {
-            fprintf(logfile, "Drivers are blacklisted!\n");
-            drivers_blacklisted = 1;
-        }
-        break;
-    }
-}
-
-
-static void platform_fixed_ioport_write1(void *opaque, uint32_t addr, uint32_t val)
-{
-    switch (addr - 0x10) {
-    case 2:
-        /* Send bytes to syslog */
-        if (val == '\n' || log_buffer_off == sizeof(log_buffer) - 1) {
-            /* Flush buffer */
-            log_buffer[log_buffer_off] = 0;
-            throttle(log_buffer_off);
-            fprintf(logfile, "%s\n", log_buffer);
-            log_buffer_off = 0;
-            break;
-        }
-        log_buffer[log_buffer_off++] = val;
-        break;
-    }
-}
-
-static uint32_t platform_fixed_ioport_read2(void *opaque, uint32_t addr)
-{
-    switch (addr - 0x10) {
-    case 0:
-        if (drivers_blacklisted) {
-            /* The drivers will recognise this magic number and refuse
-             * to do anything. */
-            return 0xd249;
-        } else {
-            /* Magic value so that you can identify the interface. */
-            return 0x49d2;
-        }
-    default:
-        return 0xffff;
-    }
-}
-
-static uint32_t platform_fixed_ioport_read1(void *opaque, uint32_t addr)
-{
-    switch (addr - 0x10) {
-    case 2:
-        /* Version number */
-        return 1;
-    default:
-        return 0xff;
-    }
-}
-
 struct pci_config_header {
     uint16_t vendor_id;
     uint16_t device_id;
@@ -368,7 +411,6 @@ static void xen_pci_save(QEMUFile *f, void *opaque)
     uint64_t t = 0;
 
     pci_device_save(&d->pci_dev, f);
-    qemu_put_8s(f, &d->platform_flags);
     qemu_put_be64s(f, &t);
 }
 
@@ -377,7 +419,7 @@ static int xen_pci_load(QEMUFile *f, void *opaque, int version_id)
     PCIXenPlatformState *d = opaque;
     int ret;
 
-    if (version_id > 2)
+    if (version_id > 3)
         return -EINVAL;
 
     ret = pci_device_load(&d->pci_dev, f);
@@ -385,9 +427,11 @@ static int xen_pci_load(QEMUFile *f, void *opaque, int version_id)
         return ret;
 
     if (version_id >= 2) {
-        uint8_t flags;
-        qemu_get_8s(f, &flags);
-        xen_platform_ioport_writeb(d, 0, flags);
+        if (version_id == 2) {
+            uint8_t flags;
+            qemu_get_8s(f, &flags);
+            xen_platform_ioport_writeb(d, 0, flags);
+        }
         qemu_get_be64(f);
     }
 
@@ -398,7 +442,6 @@ void pci_xen_platform_init(PCIBus *bus)
 {
     PCIXenPlatformState *d;
     struct pci_config_header *pch;
-    struct stat stbuf;
 
     printf("Register xen platform.\n");
     d = (PCIXenPlatformState *)pci_register_device(
@@ -426,17 +469,8 @@ void pci_xen_platform_init(PCIBus *bus)
     pci_register_io_region(&d->pci_dev, 1, 0x1000000,
                            PCI_ADDRESS_SPACE_MEM_PREFETCH, platform_mmio_map);
 
-    xen_platform_ioport_writeb(d, 0, 0);
-
-    register_savevm("platform", 0, 2, xen_pci_save, xen_pci_load, d);
+    register_savevm("platform", 0, 3, xen_pci_save, xen_pci_load, d);
     printf("Done register platform.\n");
-    register_ioport_write(0x10, 16, 4, platform_fixed_ioport_write4, NULL);
-    register_ioport_write(0x10, 16, 2, platform_fixed_ioport_write2, NULL);
-    register_ioport_write(0x10, 16, 1, platform_fixed_ioport_write1, NULL);
-    register_ioport_read(0x10, 16, 2, platform_fixed_ioport_read2, NULL);
-    register_ioport_read(0x10, 16, 1, platform_fixed_ioport_read1, NULL);
-
-    if (stat("/etc/disable-guest-log-throttle", &stbuf) == 0)
-        throttling_disabled = 1;
 
 }
+
