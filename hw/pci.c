@@ -770,7 +770,8 @@ PCIBus *pci_bridge_init(PCIBus *bus, int devfn, uint16_t vid, uint16_t did,
     return s->bus;
 }
 
-int pt_chk_bar_overlap(PCIBus *bus, int devfn, uint32_t addr, uint32_t size)
+int pt_chk_bar_overlap(PCIBus *bus, int devfn, uint32_t addr,
+                        uint32_t size, uint8_t type)
 {
     PCIDevice *devices = NULL;
     PCIIORegion *r;
@@ -790,6 +791,17 @@ int pt_chk_bar_overlap(PCIBus *bus, int devfn, uint32_t addr, uint32_t size)
         for (j=0; j<PCI_NUM_REGIONS; j++)
         {
             r = &devices->io_regions[j];
+
+            /* skip different resource type, but don't skip when
+             * prefetch and non-prefetch memory are compared.
+             */
+            if (type != r->type)
+            {
+                if (type == PCI_ADDRESS_SPACE_IO ||
+                    r->type == PCI_ADDRESS_SPACE_IO)
+                    continue;
+            }
+
             if ((addr < (r->addr + r->size)) && ((addr + size) > r->addr))
             {
                 printf("Overlapped to device[%02x:%02x.%x][Region:%d]"

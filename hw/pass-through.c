@@ -1771,7 +1771,8 @@ static void pt_bar_mapping(struct pt_dev *ptdev, int io_enable, int mem_enable)
         PT_GET_EMUL_SIZE(base->bar_flag, r_size);
 
         /* check overlapped address */
-        ret = pt_chk_bar_overlap(dev->bus, dev->devfn, r_addr, r_size);
+        ret = pt_chk_bar_overlap(dev->bus, dev->devfn,
+                        r_addr, r_size, r->type);
         if (ret > 0)
             PT_LOG("Warning: ptdev[%02x:%02x.%x][Region:%d][Address:%08xh]"
                 "[Size:%08xh] is overlapped.\n", pci_bus_num(dev->bus),
