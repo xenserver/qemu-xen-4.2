@@ -46,6 +46,8 @@ struct dpci_infos {
 
 } dpci_infos;
 
+char mapped_machine_irq[PT_NR_IRQS] = {0};
+
 /* prototype */
 static uint32_t pt_common_reg_init(struct pt_dev *ptdev,
     struct pt_reg_info_tbl *reg, uint32_t real_offset);
@@ -3757,6 +3759,7 @@ struct pt_dev * register_real_device(PCIBus *e_bus,
         {
             machine_irq = pirq;
             assigned_device->machine_irq = pirq;
+            mapped_machine_irq[machine_irq]++;
         }
     }
 
@@ -3836,6 +3839,19 @@ int unregister_real_device(int slot)
         pt_msi_disable(assigned_device);
     if (assigned_device->msix)
         pt_msix_disable(assigned_device);
+
+    if (machine_irq)
+    {
+        mapped_machine_irq[machine_irq]--;
+
+        if (mapped_machine_irq[machine_irq] == 0)
+        {
+            rc = xc_physdev_unmap_pirq(xc_handle, domid, machine_irq);
+
+            if (rc < 0)
+                PT_LOG("Error: Unmaping of interrupt failed! rc=%d\n", rc);
+        }
+    }
 
     /* delete all emulated config registers */
     pt_config_delete(assigned_device);

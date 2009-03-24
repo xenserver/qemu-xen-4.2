@@ -40,6 +40,7 @@
 
 #define PT_MACHINE_IRQ_AUTO (0xFFFFFFFF)
 #define PT_VIRT_DEVFN_AUTO  (-1)
+#define PT_NR_IRQS          (256)
 
 /* Misc PCI constants that should be moved to a separate library :) */
 #define PCI_CONFIG_SIZE         (256)
