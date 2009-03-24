@@ -73,8 +73,6 @@ static uint32_t pt_linkctrl2_reg_init(struct pt_dev *ptdev,
     struct pt_reg_info_tbl *reg, uint32_t real_offset);
 static uint32_t pt_msgctrl_reg_init(struct pt_dev *ptdev,
     struct pt_reg_info_tbl *reg, uint32_t real_offset);
-static uint32_t pt_msgaddr32_reg_init(struct pt_dev *ptdev,
-    struct pt_reg_info_tbl *reg, uint32_t real_offset);
 static uint32_t pt_msgaddr64_reg_init(struct pt_dev *ptdev,
     struct pt_reg_info_tbl *reg, uint32_t real_offset);
 static uint32_t pt_msgdata_reg_init(struct pt_dev *ptdev,
@@ -558,8 +556,8 @@ static struct pt_reg_info_tbl pt_emu_reg_msi_tbl[] = {
         .offset     = PCI_MSI_FLAGS, // 2
         .size       = 2,
         .init_val   = 0x0000,
-        .ro_mask    = 0x018E,
-        .emu_mask   = 0xFFFF,
+        .ro_mask    = 0xFF8E,
+        .emu_mask   = 0x007F,
         .init       = pt_msgctrl_reg_init,
         .u.w.read   = pt_word_reg_read,
         .u.w.write  = pt_msgctrl_reg_write,
@@ -570,9 +568,9 @@ static struct pt_reg_info_tbl pt_emu_reg_msi_tbl[] = {
         .offset     = PCI_MSI_ADDRESS_LO, // 4
         .size       = 4,
         .init_val   = 0x00000000,
-        .ro_mask    = 0x00000FF0,    /* bit 4~11 is reserved for MSI in x86 */
+        .ro_mask    = 0x00000003,
         .emu_mask   = 0xFFFFFFFF,
-        .init       = pt_msgaddr32_reg_init,
+        .init       = pt_common_reg_init,
         .u.dw.read  = pt_long_reg_read,
         .u.dw.write = pt_msgaddr32_reg_write,
         .u.dw.restore = NULL,
@@ -594,7 +592,7 @@ static struct pt_reg_info_tbl pt_emu_reg_msi_tbl[] = {
         .offset     = PCI_MSI_DATA_32, // 8
         .size       = 2,
         .init_val   = 0x0000,
-        .ro_mask    = 0x3800,
+        .ro_mask    = 0x0000,
         .emu_mask   = 0xFFFF,
         .init       = pt_msgdata_reg_init,
         .u.w.read   = pt_word_reg_read,
@@ -606,7 +604,7 @@ static struct pt_reg_info_tbl pt_emu_reg_msi_tbl[] = {
         .offset     = PCI_MSI_DATA_64, // 12
         .size       = 2,
         .init_val   = 0x0000,
-        .ro_mask    = 0x3800,
+        .ro_mask    = 0x0000,
         .emu_mask   = 0xFFFF,
         .init       = pt_msgdata_reg_init,
         .u.w.read   = pt_word_reg_read,
@@ -2486,7 +2484,7 @@ static uint32_t pt_msgctrl_reg_init(struct pt_dev *ptdev,
     uint32_t reg_field = 0;
 
     /* use I/O device register's value as initial value */
-    reg_field |= *((uint16_t*)(d->config + real_offset));
+    reg_field = *((uint16_t*)(d->config + real_offset));
 
     if (reg_field & PCI_MSI_FLAGS_ENABLE)
     {
@@ -2496,40 +2494,18 @@ static uint32_t pt_msgctrl_reg_init(struct pt_dev *ptdev,
     ptdev->msi->flags |= (reg_field | MSI_FLAG_UNINIT);
     ptdev->msi->ctrl_offset = real_offset;
 
-    /* All register is 0 after reset, except first 4 byte */
-    reg_field &= reg->ro_mask;
-
-    return reg_field;
-}
-
-/* initialize Message Address register */
-static uint32_t pt_msgaddr32_reg_init(struct pt_dev *ptdev,
-        struct pt_reg_info_tbl *reg, uint32_t real_offset)
-{
-    PCIDevice *d = (struct PCIDevice *)ptdev;
-    uint32_t reg_field = 0;
-
-    /* use I/O device register's value as initial value */
-    reg_field |= *((uint32_t*)(d->config + real_offset));
-
-    return reg_field;
+    return reg->init_val;
 }
 
 /* initialize Message Upper Address register */
 static uint32_t pt_msgaddr64_reg_init(struct pt_dev *ptdev,
         struct pt_reg_info_tbl *reg, uint32_t real_offset)
 {
-    PCIDevice *d = (struct PCIDevice *)ptdev;
-    uint32_t reg_field = 0;
-
     /* no need to initialize in case of 32 bit type */
     if (!(ptdev->msi->flags & PCI_MSI_FLAGS_64BIT))
         return PT_INVALID_REG;
 
-    /* use I/O device register's value as initial value */
-    reg_field |= *((uint32_t*)(d->config + real_offset));
-
-    return reg_field;
+    return reg->init_val;
 }
 
 /* this function will be called twice (for 32 bit and 64 bit type) */
@@ -2537,14 +2513,13 @@ static uint32_t pt_msgaddr64_reg_init(struct pt_dev *ptdev,
 static uint32_t pt_msgdata_reg_init(struct pt_dev *ptdev,
         struct pt_reg_info_tbl *reg, uint32_t real_offset)
 {
-    PCIDevice *d = (struct PCIDevice *)ptdev;
     uint32_t flags = ptdev->msi->flags;
     uint32_t offset = reg->offset;
 
     /* check the offset whether matches the type or not */
     if (((offset == PCI_MSI_DATA_64) &&  (flags & PCI_MSI_FLAGS_64BIT)) ||
         ((offset == PCI_MSI_DATA_32) && !(flags & PCI_MSI_FLAGS_64BIT)))
-        return *((uint16_t*)(d->config + real_offset));
+        return reg->init_val;
     else
         return PT_INVALID_REG;
 }
@@ -2558,18 +2533,17 @@ static uint32_t pt_msixctrl_reg_init(struct pt_dev *ptdev,
     uint16_t reg_field = 0;
 
     /* use I/O device register's value as initial value */
-    reg_field |= *((uint16_t*)(d->config + real_offset));
+    reg_field = *((uint16_t*)(d->config + real_offset));
 
     if (reg_field & PCI_MSIX_ENABLE)
     {
         PT_LOG("MSIX enabled already, disable first\n");
         pci_write_word(pdev, real_offset, reg_field & ~PCI_MSIX_ENABLE);
-        reg_field &= ~(PCI_MSIX_ENABLE | PCI_MSIX_MASK);
     }
 
     ptdev->msix->ctrl_offset = real_offset;
 
-    return reg_field;
+    return reg->init_val;
 }
 
 /* get register group size */
