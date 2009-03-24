@@ -5783,6 +5783,9 @@ int main(int argc, char **argv, char **envp)
         }
     }
 
+    if (strlen(direct_pci_str) > 0)
+        direct_pci = direct_pci_str;
+
     machine->init(ram_size, vga_ram_size, boot_devices,
                   kernel_filename, kernel_cmdline, initrd_filename, cpu_model,
 		  direct_pci);
@@ -5902,9 +5905,6 @@ int main(int argc, char **argv, char **envp)
         }
     }
 #endif
-
-    if (strlen(direct_pci_str) > 0)
-        direct_pci = direct_pci_str;
 
     for(i = 0; i < MAX_VIRTIO_CONSOLES; i++) {
         const char *devname = virtio_consoles[i];
