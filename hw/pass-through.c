@@ -2868,7 +2868,7 @@ static int pt_pmcsr_reg_read(struct pt_dev *ptdev,
     uint16_t valid_emu_mask = reg->emu_mask;
 
     if (!ptdev->power_mgmt)
-        valid_emu_mask |= PCI_PM_CTRL_STATE_MASK;
+        valid_emu_mask |= PCI_PM_CTRL_STATE_MASK | PCI_PM_CTRL_NO_SOFT_RESET;
 
     valid_emu_mask = valid_emu_mask & valid_mask ;
     *value = PT_MERGE_VALUE(*value, cfg_entry->data, ~valid_emu_mask);
@@ -3152,36 +3152,25 @@ static int pt_pmcsr_reg_write(struct pt_dev *ptdev,
 {
     struct pt_reg_info_tbl *reg = cfg_entry->reg;
     PCIDevice *d = &ptdev->dev;
+    uint16_t emu_mask = reg->emu_mask;
     uint16_t writable_mask = 0;
     uint16_t throughable_mask = 0;
     struct pt_pm_info *pm_state = ptdev->pm_state;
     uint16_t read_val = 0;
 
-    if (!ptdev->power_mgmt) {
-        uint16_t emu_mask = 
-            PCI_PM_CTRL_PME_STATUS | PCI_PM_CTRL_DATA_SCALE_MASK |
-            PCI_PM_CTRL_PME_ENABLE |
-            PCI_PM_CTRL_DATA_SEL_MASK | PCI_PM_CTRL_STATE_MASK;
-        uint16_t ro_mask = PCI_PM_CTRL_DATA_SCALE_MASK;
-
-        /* modify emulate register */
-        writable_mask = emu_mask & ~ro_mask & valid_mask;
-
-        cfg_entry->data = PT_MERGE_VALUE(*value, cfg_entry->data, writable_mask);
-        /* create value for writing to I/O device register */
-        throughable_mask = ~emu_mask & valid_mask;
-        *value = PT_MERGE_VALUE(*value, dev_value, throughable_mask);
-
-        return 0;
-    }
+    if (!ptdev->power_mgmt)
+        emu_mask |= PCI_PM_CTRL_STATE_MASK | PCI_PM_CTRL_NO_SOFT_RESET;
 
     /* modify emulate register */
-    writable_mask = reg->emu_mask & ~reg->ro_mask & valid_mask;
+    writable_mask = emu_mask & ~reg->ro_mask & valid_mask;
     cfg_entry->data = PT_MERGE_VALUE(*value, cfg_entry->data, writable_mask);
 
     /* create value for writing to I/O device register */
-    throughable_mask = ~reg->emu_mask & valid_mask;
+    throughable_mask = ~emu_mask & valid_mask;
     *value = PT_MERGE_VALUE(*value, dev_value, throughable_mask);
+
+    if (!ptdev->power_mgmt)
+        return 0;
 
     /* set I/O device power state */
     pm_state->cur_state = (dev_value & PCI_PM_CTRL_STATE_MASK);
