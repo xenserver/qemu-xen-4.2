@@ -5884,6 +5884,7 @@ int main(int argc, char **argv, char **envp)
             snprintf(label, sizeof(label), "serial%d", i);
             if (strstart(devname, "vc", 0))
                 qemu_chr_printf(serial_hds[i], "serial%d console\r\n", i);
+            xenstore_store_serial_port_info(i, serial_hds[i], devname);
         }
     }
 
