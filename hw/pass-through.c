@@ -3931,10 +3931,22 @@ int pt_init(PCIBus *e_bus, const char *direct_pci)
     if ( !(direct_pci_head = direct_pci_p = strdup(direct_pci)) )
         return 0;
 
-    /* the virtual pci slots of all pass-through devs
-     * with hex format: xx;xx...;
+    /* The minimal format of direct_pci: xxxx:xx:xx.x-xxxx:xx:xx.x-... It may
+     * be even longer considering the per-device opts(see the parsing for
+     * '/local/domain/0/backend/pci/XX/YY/opts-ZZ' in
+     * xenstore_parse_domain_config().
+     *
+     * The format of vslots(virtual pci slots of all pass-through devs):
+     * 0xXX;0xXX;... (see the code below).
+     *
+     * We're sure the length of direct_pci is bigger than that of vslots.
      */
-    vslots = qemu_mallocz ( strlen(direct_pci) / 3 );
+    vslots = qemu_mallocz(strlen(direct_pci) + 1);
+    if ( vslots == NULL )
+    {
+        status = -1;
+        goto err;
+    }
 
     /* Assign given devices to guest */
     while ( next_bdf(&direct_pci_p, &seg, &b, &d, &f, &opt) )
