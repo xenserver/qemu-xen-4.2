@@ -3621,7 +3621,7 @@ static struct pt_dev * register_real_device(PCIBus *e_bus,
     struct pci_dev *pci_dev;
     uint8_t e_device, e_intx;
     struct pci_config_cf8 machine_bdf;
-    int free_slot = -1;
+    int free_slot;
     char *key, *val;
     int msi_translate, power_mgmt;
 
@@ -3709,8 +3709,7 @@ static struct pt_dev * register_real_device(PCIBus *e_bus,
         return NULL;
     }
 
-    if ( free_slot > 0 )
-        dpci_infos.php_devs[free_slot].pt_dev = assigned_device;
+    dpci_infos.php_devs[PCI_SLOT(e_devfn)].pt_dev = assigned_device;
 
     assigned_device->pci_dev = pci_dev;
     assigned_device->msi_trans_cap = msi_translate;
@@ -3890,8 +3889,6 @@ int power_on_php_slot(int slot)
             php_dev->opt);
 
     php_dev->opt = NULL;
-
-    php_dev->pt_dev = pt_dev;
 
     return 0;
 
