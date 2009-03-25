@@ -935,8 +935,8 @@ int bdf_to_slot(char *bdf_str)
 }
 
 /* Being called each time a mmio region has been updated */
-void pt_iomem_map(PCIDevice *d, int i, uint32_t e_phys, uint32_t e_size,
-                  int type)
+static void pt_iomem_map(PCIDevice *d, int i, uint32_t e_phys, uint32_t e_size,
+                         int type)
 {
     struct pt_dev *assigned_device  = (struct pt_dev *)d;
     uint32_t old_ebase = assigned_device->bases[i].e_physbase;
@@ -994,8 +994,8 @@ void pt_iomem_map(PCIDevice *d, int i, uint32_t e_phys, uint32_t e_size,
 }
 
 /* Being called each time a pio region has been updated */
-void pt_ioport_map(PCIDevice *d, int i,
-                   uint32_t e_phys, uint32_t e_size, int type)
+static void pt_ioport_map(PCIDevice *d, int i,
+                          uint32_t e_phys, uint32_t e_size, int type)
 {
     struct pt_dev *assigned_device  = (struct pt_dev *)d;
     uint32_t old_ebase = assigned_device->bases[i].e_physbase;
@@ -1040,8 +1040,8 @@ void pt_ioport_map(PCIDevice *d, int i,
 }
 
 /* find emulate register group entry */
-struct pt_reg_grp_tbl* pt_find_reg_grp(
-        struct pt_dev *ptdev, uint32_t address)
+static struct pt_reg_grp_tbl* pt_find_reg_grp(struct pt_dev *ptdev,
+                                              uint32_t address)
 {
     struct pt_reg_grp_tbl* reg_grp_entry = NULL;
 
@@ -1061,8 +1061,8 @@ out:
 }
 
 /* find emulate register entry */
-struct pt_reg_tbl* pt_find_reg(
-        struct pt_reg_grp_tbl* reg_grp, uint32_t address)
+static struct pt_reg_tbl* pt_find_reg(struct pt_reg_grp_tbl* reg_grp,
+                                      uint32_t address)
 {
     struct pt_reg_tbl* reg_entry = NULL;
     struct pt_reg_info_tbl* reg = NULL;
@@ -1625,7 +1625,7 @@ static void pt_unregister_regions(struct pt_dev *assigned_device)
 
 }
 
-uint8_t find_cap_offset(struct pci_dev *pci_dev, uint8_t cap)
+static uint8_t find_cap_offset(struct pci_dev *pci_dev, uint8_t cap)
 {
     int id;
     int max_cap = 48;
@@ -1655,7 +1655,7 @@ uint8_t find_cap_offset(struct pci_dev *pci_dev, uint8_t cap)
     return 0;
 }
 
-uint32_t find_ext_cap_offset(struct pci_dev *pci_dev, uint32_t cap)
+static uint32_t find_ext_cap_offset(struct pci_dev *pci_dev, uint32_t cap)
 {
     uint32_t header = 0;
     int max_cap = 480;
@@ -1794,7 +1794,7 @@ static void pt_bar_mapping(struct pt_dev *ptdev, int io_enable, int mem_enable)
 }
 
 /* check power state transition */
-int check_power_state(struct pt_dev *ptdev)
+static int check_power_state(struct pt_dev *ptdev)
 {
     struct pt_pm_info *pm_state = ptdev->pm_state;
     PCIDevice *d = &ptdev->dev;
@@ -1865,7 +1865,7 @@ static void pt_aer_reg_restore(struct pt_dev *ptdev)
 }
 
 /* reset Interrupt and I/O resource  */
-void pt_reset_interrupt_and_io_mapping(struct pt_dev *ptdev)
+static void pt_reset_interrupt_and_io_mapping(struct pt_dev *ptdev)
 {
     PCIDevice *d = &ptdev->dev;
     PCIIORegion *r;
@@ -2056,7 +2056,7 @@ out:
     pm_state->pm_timer = NULL;
 }
 
-void pt_default_power_transition(void *opaque)
+static void pt_default_power_transition(void *opaque)
 {
     struct pt_dev *ptdev = opaque;
     struct pt_pm_info *pm_state = ptdev->pm_state;
@@ -3611,7 +3611,7 @@ static int pt_pmcsr_reg_restore(struct pt_dev *ptdev,
     return 0;
 }
 
-struct pt_dev * register_real_device(PCIBus *e_bus,
+static struct pt_dev * register_real_device(PCIBus *e_bus,
         const char *e_dev_name, int e_devfn, uint8_t r_bus, uint8_t r_dev,
         uint8_t r_func, uint32_t machine_irq, struct pci_access *pci_access,
         char *opt)
@@ -3796,7 +3796,7 @@ out:
     return assigned_device;
 }
 
-int unregister_real_device(int slot)
+static int unregister_real_device(int slot)
 {
     struct php_dev *php_dev;
     struct pci_dev *pci_dev;

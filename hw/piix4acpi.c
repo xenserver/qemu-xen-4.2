@@ -72,7 +72,7 @@ typedef struct GPEState {
 
 } GPEState;
 
-GPEState gpe_state;
+static GPEState gpe_state;
 
 typedef struct PHPSlots {
     uint8_t status[NR_PCI_DEV]; /* Apaptor stats */
@@ -82,7 +82,7 @@ typedef struct PHPSlots {
                                  * PSTB in ASL */
 } PHPSlots;
 
-PHPSlots php_slots;
+static PHPSlots php_slots;
 int s3_shutdown_flag;
 static qemu_irq sci_irq;
 
