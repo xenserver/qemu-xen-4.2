@@ -320,9 +320,9 @@ static void php_slots_init(void)
     }
 
     /* ACPI PCI hotplug controller */
-    register_ioport_read(ACPI_PHP_IO_ADDR, NR_PCI_DEV, 1,
+    register_ioport_read(ACPI_PHP_IO_ADDR, NR_PCI_DEV + 2, 1,
                          acpi_php_readb, &php_slots);
-    register_ioport_write(ACPI_PHP_IO_ADDR, NR_PCI_DEV, 1,
+    register_ioport_write(ACPI_PHP_IO_ADDR, NR_PCI_DEV + 2, 1,
                           acpi_php_writeb, &php_slots);
     register_savevm("pcislots", 0, 1, pcislots_save, pcislots_load,
                     &php_slots);
