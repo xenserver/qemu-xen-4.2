@@ -219,12 +219,13 @@ static void acpi_dbg_writel(void *opaque, uint32_t addr, uint32_t val)
 }
 
 /*
- * simple PCI hotplug controller IO 
+ * simple PCI hotplug controller IO
  * ACPI_PHP_IO_ADDR + :
- * 0 - the hotplug description: slot(|event(remove/add); 
- * 1 - 1st php slot ctr/sts reg
- * 2 - 2nd php slot ctr/sts reg
- * ......
+ * 0 - the hotplug event
+ * 1 - the slot that has a hotplug event
+ * 2 - 1st php slot ctr/sts reg
+ * 3 - 2nd php slot ctr/sts reg
+ * ...
  */
 static uint32_t acpi_php_readb(void *opaque, uint32_t addr)
 {
