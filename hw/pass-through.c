@@ -265,18 +265,6 @@ static struct pt_reg_info_tbl pt_emu_reg_header0_tbl[] = {
         .u.b.write  = pt_byte_reg_write,
         .u.b.restore  = pt_byte_reg_restore,
     },
-    /* Header Type reg */
-    {
-        .offset     = PCI_HEADER_TYPE,
-        .size       = 1,
-        .init_val   = 0x00,
-        .ro_mask    = 0xFF,
-        .emu_mask   = 0x80,
-        .init       = pt_common_reg_init,
-        .u.b.read   = pt_byte_reg_read,
-        .u.b.write  = pt_byte_reg_write,
-        .u.b.restore  = NULL,
-    },
     /* Interrupt Line reg */
     {
         .offset     = PCI_INTERRUPT_LINE,
