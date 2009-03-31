@@ -9,7 +9,19 @@ extern int vga_ram_size;
 
 #if (defined(__i386__) || defined(__x86_64__)) && !defined(QEMU_TOOL)
 #define MAPCACHE
-uint8_t *qemu_map_cache(target_phys_addr_t phys_addr);
+
+#if defined(__i386__) 
+#define MAX_MCACHE_SIZE    0x40000000 /* 1GB max for x86 */
+#define MCACHE_BUCKET_SHIFT 16
+#elif defined(__x86_64__)
+#define MAX_MCACHE_SIZE    0x1000000000 /* 64GB max for x86_64 */
+#define MCACHE_BUCKET_SHIFT 20
+#endif
+
+#define MCACHE_BUCKET_SIZE (1UL << MCACHE_BUCKET_SHIFT)
+
+uint8_t *qemu_map_cache(target_phys_addr_t phys_addr, uint8_t lock);
+void     qemu_invalidate_entry(uint8_t *buffer);
 void     qemu_invalidate_map_cache(void);
 #else 
 #define qemu_invalidate_map_cache() ((void)0)

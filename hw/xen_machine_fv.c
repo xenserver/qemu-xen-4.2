@@ -34,16 +34,6 @@
 
 #if defined(MAPCACHE)
 
-#if defined(__i386__) 
-#define MAX_MCACHE_SIZE    0x40000000 /* 1GB max for x86 */
-#define MCACHE_BUCKET_SHIFT 16
-#elif defined(__x86_64__)
-#define MAX_MCACHE_SIZE    0x1000000000 /* 64GB max for x86_64 */
-#define MCACHE_BUCKET_SHIFT 20
-#endif
-
-#define MCACHE_BUCKET_SIZE (1UL << MCACHE_BUCKET_SHIFT)
-
 #define BITS_PER_LONG (sizeof(long)*8)
 #define BITS_TO_LONGS(bits) \
     (((bits)+BITS_PER_LONG-1)/BITS_PER_LONG)
@@ -56,10 +46,19 @@ struct map_cache {
     unsigned long paddr_index;
     uint8_t      *vaddr_base;
     DECLARE_BITMAP(valid_mapping, MCACHE_BUCKET_SIZE>>XC_PAGE_SHIFT);
+    uint8_t lock;
+    struct map_cache *next;
+};
+
+struct map_cache_rev {
+    uint8_t      *vaddr_req;
+    unsigned long paddr_index;
+    TAILQ_ENTRY(map_cache_rev) next;
 };
 
 static struct map_cache *mapcache_entry;
 static unsigned long nr_buckets;
+TAILQ_HEAD(map_cache_head, map_cache_rev) locked_entries = TAILQ_HEAD_INITIALIZER(locked_entries);
 
 /* For most cases (>99.9%), the page address is the same. */
 static unsigned long last_address_index = ~0UL;
@@ -129,20 +128,29 @@ static void qemu_remap_bucket(struct map_cache *entry,
     }
 }
 
-uint8_t *qemu_map_cache(target_phys_addr_t phys_addr)
+uint8_t *qemu_map_cache(target_phys_addr_t phys_addr, uint8_t lock)
 {
-    struct map_cache *entry;
+    struct map_cache *entry, *pentry = NULL;
     unsigned long address_index  = phys_addr >> MCACHE_BUCKET_SHIFT;
     unsigned long address_offset = phys_addr & (MCACHE_BUCKET_SIZE-1);
 
-    if (address_index == last_address_index)
+    if (address_index == last_address_index && !lock)
         return last_address_vaddr + address_offset;
 
     entry = &mapcache_entry[address_index % nr_buckets];
 
-    if (entry->vaddr_base == NULL || entry->paddr_index != address_index ||
-        !test_bit(address_offset>>XC_PAGE_SHIFT, entry->valid_mapping))
+    while (entry && entry->lock && entry->paddr_index != address_index && entry->vaddr_base) {
+        pentry = entry;
+        entry = entry->next;
+    }
+    if (!entry) {
+        entry = qemu_mallocz(sizeof(struct map_cache));
+        pentry->next = entry;
         qemu_remap_bucket(entry, address_index);
+    } else if (!entry->lock) {
+        if (!entry->vaddr_base || entry->paddr_index != address_index || !test_bit(address_offset>>XC_PAGE_SHIFT, entry->valid_mapping))
+            qemu_remap_bucket(entry, address_index);
+    }
 
     if (!test_bit(address_offset>>XC_PAGE_SHIFT, entry->valid_mapping)) {
         last_address_index = ~0UL;
@@ -151,13 +159,78 @@ uint8_t *qemu_map_cache(target_phys_addr_t phys_addr)
 
     last_address_index = address_index;
     last_address_vaddr = entry->vaddr_base;
+    if (lock) {
+        struct map_cache_rev *reventry = qemu_mallocz(sizeof(struct map_cache_rev));
+        entry->lock++;
+        reventry->vaddr_req = last_address_vaddr + address_offset;
+        reventry->paddr_index = last_address_index;
+        TAILQ_INSERT_TAIL(&locked_entries, reventry, next);
+    }
 
     return last_address_vaddr + address_offset;
+}
+
+void qemu_invalidate_entry(uint8_t *buffer)
+{
+    struct map_cache *entry = NULL, *next;
+    struct map_cache_rev *reventry;
+    unsigned long paddr_index;
+    int found = 0;
+    
+    if (last_address_vaddr == buffer) {
+        last_address_index =  ~0UL;
+        last_address_vaddr = NULL;
+    }
+
+    TAILQ_FOREACH(reventry, &locked_entries, next) {
+        if (reventry->vaddr_req == buffer) {
+            paddr_index = reventry->paddr_index;
+            found = 1;
+            break;
+        }
+    }
+    if (!found) {
+        fprintf(stderr, "qemu_invalidate_entry: could not find %p\n", buffer);
+        TAILQ_FOREACH(reventry, &locked_entries, next) {
+            fprintf(stderr, "   %lx -> %p is present\n", reventry->paddr_index, reventry->vaddr_req);
+        }
+        return;
+    }
+    TAILQ_REMOVE(&locked_entries, reventry, next);
+    qemu_free(reventry);
+
+    next = &mapcache_entry[paddr_index];
+    if (next->paddr_index == paddr_index) {
+        next->lock--;
+        return;
+    }
+
+    while (next != NULL && next->paddr_index != paddr_index) {
+        entry = next;
+        next = next->next;
+    }
+    if (!next)
+        fprintf(logfile, "Trying to unmap address %p that is not in the mapcache!\n", buffer);
+    
+    entry->next = next->next;
+    errno = munmap(next->vaddr_base, MCACHE_BUCKET_SIZE);
+    if (errno) {
+        fprintf(logfile, "unmap fails %d\n", errno);
+        exit(-1);
+    }
+    qemu_free(next);
 }
 
 void qemu_invalidate_map_cache(void)
 {
     unsigned long i;
+    struct map_cache_rev *reventry;
+
+    qemu_aio_flush();
+
+    TAILQ_FOREACH(reventry, &locked_entries, next) {
+        fprintf(stderr, "There should be no locked mappings at this time, but %lx -> %p is present\n", reventry->paddr_index, reventry->vaddr_req);
+    }
 
     mapcache_lock();
 
