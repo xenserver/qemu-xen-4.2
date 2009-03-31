@@ -3621,7 +3621,7 @@ static int pt_pmcsr_reg_restore(struct pt_dev *ptdev,
 }
 
 static struct pt_dev * register_real_device(PCIBus *e_bus,
-        const char *e_dev_name, int e_devfn, uint8_t r_bus, uint8_t r_dev,
+        const char *e_dev_name, int e_slot, uint8_t r_bus, uint8_t r_dev,
         uint8_t r_func, uint32_t machine_irq, struct pci_access *pci_access,
         char *opt)
 {
@@ -3630,7 +3630,6 @@ static struct pt_dev * register_real_device(PCIBus *e_bus,
     struct pci_dev *pci_dev;
     uint8_t e_device, e_intx;
     struct pci_config_cf8 machine_bdf;
-    int free_slot;
     char *key, *val;
     int msi_translate, power_mgmt;
 
@@ -3653,15 +3652,10 @@ static struct pt_dev * register_real_device(PCIBus *e_bus,
     pci_fill_info(pci_dev, PCI_FILL_IRQ | PCI_FILL_BASES | PCI_FILL_ROM_BASE | PCI_FILL_SIZES);
     pt_libpci_fixup(pci_dev);
 
-    if ( e_devfn == PT_VIRT_DEVFN_AUTO ) {
-        /*indicate a static assignment(not hotplug), so find a free PCI hot plug slot */
-        free_slot = __insert_to_pci_slot(r_bus, r_dev, r_func,
-                                         AUTO_PHP_SLOT, NULL);
-        if ( free_slot < 0 ) {
-            PT_LOG("Error: no free virtual PCI hot plug slot, thus no live migration.\n");
-            return NULL;
-        }
-        e_devfn = free_slot << 3;
+    e_slot = __insert_to_pci_slot(r_bus, r_dev, r_func, e_slot, NULL);
+    if ( e_slot < 0 ) {
+        PT_LOG("Error: no free virtual PCI slot\n");
+        return NULL;
     }
 
     msi_translate = direct_pci_msitranslate;
@@ -3710,7 +3704,7 @@ static struct pt_dev * register_real_device(PCIBus *e_bus,
 
     /* Register device */
     assigned_device = (struct pt_dev *) pci_register_device(e_bus, e_dev_name,
-                                sizeof(struct pt_dev), e_devfn,
+                                sizeof(struct pt_dev), PCI_DEVFN(e_slot, 0),
                                 pt_pci_read_config, pt_pci_write_config);
     if ( assigned_device == NULL )
     {
@@ -3718,7 +3712,7 @@ static struct pt_dev * register_real_device(PCIBus *e_bus,
         return NULL;
     }
 
-    dpci_infos.php_devs[PCI_SLOT(e_devfn)].pt_dev = assigned_device;
+    dpci_infos.php_devs[e_slot].pt_dev = assigned_device;
 
     assigned_device->pci_dev = pci_dev;
     assigned_device->msi_trans_cap = msi_translate;
@@ -3889,7 +3883,7 @@ int power_on_php_slot(int slot)
     pt_dev =
         register_real_device(dpci_infos.e_bus,
             "DIRECT PCI",
-            slot << 3,
+            slot,
             php_dev->r_bus,
             php_dev->r_dev,
             php_dev->r_func,
@@ -3961,7 +3955,7 @@ int pt_init(PCIBus *e_bus, const char *direct_pci)
     while ( next_bdf(&direct_pci_p, &seg, &b, &d, &f, &opt, &s) )
     {
         /* Register real device with the emulated bus */
-        pt_dev = register_real_device(e_bus, "DIRECT PCI", PT_VIRT_DEVFN_AUTO,
+        pt_dev = register_real_device(e_bus, "DIRECT PCI", s,
             b, d, f, PT_MACHINE_IRQ_AUTO, pci_access, opt);
         if ( pt_dev == NULL )
         {
