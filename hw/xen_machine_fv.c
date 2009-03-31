@@ -28,6 +28,7 @@
 #include "boards.h"
 #include "exec-all.h"
 #include "qemu-xen.h"
+#include "qemu-aio.h"
 
 #include <xen/hvm/params.h>
 #include <sys/mman.h>
