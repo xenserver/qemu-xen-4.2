@@ -187,13 +187,6 @@ void pt_msi_disable(struct pt_dev *dev)
             goto out;
         }
     }
-    /* unbind INTx */
-    if (dev->msi_trans_cap && !dev->msi_trans_en)
-    {
-        if (xc_domain_unbind_pt_irq(xc_handle, domid, dev->machine_irq,
-                        PT_IRQ_TYPE_PCI, 0, e_device, e_intx, 0))
-            PT_LOG("Error: Unbinding of interrupt failed!\n");
-    }
 
 out:
     /* clear msi info */

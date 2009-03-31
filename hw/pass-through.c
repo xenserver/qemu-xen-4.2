@@ -1867,6 +1867,20 @@ static void pt_reset_interrupt_and_io_mapping(struct pt_dev *ptdev)
     PCIDevice *d = &ptdev->dev;
     PCIIORegion *r;
     int i = 0;
+    uint8_t e_device = 0;
+    uint8_t e_intx = 0;
+
+    /* unbind INTx */
+    e_device = (ptdev->dev.devfn >> 3) & 0x1f;
+    /* fix virtual interrupt pin to INTA# */
+    e_intx = 0;
+
+    if (ptdev->msi_trans_en == 0 && ptdev->machine_irq)
+    {
+        if (xc_domain_unbind_pt_irq(xc_handle, domid, ptdev->machine_irq,
+                        PT_IRQ_TYPE_PCI, 0, e_device, e_intx, 0))
+            PT_LOG("Error: Unbinding of interrupt failed!\n");
+    }
 
     /* disable MSI/MSI-X and MSI-INTx translation */
     if (ptdev->msi)
