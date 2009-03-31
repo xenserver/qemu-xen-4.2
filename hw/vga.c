@@ -1248,6 +1248,32 @@ static void vga_draw_text(VGAState *s, int full_update)
     /* Disable dirty bit tracking */
     xc_hvm_track_dirty_vram(xc_handle, domid, 0, 0, NULL);
 
+    /* compute font data address (in plane 2) */
+    v = s->sr[3];
+    offset = (((v >> 4) & 1) | ((v << 1) & 6)) * 8192 * 4 + 2;
+    if (offset != s->font_offsets[0]) {
+        s->font_offsets[0] = offset;
+        full_update = 1;
+    }
+    font_base[0] = s->vram_ptr + offset;
+
+    offset = (((v >> 5) & 1) | ((v >> 1) & 6)) * 8192 * 4 + 2;
+    font_base[1] = s->vram_ptr + offset;
+    if (offset != s->font_offsets[1]) {
+        s->font_offsets[1] = offset;
+        full_update = 1;
+    }
+    if (s->plane_updated & (1 << 2)) {
+        /* if the plane 2 was modified since the last display, it
+           indicates the font may have been modified */
+        s->plane_updated = 0;
+        full_update = 1;
+    }
+    full_update |= update_basic_params(s);
+
+    line_offset = s->line_offset;
+    s1 = s->vram_ptr + (s->start_addr * 4);
+
     /* total width & height */
     cheight = (s->cr[9] & 0x1f) + 1;
     cw = 8;
@@ -1285,71 +1311,10 @@ static void vga_draw_text(VGAState *s, int full_update)
 
     s->rgb_to_pixel = 
         rgb_to_pixel_dup_table[get_depth_index(s->ds)];
-
     full_update |= update_palette16(s);
     palette = s->last_palette;
+    x_incr = cw * ds_get_bytes_per_pixel(s->ds);
     
-    x_incr = cw * ds_get_bytes_per_pixel(s->ds);
-    /* compute font data address (in plane 2) */
-    v = s->sr[3];
-    offset = (((v >> 4) & 1) | ((v << 1) & 6)) * 8192 * 4 + 2;
-    if (offset != s->font_offsets[0]) {
-        s->font_offsets[0] = offset;
-        full_update = 1;
-    }
-    font_base[0] = s->vram_ptr + offset;
-
-    offset = (((v >> 5) & 1) | ((v >> 1) & 6)) * 8192 * 4 + 2;
-    font_base[1] = s->vram_ptr + offset;
-    if (offset != s->font_offsets[1]) {
-        s->font_offsets[1] = offset;
-        full_update = 1;
-    }
-    if (s->plane_updated & (1 << 2)) {
-        /* if the plane 2 was modified since the last display, it
-           indicates the font may have been modified */
-        s->plane_updated = 0;
-        full_update = 1;
-    }
-    full_update |= update_basic_params(s);
-
-    line_offset = s->line_offset;
-    s1 = s->vram_ptr + (s->start_addr * 4);
-
-    /* total width & height */
-    cheight = (s->cr[9] & 0x1f) + 1;
-    cw = 8;
-    if (!(s->sr[1] & 0x01))
-        cw = 9;
-    if (s->sr[1] & 0x08)
-        cw = 16; /* NOTE: no 18 pixel wide */
-    x_incr = cw * ds_get_bytes_per_pixel(s->ds);
-    width = (s->cr[0x01] + 1);
-    if (s->cr[0x06] == 100) {
-        /* ugly hack for CGA 160x100x16 - explain me the logic */
-        height = 100;
-    } else {
-        height = s->cr[0x12] |
-            ((s->cr[0x07] & 0x02) << 7) |
-            ((s->cr[0x07] & 0x40) << 3);
-        height = (height + 1) / cheight;
-    }
-    if ((height * width) > CH_ATTR_SIZE) {
-        /* better than nothing: exit if transient size is too big */
-        return;
-    }
-
-    if (width != s->last_width || height != s->last_height ||
-        cw != s->last_cw || cheight != s->last_ch) {
-        s->last_scr_width = width * cw;
-        s->last_scr_height = height * cheight;
-        qemu_console_resize(s->ds, s->last_scr_width, s->last_scr_height);
-        s->last_width = width;
-        s->last_height = height;
-        s->last_ch = cheight;
-        s->last_cw = cw;
-        full_update = 1;
-    }
     cursor_offset = ((s->cr[0x0e] << 8) | s->cr[0x0f]) - s->start_addr;
     if (cursor_offset != s->cursor_offset ||
         s->cr[0xa] != s->cursor_start ||
