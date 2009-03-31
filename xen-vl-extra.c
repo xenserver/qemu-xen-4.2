@@ -132,7 +132,6 @@ void do_pci_add(char *devname)
 
     acpi_php_add(pci_slot);
 }
-#endif
 
 int pci_emulation_add(char *config_text)
 {
@@ -145,3 +144,4 @@ int pci_emulation_add(char *config_text)
     PciEmulationInfoHead = new;
     return 0;
 }
+#endif

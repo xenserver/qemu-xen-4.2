@@ -206,4 +206,4 @@ int qemu_paio_cancel(int fd, struct qemu_paiocb *aiocb)
     return ret;
 }
 
-#endif CONFIG_STUBDOM
+#endif /* CONFIG_STUBDOM */

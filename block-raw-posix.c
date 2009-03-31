@@ -1232,4 +1232,4 @@ BlockDriver bdrv_host_device = {
     .bdrv_ioctl = raw_ioctl,
 };
 
-#endif CONFIG_STUBDOM
+#endif /* CONFIG_STUBDOM */

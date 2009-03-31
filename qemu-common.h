@@ -133,17 +133,6 @@ int qemu_fls(int i);
 #define qemu_isascii(c)		isascii((unsigned char)(c))
 #define qemu_toascii(c)		toascii((unsigned char)(c))
 
-#define CTYPE(isfoobar,argumentchar) (isfoobar((unsigned char)(argumentchar)))
-  /* One must not pass a plain `char' to isupper, toupper, et al.  If
-   * it has the top bit set (ie, is negative if your chars are
-   * signed), undefined behaviour results.  The <ctype.h> functions
-   * are defined to take the value of an unsigned char, as an int.
-   * So use this macro.  You may pass toupper et al for isfoobar.
-   * Do not pass EOF as a character to this macro.  If you might have
-   * EOF then you ought to have it in an int representing an unsigned
-   * char, which is safe for the ctype macros directly.  Or test separately.
-   * Obviously don't use this for floating point things like isnan! */
-
 void *qemu_malloc(size_t size);
 void *qemu_realloc(void *ptr, size_t size);
 void *qemu_mallocz(size_t size);

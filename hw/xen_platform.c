@@ -29,6 +29,7 @@
 #include "irq.h"
 #include "qemu-xen.h"
 #include "net.h"
+#include "xen_platform.h"
 
 #include <assert.h>
 #include <xenguest.h>
@@ -254,12 +255,12 @@ static uint32_t platform_fixed_ioport_read1(void *opaque, uint32_t addr)
     }
 }
 
-void platform_fixed_ioport_save(QEMUFile *f, void *opaque)
+static void platform_fixed_ioport_save(QEMUFile *f, void *opaque)
 {
     qemu_put_8s(f, &platform_flags);
 }
 
-int platform_fixed_ioport_load(QEMUFile *f, void *opaque, int version_id)
+static int platform_fixed_ioport_load(QEMUFile *f, void *opaque, int version_id)
 {
     uint8_t flags;
 

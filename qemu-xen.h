@@ -24,7 +24,6 @@ void timeoffset_get(void);
 
 /* xen_platform.c */
 #ifndef QEMU_TOOL
-void pci_xen_platform_init(PCIBus *bus);
 void xen_vga_populate_vram(uint64_t vram_addr, uint32_t size);
 void xen_vga_vram_map(uint64_t vram_addr, uint32_t size);
 void set_vram_mapping(void *opaque, unsigned long begin, unsigned long end);
