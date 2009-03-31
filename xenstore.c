@@ -584,6 +584,24 @@ void xenstore_parse_domain_config(int hvm_domid)
 
             strcat(direct_pci_str, dev);
 
+            if (pasprintf(&buf, "/local/domain/0/backend/pci/%u/%u/vslot-%d",
+                          hvm_domid, pci_devid, i) != -1) {
+                free(dev);
+                dev = xs_read(xsh, XBT_NULL, buf, &len);
+            }
+            if ( dev ) {
+                if (strlen(dev) + strlen(direct_pci_str) >
+                    DIRECT_PCI_STR_LEN - 2) {
+                    fprintf(stderr, "qemu: too many pci pass-through "
+                            "devices\n");
+                    memset(direct_pci_str, 0, DIRECT_PCI_STR_LEN);
+                    goto out;
+                }
+                strcat(direct_pci_str, "@");
+                strcat(direct_pci_str, dev);
+            }
+
+
             if (pasprintf(&buf, "/local/domain/0/backend/pci/%u/%u/opts-%d",
                           hvm_domid, pci_devid, i) != -1) {
                 free(dev);
