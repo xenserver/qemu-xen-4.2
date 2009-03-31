@@ -3098,6 +3098,8 @@ static void _ide_unplug_harddisks(int start)
         fprintf(stderr, "No principal controller?\n");
         return;
     }
+    /* wait for outstanding aio requests */
+    qemu_aio_flush();
     for (i = start; i < 4; i++) {
         s = principal_ide_controller->ide_if + i;
         if (!s->bs)
