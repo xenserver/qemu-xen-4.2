@@ -31,6 +31,10 @@
 #include <malloc.h>
 #include "qemu-char.h"
 
+#include <xen/io/blkif.h>
+#define IDE_DMA_BUF_SECTORS \
+	(((BLKIF_MAX_SEGMENTS_PER_REQUEST - 1 ) * TARGET_PAGE_SIZE) / 512)
+#define IDE_DMA_BUF_BYTES (IDE_DMA_BUF_SECTORS * 512)
 #define SECTOR_SIZE 512
 
 #ifndef QEMU_TOOL
@@ -131,8 +135,18 @@ void qemu_aio_wait(void)
     remove_waiter(w);
 }
 
-static void vbd_aio_callback(struct blkfront_aiocb *aiocbp, int ret) {
+static void vbd_do_aio(struct blkfront_aiocb *aiocbp, int ret) {
     VbdAIOCB *acb = aiocbp->data;
+    int n = aiocbp->aio_nbytes;
+
+    aiocbp->total_bytes -= n;
+    if (aiocbp->total_bytes > 0) {
+        aiocbp->aio_buf += n; 
+        aiocbp->aio_offset += n;
+        aiocbp->aio_nbytes = aiocbp->total_bytes > IDE_DMA_BUF_BYTES ? IDE_DMA_BUF_BYTES : aiocbp->total_bytes;
+        blkfront_aio(aiocbp, aiocbp->is_write);
+        return;
+    }
 
     acb->common.cb(acb->common.opaque, ret);
     qemu_aio_release(acb);
@@ -140,7 +154,7 @@ static void vbd_aio_callback(struct blkfront_aiocb *aiocbp, int ret) {
 
 static VbdAIOCB *vbd_aio_setup(BlockDriverState *bs,
         int64_t sector_num, uint8_t *buf, int nb_sectors,
-        BlockDriverCompletionFunc *cb, void *opaque)
+        BlockDriverCompletionFunc *cb, uint8_t is_write, void *opaque)
 {
     BDRVVbdState *s = bs->opaque;
     VbdAIOCB *acb;
@@ -150,9 +164,15 @@ static VbdAIOCB *vbd_aio_setup(BlockDriverState *bs,
 	return NULL;
     acb->aiocb.aio_dev = s->dev;
     acb->aiocb.aio_buf = buf;
-    acb->aiocb.aio_nbytes = nb_sectors * SECTOR_SIZE;
     acb->aiocb.aio_offset = sector_num * SECTOR_SIZE;
-    acb->aiocb.aio_cb = vbd_aio_callback;
+    if (nb_sectors <= IDE_DMA_BUF_SECTORS)
+        acb->aiocb.aio_nbytes = nb_sectors * SECTOR_SIZE;
+    else
+        acb->aiocb.aio_nbytes = IDE_DMA_BUF_BYTES;
+    acb->aiocb.aio_cb = vbd_do_aio;
+
+    acb->aiocb.total_bytes = nb_sectors * SECTOR_SIZE;
+    acb->aiocb.is_write = is_write;
     acb->aiocb.data = acb;
 
     return acb;
@@ -164,7 +184,7 @@ static BlockDriverAIOCB *vbd_aio_read(BlockDriverState *bs,
 {
     VbdAIOCB *acb;
 
-    acb = vbd_aio_setup(bs, sector_num, buf, nb_sectors, cb, opaque);
+    acb = vbd_aio_setup(bs, sector_num, buf, nb_sectors, cb, 0, opaque);
     if (!acb)
 	return NULL;
     blkfront_aio(&acb->aiocb, 0);
@@ -177,7 +197,7 @@ static BlockDriverAIOCB *vbd_aio_write(BlockDriverState *bs,
 {
     VbdAIOCB *acb;
 
-    acb = vbd_aio_setup(bs, sector_num, (uint8_t*) buf, nb_sectors, cb, opaque);
+    acb = vbd_aio_setup(bs, sector_num, (uint8_t*) buf, nb_sectors, cb, 1, opaque);
     if (!acb)
 	return NULL;
     blkfront_aio(&acb->aiocb, 1);
@@ -196,7 +216,7 @@ static int vbd_aligned_io(BlockDriverState *bs,
     VbdAIOCB *acb;
     int result[2];
     result[0] = 0;
-    acb = vbd_aio_setup(bs, sector_num, (uint8_t*) buf, nb_sectors, vbd_cb, &result);
+    acb = vbd_aio_setup(bs, sector_num, (uint8_t*) buf, nb_sectors, vbd_cb, write, &result);
     blkfront_aio(&acb->aiocb, write);
     while (!result[0])
 	qemu_aio_wait();
@@ -268,13 +288,13 @@ static BlockDriverAIOCB *vbd_aio_flush(BlockDriverState *bs,
     }
     if (s->info.barrier == 1) {
         acb = vbd_aio_setup(bs, 0, NULL, 0,
-                s->info.flush == 1 ? vbd_nop_cb : cb, opaque);
+                s->info.flush == 1 ? vbd_nop_cb : cb, 0, opaque);
         if (!acb)
             return NULL;
         blkfront_aio_push_operation(&acb->aiocb, BLKIF_OP_WRITE_BARRIER);
     }
     if (s->info.flush == 1) {
-        acb = vbd_aio_setup(bs, 0, NULL, 0, cb, opaque);
+        acb = vbd_aio_setup(bs, 0, NULL, 0, cb, 0, opaque);
         if (!acb)
             return NULL;
         blkfront_aio_push_operation(&acb->aiocb, BLKIF_OP_FLUSH_DISKCACHE);
