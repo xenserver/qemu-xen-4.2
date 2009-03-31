@@ -776,9 +776,10 @@ static int token_value(char *token)
     return strtol(token, NULL, 16);
 }
 
-static int next_bdf(char **str, int *seg, int *bus, int *dev, int *func, char **opt)
+static int next_bdf(char **str, int *seg, int *bus, int *dev, int *func,
+                    char **opt, int *vslot)
 {
-    char *token;
+    char *token, *endptr;
     const char *delim = ":.-";
 
     if ( !(*str) ||
@@ -795,7 +796,20 @@ static int next_bdf(char **str, int *seg, int *bus, int *dev, int *func, char **
     *dev  = token_value(token);
 
     token  = strsep(str, delim);
-    *opt = strchr(token, ',');
+
+    *opt = strchr(token, '@');
+    if (*opt)
+    {
+        *(*opt)++ = '\0';
+        *vslot = token_value(*opt);
+    }
+    else
+    {
+        *vslot = AUTO_PHP_SLOT;
+        *opt = token;
+    }
+
+    *opt = strchr(*opt, ',');
     if (*opt)
         *(*opt)++ = '\0';
 
@@ -881,14 +895,9 @@ found:
 int insert_to_pci_slot(char *bdf_slt)
 {
     int seg, bus, dev, func, slot;
-    char *bdf_str, *slt_str, *opt, *endptr;
-    const char *delim="@";
+    char *opt;
 
-    bdf_str = strsep(&bdf_slt, delim);
-    slt_str = bdf_slt;
-    slot = token_value(slt_str);
-
-    if ( !next_bdf(&bdf_str, &seg, &bus, &dev, &func, &opt))
+    if ( !next_bdf(&bdf_slt, &seg, &bus, &dev, &func, &opt, &slot) )
     {
         return -1;
     }
@@ -916,10 +925,10 @@ int test_pci_slot(int slot)
 /* find the pci slot for pass-through dev with specified BDF */
 int bdf_to_slot(char *bdf_str)
 {
-    int seg, bus, dev, func, i;
+    int seg, bus, dev, func, slot, i;
     char *opt;
 
-    if ( !next_bdf(&bdf_str, &seg, &bus, &dev, &func, &opt))
+    if ( !next_bdf(&bdf_str, &seg, &bus, &dev, &func, &opt, &slot))
     {
         return -1;
     }
@@ -3901,7 +3910,7 @@ int power_off_php_slot(int php_slot)
 
 int pt_init(PCIBus *e_bus, const char *direct_pci)
 {
-    int seg, b, d, f, status = -1;
+    int seg, b, d, f, s, status = -1;
     struct pt_dev *pt_dev;
     struct pci_access *pci_access;
     char *vslots;
@@ -3949,7 +3958,7 @@ int pt_init(PCIBus *e_bus, const char *direct_pci)
     }
 
     /* Assign given devices to guest */
-    while ( next_bdf(&direct_pci_p, &seg, &b, &d, &f, &opt) )
+    while ( next_bdf(&direct_pci_p, &seg, &b, &d, &f, &opt, &s) )
     {
         /* Register real device with the emulated bus */
         pt_dev = register_real_device(e_bus, "DIRECT PCI", PT_VIRT_DEVFN_AUTO,
