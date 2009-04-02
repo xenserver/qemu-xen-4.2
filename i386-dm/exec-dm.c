@@ -340,6 +340,25 @@ int cpu_register_io_memory(int io_index,
     return io_index << IO_MEM_SHIFT;
 }
 
+void cpu_unregister_io_memory(int io_table_address)
+{
+    int i;
+    int io_index = io_table_address >> IO_MEM_SHIFT;
+
+    for (i = 0; i < mmio_cnt; i++) {
+	if (mmio[i].size && mmio[i].io_index == io_index) {
+	   mmio[i].start = mmio[i].size = 0;
+	   break;
+	}
+    }
+
+    for (i=0;i < 3; i++) {
+        io_mem_read[io_index][i] = NULL;
+        io_mem_write[io_index][i] = NULL;
+    }
+    io_mem_opaque[io_index] = NULL;
+}
+
 CPUWriteMemoryFunc **cpu_get_io_memory_write(int io_index)
 {
     return io_mem_write[io_index >> IO_MEM_SHIFT];

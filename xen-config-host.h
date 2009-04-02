@@ -8,6 +8,7 @@
 #endif
 
 #define CONFIG_DM
+#define CONFIG_XEN
 
 extern char domain_name[64];
 extern int domid, domid_backend;

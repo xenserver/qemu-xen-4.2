@@ -4436,7 +4436,7 @@ static const QEMUOption qemu_options[] = {
     { "pciemulation", HAS_ARG, QEMU_OPTION_pci_emulation },
     { "vncunused", 0, QEMU_OPTION_vncunused },
     { "vcpus", HAS_ARG, QEMU_OPTION_vcpus },
-#ifdef CONFIG_XEN
+#if defined(CONFIG_XEN) && !defined(CONFIG_DM)
     { "xen-domid", HAS_ARG, QEMU_OPTION_xen_domid },
     { "xen-create", 0, QEMU_OPTION_xen_create },
     { "xen-attach", 0, QEMU_OPTION_xen_attach },
@@ -5323,7 +5323,7 @@ int main(int argc, char **argv, char **envp)
             case QEMU_OPTION_vncunused:
                 vncunused = 1;
                 break;
-#ifdef CONFIG_XEN
+#if defined(CONFIG_XEN) && !defined(CONFIG_DM)
             case QEMU_OPTION_xen_domid:
                 xen_domid = domid = atoi(optarg);
                 break;
@@ -5345,12 +5345,14 @@ int main(int argc, char **argv, char **envp)
             case QEMU_OPTION_rtc_td_hack:
                 rtc_td_hack = 1;
                 break;
+#ifndef CONFIG_DM
             case QEMU_OPTION_acpitable:
                 if(acpi_table_add(optarg) < 0) {
                     fprintf(stderr, "Wrong acpi table provided\n");
                     exit(1);
                 }
                 break;
+#endif /*CONFIG_DM*/
 #endif
 #ifdef USE_KQEMU
             case QEMU_OPTION_no_kqemu:

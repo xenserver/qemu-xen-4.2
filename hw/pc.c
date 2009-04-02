@@ -461,7 +461,9 @@ static void bochs_bios_init(void)
     fw_cfg = fw_cfg_init(BIOS_CFG_IOPORT, BIOS_CFG_IOPORT + 1, 0, 0);
     fw_cfg_add_i32(fw_cfg, FW_CFG_ID, 1);
     fw_cfg_add_i64(fw_cfg, FW_CFG_RAM_SIZE, (uint64_t)ram_size);
+#ifndef CONFIG_DM
     fw_cfg_add_bytes(fw_cfg, FW_CFG_ACPI_TABLES, acpi_tables, acpi_tables_len);
+#endif /*CONFIG_DM*/
 }
 
 /* Generate an initial boot sector which sets state and jump to

@@ -575,6 +575,12 @@ i2c_bus *piix4_pm_init(PCIBus *bus, int devfn, uint32_t smb_io_base,
     return NULL;
 }
 
+void qemu_system_hot_add_init() { }
+void qemu_system_device_hot_add(int bus, int slot, int state) {
+    fputs("qemu-upstream PCI hotplug not supported in qemu-dm\n",stderr);
+    exit(-1);
+}
+
 void i440fx_init_memory_mappings(PCIDevice *d) {
     /* our implementation doesn't need this */
 }
