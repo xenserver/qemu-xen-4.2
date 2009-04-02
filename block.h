@@ -56,9 +56,6 @@ typedef struct QEMUSnapshotInfo {
 
 #define BDRV_O_CACHE_MASK  (BDRV_O_NOCACHE | BDRV_O_CACHE_WB | BDRV_O_CACHE_DEF)
 
-#define BDRV_O_EXTENDABLE  0x0080 /* allow writes out of original size range;
-				     only effective for some drivers */
-
 void bdrv_info(void);
 void bdrv_info_stats(void);
 

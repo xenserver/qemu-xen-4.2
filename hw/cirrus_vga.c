@@ -732,10 +732,10 @@ static void cirrus_do_copy(CirrusVGAState *s, int dst, int src, int w, int h)
     s->get_resolution((VGAState *)s, &width, &height);
 
     /* extra x, y */
-    sx = (src % (width * depth)) / depth;
-    sy = (src / (width * depth));
-    dx = (dst % (width *depth)) / depth;
-    dy = (dst / (width * depth));
+    sx = (src % ABS(s->cirrus_blt_srcpitch)) / depth;
+    sy = (src / ABS(s->cirrus_blt_srcpitch));
+    dx = (dst % ABS(s->cirrus_blt_dstpitch)) / depth;
+    dy = (dst / ABS(s->cirrus_blt_dstpitch));
 
     /* normalize width */
     w /= depth;
@@ -783,10 +783,9 @@ static void cirrus_do_copy(CirrusVGAState *s, int dst, int src, int w, int h)
     /* we don't have to notify the display that this portion has
        changed since qemu_console_copy implies this */
 
-    if (!notify)
-	cirrus_invalidate_region(s, s->cirrus_blt_dstaddr,
-				 s->cirrus_blt_dstpitch, s->cirrus_blt_width,
-				 s->cirrus_blt_height);
+    cirrus_invalidate_region(s, s->cirrus_blt_dstaddr,
+				s->cirrus_blt_dstpitch, s->cirrus_blt_width,
+				s->cirrus_blt_height);
 }
 
 static int cirrus_bitblt_videotovideo_copy(CirrusVGAState * s)

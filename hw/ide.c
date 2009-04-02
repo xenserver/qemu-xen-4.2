@@ -28,11 +28,13 @@
 #include "scsi-disk.h"
 #include "pcmcia.h"
 #include "block.h"
+#include "block_int.h"
 #include "qemu-timer.h"
 #include "sysemu.h"
 #include "ppc_mac.h"
 #include "mac_dbdma.h"
 #include "sh.h"
+#include "dma.h"
 
 /* debug IDE devices */
 //#define DEBUG_IDE
@@ -429,7 +431,7 @@ typedef struct IDEState {
     int atapi_dma; /* true if dma is requested for the packet cmd */
     /* ATA DMA state */
     int io_buffer_size;
-    QEMUIOVector iovec;
+    QEMUSGList sg;
     /* PIO transfer handling */
     int req_nb_sectors; /* number of sectors per interrupt */
     EndTransferFunc *end_transfer_func;
@@ -1057,10 +1059,8 @@ static int dma_buf_prepare(BMDMAState *bm, int is_write)
         uint32_t size;
     } prd;
     int l, len;
-    void *mem;
-    target_phys_addr_t l1;
 
-    qemu_iovec_init(&s->iovec, s->nsector / (TARGET_PAGE_SIZE/512) + 1);
+    qemu_sglist_init(&s->sg, s->nsector / (TARGET_PAGE_SIZE/512) + 1);
     s->io_buffer_size = 0;
     for(;;) {
         if (bm->cur_prd_len == 0) {
@@ -1081,15 +1081,10 @@ static int dma_buf_prepare(BMDMAState *bm, int is_write)
         }
         l = bm->cur_prd_len;
         if (l > 0) {
-            l1 = l;
-            mem = cpu_physical_memory_map(bm->cur_prd_addr, &l1, is_write);
-            if (!mem) {
-                break;
-            }
-            qemu_iovec_add(&s->iovec, mem, l1);
-            bm->cur_prd_addr += l1;
-            bm->cur_prd_len -= l1;
-            s->io_buffer_size += l1;
+            qemu_sglist_add(&s->sg, bm->cur_prd_addr, l);
+            bm->cur_prd_addr += l;
+            bm->cur_prd_len -= l;
+            s->io_buffer_size += l;
         }
     }
     return 1;
@@ -1097,14 +1092,7 @@ static int dma_buf_prepare(BMDMAState *bm, int is_write)
 
 static void dma_buf_commit(IDEState *s, int is_write)
 {
-    int i;
-
-    for (i = 0; i < s->iovec.niov; ++i) {
-        cpu_physical_memory_unmap(s->iovec.iov[i].iov_base,
-                                  s->iovec.iov[i].iov_len, is_write,
-                                  s->iovec.iov[i].iov_len);
-    }
-    qemu_iovec_destroy(&s->iovec);
+    qemu_sglist_destroy(&s->sg);
 }
 
 static void ide_dma_error(IDEState *s)
@@ -1267,15 +1255,10 @@ static void ide_read_dma_cb(void *opaque, int ret)
     s->io_buffer_size = n * 512;
     if (dma_buf_prepare(bm, 1) == 0)
         goto eot;
-    if (!s->iovec.niov) {
-        wait_for_bounce_buffer(bm, ide_read_dma_cb);
-        return;
-    }
 #ifdef DEBUG_AIO
     printf("aio_read: sector_num=%" PRId64 " n=%d\n", sector_num, n);
 #endif
-    bm->aiocb = bdrv_aio_readv(s->bs, sector_num, &s->iovec, n,
-                               ide_read_dma_cb, bm);
+    bm->aiocb = dma_bdrv_read(s->bs, &s->sg, sector_num, ide_read_dma_cb, bm);
     ide_dma_submit_check(s, ide_read_dma_cb, bm);
 }
 
@@ -1416,15 +1399,10 @@ static void ide_write_dma_cb(void *opaque, int ret)
     /* launch next transfer */
     if (dma_buf_prepare(bm, 0) == 0)
         goto eot;
-    if (!s->iovec.niov) {
-        wait_for_bounce_buffer(bm, ide_write_dma_cb);
-        return;
-    }
 #ifdef DEBUG_AIO
     printf("aio_write: sector_num=%" PRId64 " n=%d\n", sector_num, n);
 #endif
-    bm->aiocb = bdrv_aio_writev(s->bs, sector_num, &s->iovec, n,
-                                ide_write_dma_cb, bm);
+    bm->aiocb = dma_bdrv_write(s->bs, &s->sg, sector_num, ide_write_dma_cb, bm);
     ide_dma_submit_check(s, ide_write_dma_cb, bm);
 }
 
@@ -3256,8 +3234,6 @@ void isa_ide_init(int iobase, int iobase2, qemu_irq irq,
     IDEState *ide_state;
 
     ide_state = qemu_mallocz(sizeof(IDEState) * 2);
-    if (!ide_state)
-        return;
 
     ide_init2(ide_state, hd0, hd1, irq);
     ide_init_ioport(ide_state, iobase, iobase2);
@@ -3718,6 +3694,7 @@ void pci_piix3_ide_init(PCIBus *bus, BlockDriverState **hd_table, int devfn,
 {
     PCIIDEState *d;
     uint8_t *pci_conf;
+    int i;
 
     /* register a function 1 of PIIX3 */
     d = (PCIIDEState *)pci_register_device(bus, "PIIX3 IDE",
@@ -3752,6 +3729,10 @@ void pci_piix3_ide_init(PCIBus *bus, BlockDriverState **hd_table, int devfn,
     ide_init_ioport(&d->ide_if[2], 0x170, 0x376);
 
     buffered_pio_init();
+
+    for (i = 0; i < 4; i++)
+        if (hd_table[i])
+            hd_table[i]->private = &d->dev;
 
     register_savevm("ide", 0, 3, pci_ide_save, pci_ide_load, d);
 }
@@ -3804,108 +3785,143 @@ void pci_piix4_ide_init(PCIBus *bus, BlockDriverState **hd_table, int devfn,
 
 typedef struct MACIOIDEState {
     IDEState ide_if[2];
-    void *dbdma;
-    int stream_index;
+    BlockDriverAIOCB *aiocb;
 } MACIOIDEState;
 
-static int pmac_atapi_read(DBDMA_transfer *info, DBDMA_transfer_cb cb)
+static void pmac_ide_atapi_transfer_cb(void *opaque, int ret)
 {
-    MACIOIDEState *m = info->opaque;
+    DBDMA_io *io = opaque;
+    MACIOIDEState *m = io->opaque;
     IDEState *s = m->ide_if->cur_drive;
-    int ret;
 
-    if (s->lba == -1)
-        return 0;
-
-    info->buf_pos = 0;
-
-    while (info->buf_pos < info->len && s->packet_transfer_size > 0) {
-
-        ret = cd_read_sector(s->bs, s->lba, s->io_buffer, s->cd_sector_size);
-        if (ret < 0) {
-            ide_transfer_stop(s);
-            ide_atapi_io_error(s, ret);
-            return info->buf_pos;
-        }
-
-        info->buf = s->io_buffer + m->stream_index;
-
-        info->buf_len = s->cd_sector_size;
-        if (info->buf_pos + info->buf_len > info->len)
-            info->buf_len = info->len - info->buf_pos;
-
-        cb(info);
-
-	/* db-dma can ask for 512 bytes whereas block size is 2048... */
-
-        m->stream_index += info->buf_len;
-        s->lba += m->stream_index / s->cd_sector_size;
-        m->stream_index %= s->cd_sector_size;
-
-        info->buf_pos += info->buf_len;
-        s->packet_transfer_size -= info->buf_len;
-    }
-    if (s->packet_transfer_size <= 0) {
-        s->status = READY_STAT | SEEK_STAT;
-        s->nsector = (s->nsector & ~7) | ATAPI_INT_REASON_IO
-                                       | ATAPI_INT_REASON_CD;
-        ide_set_irq(s);
+    if (ret < 0) {
+        m->aiocb = NULL;
+        qemu_sglist_destroy(&s->sg);
+        ide_atapi_io_error(s, ret);
+        io->dma_end(opaque);
+        return;
     }
 
-    return info->buf_pos;
+    if (s->io_buffer_size > 0) {
+        m->aiocb = NULL;
+        qemu_sglist_destroy(&s->sg);
+
+        s->packet_transfer_size -= s->io_buffer_size;
+
+        s->io_buffer_index += s->io_buffer_size;
+	s->lba += s->io_buffer_index >> 11;
+        s->io_buffer_index &= 0x7ff;
+    }
+
+    if (s->packet_transfer_size <= 0)
+        ide_atapi_cmd_ok(s);
+
+    if (io->len == 0) {
+        io->dma_end(opaque);
+        return;
+    }
+
+    /* launch next transfer */
+
+    s->io_buffer_size = io->len;
+
+    qemu_sglist_init(&s->sg, io->len / TARGET_PAGE_SIZE + 1);
+    qemu_sglist_add(&s->sg, io->addr, io->len);
+    io->addr += io->len;
+    io->len = 0;
+
+    m->aiocb = dma_bdrv_read(s->bs, &s->sg,
+                             (int64_t)(s->lba << 2) + (s->io_buffer_index >> 9),
+                             pmac_ide_atapi_transfer_cb, io);
+    if (!m->aiocb) {
+        qemu_sglist_destroy(&s->sg);
+        /* Note: media not present is the most likely case */
+        ide_atapi_cmd_error(s, SENSE_NOT_READY,
+                            ASC_MEDIUM_NOT_PRESENT);
+        io->dma_end(opaque);
+        return;
+    }
 }
 
-static int pmac_ide_transfer(DBDMA_transfer *info,
-                             DBDMA_transfer_cb cb)
+static void pmac_ide_transfer_cb(void *opaque, int ret)
 {
-    MACIOIDEState *m = info->opaque;
+    DBDMA_io *io = opaque;
+    MACIOIDEState *m = io->opaque;
     IDEState *s = m->ide_if->cur_drive;
+    int n;
     int64_t sector_num;
-    int ret, n;
 
-    if (s->is_cdrom)
-        return pmac_atapi_read(info, cb);
+    if (ret < 0) {
+        m->aiocb = NULL;
+        qemu_sglist_destroy(&s->sg);
+	ide_dma_error(s);
+        io->dma_end(io);
+        return;
+    }
 
-    info->buf = s->io_buffer;
-    info->buf_pos = 0;
-    while (info->buf_pos < info->len && s->nsector > 0) {
-
-        sector_num = ide_get_sector(s);
-
-        n = s->nsector;
-        if (n > IDE_DMA_BUF_SECTORS)
-            n = IDE_DMA_BUF_SECTORS;
-
-        info->buf_len = n << 9;
-        if (info->buf_pos + info->buf_len > info->len)
-            info->buf_len = info->len - info->buf_pos;
-        n = info->buf_len >> 9;
-
-        if (s->is_read) {
-            ret = bdrv_read(s->bs, sector_num, s->io_buffer, n);
-            if (ret == 0)
-                cb(info);
-        } else {
-            cb(info);
-            ret = bdrv_write(s->bs, sector_num, s->io_buffer, n);
-        }
-
-        if (ret != 0) {
-            ide_rw_error(s);
-            return info->buf_pos;
-        }
-
-        info->buf_pos += n << 9;
-        ide_set_sector(s, sector_num + n);
+    sector_num = ide_get_sector(s);
+    if (s->io_buffer_size > 0) {
+        m->aiocb = NULL;
+        qemu_sglist_destroy(&s->sg);
+        n = (s->io_buffer_size + 0x1ff) >> 9;
+        sector_num += n;
+        ide_set_sector(s, sector_num);
         s->nsector -= n;
     }
 
-    if (s->nsector <= 0) {
+    /* end of transfer ? */
+    if (s->nsector == 0) {
         s->status = READY_STAT | SEEK_STAT;
         ide_set_irq(s);
     }
 
-    return info->buf_pos;
+    /* end of DMA ? */
+
+    if (io->len == 0) {
+        io->dma_end(io);
+	return;
+    }
+
+    /* launch next transfer */
+
+    s->io_buffer_index = 0;
+    s->io_buffer_size = io->len;
+
+    qemu_sglist_init(&s->sg, io->len / TARGET_PAGE_SIZE + 1);
+    qemu_sglist_add(&s->sg, io->addr, io->len);
+    io->addr += io->len;
+    io->len = 0;
+
+    if (s->is_read)
+        m->aiocb = dma_bdrv_read(s->bs, &s->sg, sector_num,
+		                 pmac_ide_transfer_cb, io);
+    else
+        m->aiocb = dma_bdrv_write(s->bs, &s->sg, sector_num,
+		                  pmac_ide_transfer_cb, io);
+    if (!m->aiocb)
+        pmac_ide_transfer_cb(io, -1);
+}
+
+static void pmac_ide_transfer(DBDMA_io *io)
+{
+    MACIOIDEState *m = io->opaque;
+    IDEState *s = m->ide_if->cur_drive;
+
+    s->io_buffer_size = 0;
+    if (s->is_cdrom) {
+        pmac_ide_atapi_transfer_cb(io, 0);
+        return;
+    }
+
+    pmac_ide_transfer_cb(io, 0);
+}
+
+static void pmac_ide_flush(DBDMA_io *io)
+{
+    MACIOIDEState *m = io->opaque;
+
+    if (m->aiocb)
+        qemu_aio_flush();
 }
 
 /* PowerMac IDE memory IO */
@@ -4084,10 +4100,8 @@ int pmac_ide_init (BlockDriverState **hd_table, qemu_irq irq,
     d = qemu_mallocz(sizeof(MACIOIDEState));
     ide_init2(d->ide_if, hd_table[0], hd_table[1], irq);
 
-    if (dbdma) {
-        d->dbdma = dbdma;
-        DBDMA_register_channel(dbdma, channel, dma_irq, pmac_ide_transfer, d);
-    }
+    if (dbdma)
+        DBDMA_register_channel(dbdma, channel, dma_irq, pmac_ide_transfer, pmac_ide_flush, d);
 
     pmac_ide_memory = cpu_register_io_memory(0, pmac_ide_read,
                                              pmac_ide_write, d);

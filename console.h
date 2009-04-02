@@ -307,8 +307,8 @@ int vnc_display_open(DisplayState *ds, const char *display, int find_unused);
 int vnc_display_password(DisplayState *ds, const char *password);
 void do_info_vnc(void);
 
-/* x_keymap.c */
-extern uint8_t _translate_keycode(const int key);
+/* curses.c */
+void curses_display_init(DisplayState *ds, int full_screen);
 
 /* FIXME: term_printf et al should probably go elsewhere so everything
    does not need to include console.h  */

@@ -66,10 +66,6 @@ MigrationState *exec_start_outgoing_migration(const char *command,
 #else
 
     s = qemu_mallocz(sizeof(*s));
-    if (s == NULL) {
-        dprintf("Unable to allocate FdMigrationState\n");
-        goto err;
-    }
 
     f = popen(command, "w");
     if (f == NULL) {
@@ -114,7 +110,6 @@ err_after_open:
     pclose(f);
 err_after_alloc:
     qemu_free(s);
-err:
     return NULL;
 #endif /*!CONFIG_STUBDOM*/
 }

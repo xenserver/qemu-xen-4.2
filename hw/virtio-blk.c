@@ -104,8 +104,7 @@ static void virtio_blk_rw_complete(void *opaque, int ret)
 static VirtIOBlockReq *virtio_blk_alloc_request(VirtIOBlock *s)
 {
     VirtIOBlockReq *req = qemu_mallocz(sizeof(*req));
-    if (req != NULL)
-        req->dev = s;
+    req->dev = s;
     return req;
 }
 
@@ -315,6 +314,7 @@ void *virtio_blk_init(PCIBus *bus, BlockDriverState *bs)
     s->vdev.reset = virtio_blk_reset;
     s->bs = bs;
     s->rq = NULL;
+    bs->private = &s->vdev.pci_dev;
     bdrv_guess_geometry(s->bs, &cylinders, &heads, &secs);
     bdrv_set_geometry_hint(s->bs, cylinders, heads, secs);
 

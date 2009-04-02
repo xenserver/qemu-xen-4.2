@@ -1247,6 +1247,35 @@ static void mem_info(void)
 }
 #endif
 
+#if defined(TARGET_SH4)
+
+static void print_tlb(int idx, tlb_t *tlb)
+{
+    term_printf(" tlb%i:\t"
+                "asid=%hhu vpn=%x\tppn=%x\tsz=%hhu size=%u\t"
+                "v=%hhu shared=%hhu cached=%hhu prot=%hhu "
+                "dirty=%hhu writethrough=%hhu\n",
+                idx,
+                tlb->asid, tlb->vpn, tlb->ppn, tlb->sz, tlb->size,
+                tlb->v, tlb->sh, tlb->c, tlb->pr,
+                tlb->d, tlb->wt);
+}
+
+static void tlb_info(void)
+{
+    CPUState *env = mon_get_cpu();
+    int i;
+
+    term_printf ("ITLB:\n");
+    for (i = 0 ; i < ITLB_SIZE ; i++)
+        print_tlb (i, &env->itlb[i]);
+    term_printf ("UTLB:\n");
+    for (i = 0 ; i < UTLB_SIZE ; i++)
+        print_tlb (i, &env->utlb[i]);
+}
+
+#endif
+
 static void do_info_kqemu(void)
 {
 #ifdef USE_KQEMU
@@ -1373,10 +1402,6 @@ static void do_wav_capture (const char *path,
     CaptureState *s;
 
     s = qemu_mallocz (sizeof (*s));
-    if (!s) {
-        term_printf ("Not enough memory to add wave capture\n");
-        return;
-    }
 
     freq = has_freq ? freq : 44100;
     bits = has_bits ? bits : 16;
@@ -1523,9 +1548,24 @@ static const term_cmd_t term_cmds[] = {
       "", "cancel the current VM migration" },
     { "migrate_set_speed", "s", do_migrate_set_speed,
       "value", "set maximum speed (in bytes) for migrations" },
+#if defined(TARGET_I386)
+    { "drive_add", "ss", drive_hot_add, "pci_addr=[[<domain>:]<bus>:]<slot>\n"
+                                         "[file=file][,if=type][,bus=n]\n"
+                                        "[,unit=m][,media=d][index=i]\n"
+                                        "[,cyls=c,heads=h,secs=s[,trans=t]]\n"
+                                        "[snapshot=on|off][,cache=on|off]",
+                                        "add drive to PCI storage controller" },
+    { "pci_add", "sss", pci_device_hot_add, "pci_addr=auto|[[<domain>:]<bus>:]<slot> nic|storage [[vlan=n][,macaddr=addr][,model=type]] [file=file][,if=type][,bus=nr]...", "hot-add PCI device" },
+    { "pci_del", "s", pci_device_hot_remove, "pci_addr=[[<domain>:]<bus>:]<slot>", "hot remove PCI device" },
+    { "host_net_add", "ss", net_host_device_add,
+      "[tap,user,socket,vde] options", "add host VLAN client" },
+    { "host_net_remove", "is", net_host_device_remove,
+      "vlan_id name", "remove host VLAN client" },
+#endif
     { "balloon", "i", do_balloon,
       "target", "request VM to change it's memory allocation (in MB)" },
-    { "set_link", "ss", do_set_link, "name [up|down]" },
+    { "set_link", "ss", do_set_link,
+      "name [up|down]", "change the link status of a network adapter" },
     { NULL, NULL, },
 };
 
@@ -1553,9 +1593,11 @@ static const term_cmd_t info_cmds[] = {
       "", "show i8259 (PIC) state", },
     { "pci", "", pci_info,
       "", "show PCI info", },
-#if defined(TARGET_I386)
+#if defined(TARGET_I386) || defined(TARGET_SH4)
     { "tlb", "", tlb_info,
       "", "show virtual to physical memory mappings", },
+#endif
+#if defined(TARGET_I386)
     { "mem", "", mem_info,
       "", "show the active virtual memory mappings", },
     { "hpet", "", do_info_hpet,

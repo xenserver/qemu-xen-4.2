@@ -888,8 +888,6 @@ static USBDevice *usb_pointer_init(int kind, int xyrel, const char *devname)
     USBHIDState *s;
 
     s = qemu_mallocz(sizeof(USBHIDState));
-    if (!s)
-        return NULL;
     s->dev.speed = USB_SPEED_FULL;
     s->dev.handle_packet = usb_generic_handle_packet;
 
@@ -925,8 +923,6 @@ USBDevice *usb_keyboard_init(void)
     USBHIDState *s;
 
     s = qemu_mallocz(sizeof(USBHIDState));
-    if (!s)
-        return NULL;
     s->dev.speed = USB_SPEED_FULL;
     s->dev.handle_packet = usb_generic_handle_packet;
 

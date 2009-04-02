@@ -152,13 +152,6 @@ static void ppc_heathrow_init (ram_addr_t ram_size, int vga_ram_size,
         qemu_register_reset(&cpu_ppc_reset, env);
         envs[i] = env;
     }
-    if (env->nip < 0xFFF80000) {
-        /* Special test for PowerPC 601:
-         * the boot vector is at 0xFFF00100, then we need a 1MB BIOS.
-         * But the NVRAM is located at 0xFFF04000...
-         */
-        cpu_abort(env, "G3 Beige Mac hardware can not handle 1 MB BIOS\n");
-    }
 
     /* allocate RAM */
     if (ram_size > (2047 << 20)) {
@@ -357,7 +350,7 @@ static void ppc_heathrow_init (ram_addr_t ram_size, int vga_ram_size,
     adb_kbd_init(&adb_bus);
     adb_mouse_init(&adb_bus);
 
-    nvr = macio_nvram_init(&nvram_mem_index, 0x2000);
+    nvr = macio_nvram_init(&nvram_mem_index, 0x2000, 4);
     pmac_format_nvram_partition(nvr, 0x2000);
 
     macio_init(pci_bus, PCI_DEVICE_ID_APPLE_343S1201, 1, pic_mem_index,

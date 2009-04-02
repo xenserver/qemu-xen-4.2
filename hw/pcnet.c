@@ -1987,7 +1987,7 @@ static void pci_physical_memory_read(void *dma_opaque, target_phys_addr_t addr,
     cpu_physical_memory_read(addr, buf, len);
 }
 
-void pci_pcnet_init(PCIBus *bus, NICInfo *nd, int devfn)
+PCIDevice *pci_pcnet_init(PCIBus *bus, NICInfo *nd, int devfn)
 {
     PCNetState *d;
     uint8_t *pci_conf;
@@ -2034,6 +2034,7 @@ void pci_pcnet_init(PCIBus *bus, NICInfo *nd, int devfn)
     d->pci_dev = &d->dev;
 
     pcnet_common_init(d, nd);
+    return (PCIDevice *)d;
 }
 
 /* SPARC32 interface */
@@ -2091,8 +2092,6 @@ void lance_init(NICInfo *nd, target_phys_addr_t leaddr, void *dma_opaque,
     qemu_check_nic_model(nd, "lance");
 
     d = qemu_mallocz(sizeof(PCNetState));
-    if (!d)
-        return;
 
     lance_io_memory =
         cpu_register_io_memory(0, lance_mem_read, lance_mem_write, d);

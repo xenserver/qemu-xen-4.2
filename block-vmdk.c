@@ -276,8 +276,6 @@ static int vmdk_snapshot_create(const char *filename, const char *backing_file)
 
     /* write RGD */
     rgd_buf = qemu_malloc(gd_size);
-    if (!rgd_buf)
-        goto fail;
     if (lseek(p_fd, rgd_offset, SEEK_SET) == -1)
         goto fail_rgd;
     if (qemu_read_ok(p_fd, rgd_buf, gd_size) < 0)
@@ -290,8 +288,6 @@ static int vmdk_snapshot_create(const char *filename, const char *backing_file)
 
     /* write GD */
     gd_buf = qemu_malloc(gd_size);
-    if (!gd_buf)
-        goto fail_rgd;
     if (lseek(p_fd, gd_offset, SEEK_SET) == -1)
         goto fail_gd;
     if (qemu_read_ok(p_fd, gd_buf, gd_size) < 0)
@@ -378,7 +374,7 @@ static int vmdk_open(BlockDriverState *bs, const char *filename, int flags)
         // Parent must be opened as RO.
         flags = BDRV_O_RDONLY;
 
-    ret = bdrv_file_open(&s->hd, filename, flags | BDRV_O_EXTENDABLE);
+    ret = bdrv_file_open(&s->hd, filename, flags);
     if (ret < 0)
         return ret;
     if (bdrv_pread(s->hd, 0, &magic, sizeof(magic)) != sizeof(magic))
@@ -430,8 +426,6 @@ static int vmdk_open(BlockDriverState *bs, const char *filename, int flags)
     /* read the L1 table */
     l1_size = s->l1_size * sizeof(uint32_t);
     s->l1_table = qemu_malloc(l1_size);
-    if (!s->l1_table)
-        goto fail;
     if (bdrv_pread(s->hd, s->l1_table_offset, s->l1_table, l1_size) != l1_size)
         goto fail;
     for(i = 0; i < s->l1_size; i++) {
@@ -440,8 +434,6 @@ static int vmdk_open(BlockDriverState *bs, const char *filename, int flags)
 
     if (s->l1_backup_table_offset) {
         s->l1_backup_table = qemu_malloc(l1_size);
-        if (!s->l1_backup_table)
-            goto fail;
         if (bdrv_pread(s->hd, s->l1_backup_table_offset, s->l1_backup_table, l1_size) != l1_size)
             goto fail;
         for(i = 0; i < s->l1_size; i++) {
@@ -450,8 +442,6 @@ static int vmdk_open(BlockDriverState *bs, const char *filename, int flags)
     }
 
     s->l2_cache = qemu_malloc(s->l2_size * L2_CACHE_SIZE * sizeof(uint32_t));
-    if (!s->l2_cache)
-        goto fail;
     return 0;
  fail:
     qemu_free(s->l1_backup_table);

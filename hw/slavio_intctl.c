@@ -98,7 +98,7 @@ static uint32_t slavio_intctl_mem_readl(void *opaque, target_phys_addr_t addr)
         ret = 0;
         break;
     }
-    DPRINTF("read cpu %d reg 0x" TARGET_FMT_plx " = %x\n", cpu, addr, ret);
+    DPRINTF("read cpu %d reg 0x" TARGET_FMT_plx " = %x\n", s->cpu, addr, ret);
 
     return ret;
 }
@@ -110,7 +110,7 @@ static void slavio_intctl_mem_writel(void *opaque, target_phys_addr_t addr,
     uint32_t saddr;
 
     saddr = addr >> 2;
-    DPRINTF("write cpu %d reg 0x" TARGET_FMT_plx " = %x\n", cpu, addr, val);
+    DPRINTF("write cpu %d reg 0x" TARGET_FMT_plx " = %x\n", s->cpu, addr, val);
     switch (saddr) {
     case 1: // clear pending softints
         if (val & CPU_IRQ_INT15_IN)
@@ -381,14 +381,10 @@ void *slavio_intctl_init(target_phys_addr_t addr, target_phys_addr_t addrg,
     SLAVIO_CPUINTCTLState *slave;
 
     s = qemu_mallocz(sizeof(SLAVIO_INTCTLState));
-    if (!s)
-        return NULL;
 
     s->intbit_to_level = intbit_to_level;
     for (i = 0; i < MAX_CPUS; i++) {
         slave = qemu_mallocz(sizeof(SLAVIO_CPUINTCTLState));
-        if (!slave)
-            return NULL;
 
         slave->cpu = i;
         slave->master = s;

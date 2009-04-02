@@ -102,6 +102,7 @@ i2c_bus *piix4_pm_init(PCIBus *bus, int devfn, uint32_t smb_io_base,
                        qemu_irq sci_irq);
 void piix4_smbus_register_device(SMBusDevice *dev, uint8_t addr);
 void acpi_bios_init(void);
+int acpi_table_add(const char *table_desc);
 
 void acpi_php_add(int);
 void acpi_php_del(int);
@@ -130,7 +131,7 @@ enum vga_retrace_method {
 
 extern enum vga_retrace_method vga_retrace_method;
 
-#ifndef TARGET_SPARC
+#if !defined(TARGET_SPARC) || defined(TARGET_SPARC64)
 #define VGA_RAM_SIZE (8192 * 1024)
 #else
 #define VGA_RAM_SIZE (9 * 1024 * 1024)

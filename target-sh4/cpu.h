@@ -95,6 +95,7 @@ typedef struct tlb_t {
 
 enum sh_features {
     SH_FEATURE_SH4A = 1,
+    SH_FEATURE_BCR3_AND_BCR4 = 2,
 };
 
 typedef struct CPUSH4State {
@@ -139,6 +140,8 @@ typedef struct CPUSH4State {
     uint32_t prr;		/* Processor Revision Register */
     uint32_t cvr;		/* Cache Version Register */
 
+    uint32_t ldst;
+
      CPU_COMMON tlb_t utlb[UTLB_SIZE];	/* unified translation table */
     tlb_t itlb[ITLB_SIZE];	/* instruction translation table */
     void *intc_handle;
@@ -161,6 +164,8 @@ static inline void cpu_set_tls(CPUSH4State *env, target_ulong newtls)
 {
   env->gbr = newtls;
 }
+
+void cpu_load_tlb(CPUSH4State * env);
 
 #include "softfloat.h"
 

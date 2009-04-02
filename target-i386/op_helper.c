@@ -1275,8 +1275,7 @@ static int check_exception(int intno, int *error_code)
         if (env->hflags & HF_SVMI_MASK)
             helper_vmexit(SVM_EXIT_SHUTDOWN, 0); /* does not return */
 
-        if (qemu_loglevel_mask(CPU_LOG_RESET))
-            fprintf(logfile, "Triple fault\n");
+        qemu_log_mask(CPU_LOG_RESET, "Triple fault\n");
 
         qemu_system_reset_request();
         return EXCP_HLT;
@@ -1913,7 +1912,7 @@ void helper_cpuid(void)
 
     helper_svm_check_intercept_param(SVM_EXIT_CPUID, 0);
 
-    cpu_x86_cpuid(env, (uint32_t)EAX, &eax, &ebx, &ecx, &edx);
+    cpu_x86_cpuid(env, (uint32_t)EAX, (uint32_t)ECX, &eax, &ebx, &ecx, &edx);
     EAX = eax;
     EBX = ebx;
     ECX = ecx;

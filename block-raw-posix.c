@@ -538,8 +538,6 @@ static int posix_aio_init(void)
         return 0;
 
     s = qemu_malloc(sizeof(PosixAioState));
-    if (s == NULL)
-        return -ENOMEM;
 
     /* under some circumstances on Centos 4.3 (at least)
      * SIGUSR2 is mistakenly blocked, which breaks badly */
@@ -617,6 +615,7 @@ static void raw_aio_remove(RawAIOCB *acb)
     pacb = &posix_aio_state->first_aio;
     for(;;) {
         if (*pacb == NULL) {
+            fprintf(stderr, "raw_aio_remove: aio request not found!\n");
             break;
         } else if (*pacb == acb) {
             *pacb = acb->next;

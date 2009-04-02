@@ -151,7 +151,7 @@ static int bochs_open(BlockDriverState *bs, const char *filename, int flags)
     s->catalog_bitmap = qemu_malloc(s->catalog_size * 4);
     if (!s->catalog_bitmap)
 	goto fail;
-    if (qemu_read(s->fd, s->catalog_bitmap, s->catalog_size * 4) !=
+    if (read(s->fd, s->catalog_bitmap, s->catalog_size * 4) !=
 	s->catalog_size * 4)
 	goto fail;
     for (i = 0; i < s->catalog_size; i++)
