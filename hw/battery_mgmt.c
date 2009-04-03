@@ -29,6 +29,7 @@
 #include "hw.h"
 #include "pc.h"
 #include "qemu-xen.h"
+#include "qemu-log.h"
 #include "isa.h" //register_ioport_read declaration
 #include "battery_mgmt.h"
 
@@ -58,8 +59,6 @@
 
 static enum POWER_MGMT_MODE power_mgmt_mode = PM_MODE_NONE;
 static battery_state_info battery_info;
-extern FILE *logfile;
-extern int domid;
 
 int is_battery_pt_feasible(void)
 {
