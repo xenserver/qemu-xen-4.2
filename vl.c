@@ -6037,6 +6037,7 @@ int main(int argc, char **argv, char **envp)
 	    exit(1);
     }
 
+#ifndef CONFIG_STUBDOM
 #ifndef _WIN32
     if (run_as) {
         pwd = getpwnam(run_as);
@@ -6069,6 +6070,7 @@ int main(int argc, char **argv, char **envp)
         }
     }
 #endif
+#endif /*CONFIG_STUBDOM*/
 
     if (daemonize) {
         dup2(fd, 0);
