@@ -505,6 +505,7 @@ void xenstore_parse_domain_config(int hvm_domid)
         }
 
 	drives_table[nb_drives].bdrv = bs;
+	drives_table[nb_drives].used = 1;
 	nb_drives++;
 
     }
