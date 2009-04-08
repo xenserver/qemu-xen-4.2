@@ -744,9 +744,7 @@ static void xenfb_update(void *opaque)
             break;
         default:
             /* we must convert stuff */
-            qemu_resize_displaysurface(xenfb->c.ds,
-                                       xenfb->width, xenfb->height,
-                                       xenfb->depth, xenfb->row_stride);
+            qemu_resize_displaysurface(xenfb->c.ds, xenfb->width, xenfb->height);
             break;
         }
         dpy_resize(xenfb->c.ds);

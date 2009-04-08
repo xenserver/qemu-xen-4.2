@@ -1173,7 +1173,10 @@ static inline int get_depth_index(DisplayState *s)
     case 16:
         return 2;
     case 32:
-        return 3;
+        if (is_surface_bgr(s->surface))
+            return 4;
+        else
+            return 3;
     }
 }
 
@@ -2794,7 +2797,8 @@ static void vga_screen_dump(void *opaque, const char *filename)
     dcl.dpy_resize = vga_save_dpy_resize;
     dcl.dpy_refresh = vga_save_dpy_refresh;
     register_displaychangelistener(ds, &dcl);
-    ds->surface = qemu_create_displaysurface(ds, w, h, 32, 4 * w);
+    ds->allocator = &default_allocator;
+    ds->surface = qemu_create_displaysurface(ds, w, h);
  
     s->ds = ds;
     s->graphic_mode = -1;

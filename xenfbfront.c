@@ -216,7 +216,7 @@ static void kbdfront_thread(void *p)
 }
 
 
-static DisplaySurface* xenfb_create_displaysurface(int width, int height, int bpp, int linesize)
+static DisplaySurface* xenfb_create_displaysurface(int width, int height)
 {
     DisplaySurface *surface = (DisplaySurface*) qemu_mallocz(sizeof(DisplaySurface));
     if (surface == NULL) {
@@ -226,8 +226,8 @@ static DisplaySurface* xenfb_create_displaysurface(int width, int height, int bp
 
     surface->width = width;
     surface->height = height;
-    surface->linesize = linesize;
-    surface->pf = qemu_default_pixelformat(bpp);
+    surface->linesize = width * 4;
+    surface->pf = qemu_default_pixelformat(32);
 #ifdef WORDS_BIGENDIAN
     surface->flags = QEMU_ALLOCATED_FLAG | QEMU_BIG_ENDIAN_FLAG;
 #else
@@ -239,12 +239,12 @@ static DisplaySurface* xenfb_create_displaysurface(int width, int height, int bp
 }
 
 static DisplaySurface* xenfb_resize_displaysurface(DisplaySurface *surface,
-                                          int width, int height, int bpp, int linesize)
+                                          int width, int height)
 {
     surface->width = width;
     surface->height = height;
-    surface->linesize = linesize;
-    surface->pf = qemu_default_pixelformat(bpp);
+    surface->linesize = width * 4;
+    surface->pf = qemu_default_pixelformat(32);
 #ifdef WORDS_BIGENDIAN
     surface->flags = QEMU_ALLOCATED_FLAG | QEMU_BIG_ENDIAN_FLAG;
 #else
@@ -282,7 +282,7 @@ static void xenfb_pv_display_allocator(void)
     /* Touch the pages before sharing them */
     memset(xs->nonshared_vram, 0xff, vga_ram_size);
 
-    ds = xenfb_create_displaysurface(ds_get_width(xs->ds), ds_get_height(xs->ds), ds_get_bits_per_pixel(xs->ds), ds_get_linesize(xs->ds));
+    ds = xenfb_create_displaysurface(ds_get_width(xs->ds), ds_get_height(xs->ds));
     defaultallocator_free_displaysurface(xs->ds->surface);
     xs->ds->surface = ds;
 }

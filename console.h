@@ -108,9 +108,8 @@ struct DisplayChangeListener {
 };
 
 struct DisplayAllocator {
-    DisplaySurface* (*create_displaysurface)(int width, int height, int bpp, int linesize);
-    DisplaySurface* (*resize_displaysurface)(DisplaySurface *surface,
-            int width, int height, int bpp, int linesize);
+    DisplaySurface* (*create_displaysurface)(int width, int height);
+    DisplaySurface* (*resize_displaysurface)(DisplaySurface *surface, int width, int height);
     void (*free_displaysurface)(DisplaySurface *surface);
 };
 
@@ -138,24 +137,31 @@ PixelFormat qemu_default_pixelformat(int bpp);
 
 extern struct DisplayAllocator default_allocator;
 DisplayAllocator *register_displayallocator(DisplayState *ds, DisplayAllocator *da);
-DisplaySurface* defaultallocator_create_displaysurface(int width, int height, int bpp, int linesize);
-DisplaySurface* defaultallocator_resize_displaysurface(DisplaySurface *surface,
-        int width, int height, int bpp, int linesize);
+DisplaySurface* defaultallocator_create_displaysurface(int width, int height);
+DisplaySurface* defaultallocator_resize_displaysurface(DisplaySurface *surface, int width, int height);
 void defaultallocator_free_displaysurface(DisplaySurface *surface);
 
-static inline DisplaySurface* qemu_create_displaysurface(DisplayState *ds, int width, int height, int bpp, int linesize)
+static inline DisplaySurface* qemu_create_displaysurface(DisplayState *ds, int width, int height)
 {
-    return ds->allocator->create_displaysurface(width, height, bpp, linesize);    
+    return ds->allocator->create_displaysurface(width, height);    
 }
 
-static inline DisplaySurface* qemu_resize_displaysurface(DisplayState *ds, int width, int height, int bpp, int linesize)
+static inline DisplaySurface* qemu_resize_displaysurface(DisplayState *ds, int width, int height)
 {
-    return ds->allocator->resize_displaysurface(ds->surface, width, height, bpp, linesize);
+    return ds->allocator->resize_displaysurface(ds->surface, width, height);
 }
 
 static inline void qemu_free_displaysurface(DisplayState *ds)
 {
     ds->allocator->free_displaysurface(ds->surface);
+}
+
+static inline int is_surface_bgr(DisplaySurface *surface)
+{
+    if (surface->pf.bits_per_pixel == 32 && surface->pf.rshift == 0)
+        return 1;
+    else
+        return 0;
 }
 
 static inline int is_buffer_shared(DisplaySurface *surface)

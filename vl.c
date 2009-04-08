@@ -2922,7 +2922,7 @@ static void dumb_display_init(void)
         exit(1);
     }
     ds->allocator = &default_allocator;
-    ds->surface = qemu_create_displaysurface(ds, 640, 480, 32, 640 * 4);
+    ds->surface = qemu_create_displaysurface(ds, 640, 480);
     register_displaystate(ds);
 }
 
