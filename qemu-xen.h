@@ -5,6 +5,12 @@
 extern int restore;
 extern int vga_ram_size;
 
+#if defined(__i386__) || defined(__x86_64__)
+#define phys_ram_addr(x) (qemu_map_cache(x, 0))
+#elif defined(__ia64__)
+#define phys_ram_addr(x) (((x) < ram_size) ? (phys_ram_base + (x)) : NULL)
+#endif
+
 /* xen_machine_fv.c */
 
 #if (defined(__i386__) || defined(__x86_64__)) && !defined(QEMU_TOOL)
@@ -19,13 +25,11 @@ extern int vga_ram_size;
 #endif
 
 #define MCACHE_BUCKET_SIZE (1UL << MCACHE_BUCKET_SHIFT)
+#endif
 
 uint8_t *qemu_map_cache(target_phys_addr_t phys_addr, uint8_t lock);
 void     qemu_invalidate_entry(uint8_t *buffer);
 void     qemu_invalidate_map_cache(void);
-#else 
-#define qemu_invalidate_map_cache() ((void)0)
-#endif
 
 #define mapcache_lock()   ((void)0)
 #define mapcache_unlock() ((void)0)

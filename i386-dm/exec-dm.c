@@ -453,12 +453,6 @@ void unregister_iomem(target_phys_addr_t start)
 }
 
 
-#if defined(__i386__) || defined(__x86_64__)
-#define phys_ram_addr(x) (qemu_map_cache(x, 0))
-#elif defined(__ia64__)
-#define phys_ram_addr(x) (((x) < ram_size) ? (phys_ram_base + (x)) : NULL)
-#endif
-
 unsigned long *logdirty_bitmap;
 unsigned long logdirty_bitmap_size;
 
@@ -795,7 +789,6 @@ static void cpu_notify_map_clients(void)
     }
 }
 
-#ifdef MAPCACHE
 /* Map a physical memory region into a host virtual address.
  * May map a subset of the requested range, given by and returned in *plen.
  * May return NULL if resources needed to perform the mapping are exhausted.
@@ -807,9 +800,11 @@ void *cpu_physical_memory_map(target_phys_addr_t addr,
                               target_phys_addr_t *plen,
                               int is_write)
 {
+#ifdef MAPCACHE
     unsigned long l = MCACHE_BUCKET_SIZE - (addr & (MCACHE_BUCKET_SIZE-1));
     if ((*plen) > l)
         *plen = l;
+#endif
     return qemu_map_cache(addr, 1);
 }
 
@@ -822,71 +817,3 @@ void cpu_physical_memory_unmap(void *buffer, target_phys_addr_t len,
 {
     qemu_invalidate_entry(buffer);
 }
-#else
-/* Map a physical memory region into a host virtual address.
- * May map a subset of the requested range, given by and returned in *plen.
- * May return NULL if resources needed to perform the mapping are exhausted.
- * Use only for reads OR writes - not for read-modify-write operations.
- * Use cpu_register_map_client() to know when retrying the map operation is
- * likely to succeed.
- */
-void *cpu_physical_memory_map(target_phys_addr_t addr,
-                              target_phys_addr_t *plen,
-                              int is_write)
-{
-    target_phys_addr_t len = *plen;
-    target_phys_addr_t done = 0;
-    int l;
-    uint8_t *ret = NULL;
-    uint8_t *ptr;
-    target_phys_addr_t page;
-    PhysPageDesc *p;
-    unsigned long addr1;
-
-    while (len > 0) {
-        page = addr & TARGET_PAGE_MASK;
-        l = (page + TARGET_PAGE_SIZE) - addr;
-        if (l > len)
-            l = len;
-
-        if (done || bounce.buffer) {
-            break;
-        }
-	bounce.buffer = qemu_memalign(TARGET_PAGE_SIZE, TARGET_PAGE_SIZE);
-        bounce.addr = addr;
-        bounce.len = l;
-        if (!is_write) {
-            cpu_physical_memory_rw(addr, bounce.buffer, l, 0);
-        }
-        ptr = bounce.buffer;
-
-        if (!done) {
-            ret = ptr;
-        } else if (ret + done != ptr) {
-            break;
-        }
-
-        len -= l;
-        addr += l;
-        done += l;
-    }
-    *plen = done;
-    return ret;
-}
-
-/* Unmaps a memory region previously mapped by cpu_physical_memory_map().
- * Will also mark the memory as dirty if is_write == 1.  access_len gives
- * the amount of memory that was actually read or written by the caller.
- */
-void cpu_physical_memory_unmap(void *buffer, target_phys_addr_t len,
-                               int is_write, target_phys_addr_t access_len)
-{
-    assert(buffer == bounce.buffer);
-    if (is_write) {
-        cpu_physical_memory_write(bounce.addr, bounce.buffer, access_len);
-    }
-    qemu_free(bounce.buffer);
-    bounce.buffer = NULL;
-    cpu_notify_map_clients();
-}
-#endif

@@ -256,6 +256,15 @@ void qemu_invalidate_map_cache(void)
 
     mapcache_unlock();
 }
+#else
+uint8_t *qemu_map_cache(target_phys_addr_t phys_addr, uint8_t lock)
+{
+	return phys_ram_addr(phys_addr);
+}
+
+void qemu_invalidate_map_cache(void) {};
+
+void qemu_invalidate_entry(uint8_t *buffer) {};
 
 #endif /* defined(MAPCACHE) */
 
