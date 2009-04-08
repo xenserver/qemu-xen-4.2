@@ -76,6 +76,9 @@
 #define GLFAGS_SHIFT_DELIV_MODE     12
 #define GLFAGS_SHIFT_TRG_MODE       15
 
+void
+msi_set_enable(struct pt_dev *dev, int en);
+
 int
 pt_msi_setup(struct pt_dev *dev);
 

@@ -22,6 +22,67 @@
  * This file implements direct PCI assignment to a HVM guest
  */
 
+/*
+ * Interrupt Disable policy:
+ *
+ * INTx interrupt:
+ *   Initialize(register_real_device)
+ *     Map INTx(xc_physdev_map_pirq):
+ *       <fail>
+ *         - Set real Interrupt Disable bit to '1'.
+ *         - Set machine_irq and assigned_device->machine_irq to '0'.
+ *         * Don't bind INTx.
+ * 
+ *     Bind INTx(xc_domain_bind_pt_pci_irq):
+ *       <fail>
+ *         - Set real Interrupt Disable bit to '1'.
+ *         - Unmap INTx.
+ *         - Decrement mapped_machine_irq[machine_irq]
+ *         - Set assigned_device->machine_irq to '0'.
+ * 
+ *   Write to Interrupt Disable bit by guest software(pt_cmd_reg_write)
+ *     Write '0'
+ *       <ptdev->msi_trans_en is false>
+ *         - Set real bit to '0' if assigned_device->machine_irq isn't '0'.
+ * 
+ *     Write '1'
+ *       <ptdev->msi_trans_en is false>
+ *         - Set real bit to '1'.
+ * 
+ * MSI-INTx translation.
+ *   Initialize(xc_physdev_map_pirq_msi/pt_msi_setup)
+ *     Bind MSI-INTx(xc_domain_bind_pt_irq)
+ *       <fail>
+ *         - Unmap MSI.
+ *           <success>
+ *             - Set dev->msi->pirq to '-1'.
+ *           <fail>
+ *             - Do nothing.
+ * 
+ *   Write to Interrupt Disable bit by guest software(pt_cmd_reg_write)
+ *     Write '0'
+ *       <ptdev->msi_trans_en is true>
+ *         - Set MSI Enable bit to '1'.
+ * 
+ *     Write '1'
+ *       <ptdev->msi_trans_en is true>
+ *         - Set MSI Enable bit to '0'.
+ * 
+ * MSI interrupt:
+ *   Initialize MSI register(pt_msi_setup, pt_msi_update)
+ *     Bind MSI(xc_domain_update_msi_irq)
+ *       <fail>
+ *         - Unmap MSI.
+ *         - Set dev->msi->pirq to '-1'.
+ * 
+ * MSI-X interrupt:
+ *   Initialize MSI-X register(pt_msix_update_one)
+ *     Bind MSI-X(xc_domain_update_msi_irq)
+ *       <fail>
+ *         - Unmap MSI-X.
+ *         - Set entry->pirq to '-1'.
+ */
+
 #include "pass-through.h"
 #include "pci/header.h"
 #include "pci/pci.h"
@@ -208,7 +269,7 @@ static struct pt_reg_info_tbl pt_emu_reg_header0_tbl[] = {
         .size       = 2,
         .init_val   = 0x0000,
         .ro_mask    = 0xF880,
-        .emu_mask   = 0x0340,
+        .emu_mask   = 0x0740,
         .init       = pt_common_reg_init,
         .u.w.read   = pt_cmd_reg_read,
         .u.w.write  = pt_cmd_reg_write,
@@ -2945,6 +3006,23 @@ static int pt_cmd_reg_write(struct pt_dev *ptdev,
 
     /* create value for writing to I/O device register */
     throughable_mask = ~emu_mask & valid_mask;
+
+    if (*value & PCI_COMMAND_DISABLE_INTx)
+    {
+        if (ptdev->msi_trans_en)
+            msi_set_enable(ptdev, 0);
+        else
+            throughable_mask |= PCI_COMMAND_DISABLE_INTx;
+    }
+    else
+    {
+        if (ptdev->msi_trans_en)
+            msi_set_enable(ptdev, 1);
+        else
+            if (ptdev->machine_irq)
+                throughable_mask |= PCI_COMMAND_DISABLE_INTx;
+    }
+
     *value = PT_MERGE_VALUE(*value, dev_value, throughable_mask);
 
     /* mapping BAR */
@@ -3312,8 +3390,12 @@ static int pt_msgctrl_reg_write(struct pt_dev *ptdev,
 		    return 0;
                 }
             }
-            pt_msi_update(ptdev);
-
+            if (pt_msi_update(ptdev))
+            {
+                *value &= ~PCI_MSI_FLAGS_ENABLE;
+                PT_LOG("Warning: Can not bind MSI for dev %x\n", pd->devfn);
+                return 0;
+            }
             ptdev->msi->flags &= ~MSI_FLAG_UNINIT;
             ptdev->msi->flags |= PT_MSI_MAPPED;
         }
@@ -3543,6 +3625,11 @@ static int pt_cmd_reg_restore(struct pt_dev *ptdev,
     restorable_mask = reg->emu_mask & ~PCI_COMMAND_FAST_BACK;
     *value = PT_MERGE_VALUE(*value, dev_value, restorable_mask);
 
+    if (!ptdev->machine_irq)
+        *value |= PCI_COMMAND_DISABLE_INTx;
+    else
+        *value &= ~PCI_COMMAND_DISABLE_INTx;
+
     return 0;
 }
 
@@ -3756,8 +3843,14 @@ static struct pt_dev * register_real_device(PCIBus *e_bus,
 
         if ( rc )
         {
-            /* TBD: unregister device in case of an error */
             PT_LOG("Error: Mapping irq failed, rc = %d\n", rc);
+
+            /* Disable PCI intx assertion (turn on bit10 of devctl) */
+            pci_write_word(pci_dev, PCI_COMMAND,
+                *(uint16_t *)(&assigned_device->dev.config[PCI_COMMAND])
+                | PCI_COMMAND_DISABLE_INTx);
+            machine_irq = 0;
+            assigned_device->machine_irq = 0;
         }
         else
         {
@@ -3781,15 +3874,22 @@ static struct pt_dev * register_real_device(PCIBus *e_bus,
                                        e_device, e_intx);
         if ( rc < 0 )
         {
-            /* TBD: unregister device in case of an error */
             PT_LOG("Error: Binding of interrupt failed! rc=%d\n", rc);
+
+            /* Disable PCI intx assertion (turn on bit10 of devctl) */
+            pci_write_word(pci_dev, PCI_COMMAND,
+                *(uint16_t *)(&assigned_device->dev.config[PCI_COMMAND])
+                | PCI_COMMAND_DISABLE_INTx);
+            mapped_machine_irq[machine_irq]--;
+
+            if (mapped_machine_irq[machine_irq] == 0)
+            {
+                if (xc_physdev_unmap_pirq(xc_handle, domid, machine_irq))
+                    PT_LOG("Error: Unmapping of interrupt failed! rc=%d\n",
+                        rc);
+            }
+            assigned_device->machine_irq = 0;
         }
-    }
-    else {
-        /* Disable PCI intx assertion (turn on bit10 of devctl) */
-        assigned_device->dev.config[0x05] |= 0x04;
-        pci_write_word(pci_dev, 0x04,
-            *(uint16_t *)(&assigned_device->dev.config[0x04]));
     }
 
 out:

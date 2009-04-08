@@ -51,6 +51,11 @@
 /* because the current version of libpci (2.2.0) doesn't define these ID,
  * so we define Capability ID here.
  */
+#ifndef PCI_COMMAND_DISABLE_INTx
+/* Disable INTx interrupts */
+#define PCI_COMMAND_DISABLE_INTx 0x400
+#endif
+
 #ifndef PCI_CAP_ID_HOTPLUG
 /* SHPC Capability List Item reg group */
 #define PCI_CAP_ID_HOTPLUG      0x0C

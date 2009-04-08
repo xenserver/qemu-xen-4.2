@@ -22,7 +22,7 @@
 #include "pt-msi.h"
 #include <sys/mman.h>
 
-static void msi_set_enable(struct pt_dev *dev, int en)
+void msi_set_enable(struct pt_dev *dev, int en)
 {
     uint16_t val = 0;
     uint32_t address = 0;
@@ -119,6 +119,7 @@ int pt_msi_update(struct pt_dev *d)
     uint8_t gvec = 0;
     uint32_t gflags = 0;
     uint64_t addr = 0;
+    int ret = 0;
 
     /* get vector, address, flags info, etc. */
     gvec = d->msi->data & 0xFF;
@@ -126,8 +127,20 @@ int pt_msi_update(struct pt_dev *d)
     gflags = __get_msi_gflags(d->msi->data, addr);
 
     PT_LOG("Update msi with pirq %x gvec %x\n", d->msi->pirq, gvec);
-    return xc_domain_update_msi_irq(xc_handle, domid, gvec,
+
+    ret = xc_domain_update_msi_irq(xc_handle, domid, gvec,
                                      d->msi->pirq, gflags, 0);
+
+    if (ret)
+    {
+        PT_LOG("Error: Binding of MSI failed.\n");
+
+        if (xc_physdev_unmap_pirq(xc_handle, domid, d->msi->pirq))
+            PT_LOG("Error: Unmapping of MSI failed.\n");
+        d->msi->pirq = -1;
+        return ret;
+    }
+    return 0;
 }
 
 void pt_msi_disable(struct pt_dev *dev)
@@ -222,6 +235,10 @@ int pt_enable_msi_translate(struct pt_dev* dev)
                                e_device, e_intx, 0))
     {
         PT_LOG("Error: MSI-INTx translation bind failed, fallback\n");
+
+        if (xc_physdev_unmap_pirq(xc_handle, domid, dev->msi->pirq))
+            PT_LOG("Error: Unmapping of MSI failed.\n");
+        dev->msi->pirq = -1;
         return -1;
     }
 
@@ -302,6 +319,10 @@ static int pt_msix_update_one(struct pt_dev *dev, int entry_nr)
     if ( ret )
     {
         PT_LOG("Error: Updating msix irq info for entry %d\n", entry_nr);
+
+        if (xc_physdev_unmap_pirq(xc_handle, domid, entry->pirq))
+            PT_LOG("Error: Unmapping of MSI-X failed.\n");
+        entry->pirq = -1;
         return ret;
     }
 
