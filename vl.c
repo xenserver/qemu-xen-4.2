@@ -5304,8 +5304,7 @@ int main(int argc, char **argv, char **envp)
                 }
                 break;
             case QEMU_OPTION_std_vga:
-                cirrus_vga_enabled = 0;
-                vmsvga_enabled = 0;
+                select_vgahw("std");
                 break;
             case QEMU_OPTION_disable_opengl:
                 opengl_enabled = 0;
