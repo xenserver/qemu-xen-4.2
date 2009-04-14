@@ -173,15 +173,13 @@ uint8_t *qemu_map_cache(target_phys_addr_t phys_addr, uint8_t lock)
 
 void qemu_invalidate_entry(uint8_t *buffer)
 {
-    struct map_cache *entry = NULL, *next;
+    struct map_cache *entry = NULL, *pentry = NULL;
     struct map_cache_rev *reventry;
     unsigned long paddr_index;
     int found = 0;
     
-    if (last_address_vaddr == buffer) {
+    if (last_address_vaddr == buffer)
         last_address_index =  ~0UL;
-        last_address_vaddr = NULL;
-    }
 
     TAILQ_FOREACH(reventry, &locked_entries, next) {
         if (reventry->vaddr_req == buffer) {
@@ -200,26 +198,26 @@ void qemu_invalidate_entry(uint8_t *buffer)
     TAILQ_REMOVE(&locked_entries, reventry, next);
     qemu_free(reventry);
 
-    next = &mapcache_entry[paddr_index];
-    if (next->paddr_index == paddr_index) {
-        next->lock--;
+    entry = &mapcache_entry[paddr_index % nr_buckets];
+    while (entry && entry->paddr_index != paddr_index) {
+        pentry = entry;
+        entry = entry->next;
+    }
+    if (!entry) {
+        fprintf(logfile, "Trying to unmap address %p that is not in the mapcache!\n", buffer);
         return;
     }
+    entry->lock--;
+    if (entry->lock > 0 || pentry == NULL)
+        return;
 
-    while (next != NULL && next->paddr_index != paddr_index) {
-        entry = next;
-        next = next->next;
-    }
-    if (!next)
-        fprintf(logfile, "Trying to unmap address %p that is not in the mapcache!\n", buffer);
-    
-    entry->next = next->next;
-    errno = munmap(next->vaddr_base, MCACHE_BUCKET_SIZE);
+    pentry->next = entry->next;
+    errno = munmap(entry->vaddr_base, MCACHE_BUCKET_SIZE);
     if (errno) {
         fprintf(logfile, "unmap fails %d\n", errno);
         exit(-1);
     }
-    qemu_free(next);
+    qemu_free(entry);
 }
 
 void qemu_invalidate_map_cache(void)

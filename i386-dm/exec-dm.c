@@ -816,4 +816,5 @@ void cpu_physical_memory_unmap(void *buffer, target_phys_addr_t len,
                                int is_write, target_phys_addr_t access_len)
 {
     qemu_invalidate_entry(buffer);
+    cpu_notify_map_clients();
 }
