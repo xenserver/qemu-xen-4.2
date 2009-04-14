@@ -516,6 +516,13 @@ static void virtio_ioport_write(void *opaque, uint32_t addr, uint32_t val)
 
     switch (addr) {
     case VIRTIO_PCI_GUEST_FEATURES:
+	/* Guest does not negotiate properly?  We have to assume nothing. */
+	if (val & (1 << VIRTIO_F_BAD_FEATURE)) {
+	    if (vdev->bad_features)
+		val = vdev->bad_features(vdev);
+	    else
+		val = 0;
+	}
         if (vdev->set_features)
             vdev->set_features(vdev, val);
         vdev->features = val;
@@ -555,7 +562,7 @@ static uint32_t virtio_ioport_read(void *opaque, uint32_t addr)
     switch (addr) {
     case VIRTIO_PCI_HOST_FEATURES:
         ret = vdev->get_features(vdev);
-        ret |= (1 << VIRTIO_F_NOTIFY_ON_EMPTY);
+        ret |= (1 << VIRTIO_F_NOTIFY_ON_EMPTY) | (1 << VIRTIO_F_BAD_FEATURE);
         break;
     case VIRTIO_PCI_GUEST_FEATURES:
         ret = vdev->features;
@@ -726,9 +733,10 @@ VirtQueue *virtio_add_queue(VirtIODevice *vdev, int queue_size,
 
 void virtio_notify(VirtIODevice *vdev, VirtQueue *vq)
 {
-    /* Always notify when queue is empty */
-    if ((vq->inuse || vring_avail_idx(vq) != vq->last_avail_idx) &&
-        (vring_avail_flags(vq) & VRING_AVAIL_F_NO_INTERRUPT))
+    /* Always notify when queue is empty (when feature acknowledge) */
+    if ((vring_avail_flags(vq) & VRING_AVAIL_F_NO_INTERRUPT) &&
+        (!(vdev->features & (1 << VIRTIO_F_NOTIFY_ON_EMPTY)) ||
+         (vq->inuse || vring_avail_idx(vq) != vq->last_avail_idx)))
         return;
 
     vdev->isr |= 0x01;

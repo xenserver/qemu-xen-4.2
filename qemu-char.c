@@ -101,6 +101,10 @@
 /***********************************************************/
 /* character device */
 
+static TAILQ_HEAD(CharDriverStateHead, CharDriverState) chardevs =
+    TAILQ_HEAD_INITIALIZER(chardevs);
+static int initial_reset_issued;
+
 static void qemu_chr_event(CharDriverState *s, int event)
 {
     if (!s->chr_event)
@@ -118,9 +122,20 @@ static void qemu_chr_reset_bh(void *opaque)
 
 void qemu_chr_reset(CharDriverState *s)
 {
-    if (s->bh == NULL) {
+    if (s->bh == NULL && initial_reset_issued) {
 	s->bh = qemu_bh_new(qemu_chr_reset_bh, s);
 	qemu_bh_schedule(s->bh);
+    }
+}
+
+void qemu_chr_initial_reset(void)
+{
+    CharDriverState *chr;
+
+    initial_reset_issued = 1;
+
+    TAILQ_FOREACH(chr, &chardevs, next) {
+        qemu_chr_reset(chr);
     }
 }
 
@@ -210,12 +225,15 @@ typedef struct {
     IOEventHandler *chr_event[MAX_MUX];
     void *ext_opaque[MAX_MUX];
     CharDriverState *drv;
-    unsigned char buffer[MUX_BUFFER_SIZE];
-    int prod;
-    int cons;
     int mux_cnt;
     int term_got_escape;
     int max_size;
+    /* Intermediate input buffer allows to catch escape sequences even if the
+       currently active device is not accepting any input - but only until it
+       is full as well. */
+    unsigned char buffer[MAX_MUX][MUX_BUFFER_SIZE];
+    int prod[MAX_MUX];
+    int cons[MAX_MUX];
 } MuxDriver;
 
 
@@ -345,11 +363,11 @@ static void mux_chr_accept_input(CharDriverState *chr)
     int m = chr->focus;
     MuxDriver *d = chr->opaque;
 
-    while (d->prod != d->cons &&
+    while (d->prod[m] != d->cons[m] &&
            d->chr_can_read[m] &&
            d->chr_can_read[m](d->ext_opaque[m])) {
         d->chr_read[m](d->ext_opaque[m],
-                       &d->buffer[d->cons++ & MUX_BUFFER_MASK], 1);
+                       &d->buffer[m][d->cons[m]++ & MUX_BUFFER_MASK], 1);
     }
 }
 
@@ -357,11 +375,12 @@ static int mux_chr_can_read(void *opaque)
 {
     CharDriverState *chr = opaque;
     MuxDriver *d = chr->opaque;
+    int m = chr->focus;
 
-    if ((d->prod - d->cons) < MUX_BUFFER_SIZE)
+    if ((d->prod[m] - d->cons[m]) < MUX_BUFFER_SIZE)
         return 1;
-    if (d->chr_can_read[chr->focus])
-        return d->chr_can_read[chr->focus](d->ext_opaque[chr->focus]);
+    if (d->chr_can_read[m])
+        return d->chr_can_read[m](d->ext_opaque[m]);
     return 0;
 }
 
@@ -376,12 +395,12 @@ static void mux_chr_read(void *opaque, const uint8_t *buf, int size)
 
     for(i = 0; i < size; i++)
         if (mux_proc_byte(chr, d, buf[i])) {
-            if (d->prod == d->cons &&
+            if (d->prod[m] == d->cons[m] &&
                 d->chr_can_read[m] &&
                 d->chr_can_read[m](d->ext_opaque[m]))
                 d->chr_read[m](d->ext_opaque[m], &buf[i], 1);
             else
-                d->buffer[d->prod++ & MUX_BUFFER_MASK] = buf[i];
+                d->buffer[m][d->prod[m]++ & MUX_BUFFER_MASK] = buf[i];
         }
 }
 
@@ -890,6 +909,8 @@ static void pty_chr_close(struct CharDriverState *chr)
 
     qemu_set_fd_handler2(s->fd, NULL, NULL, NULL, NULL);
     close(s->fd);
+    qemu_del_timer(s->timer);
+    qemu_free_timer(s->timer);
     qemu_free(s);
 }
 
@@ -1720,6 +1741,16 @@ static void udp_chr_update_read_handler(CharDriverState *chr)
     }
 }
 
+static void udp_chr_close(CharDriverState *chr)
+{
+    NetCharDriver *s = chr->opaque;
+    if (s->fd >= 0) {
+        qemu_set_fd_handler(s->fd, NULL, NULL, NULL);
+        closesocket(s->fd);
+    }
+    qemu_free(s);
+}
+
 static CharDriverState *qemu_chr_open_udp(const char *def)
 {
     CharDriverState *chr = NULL;
@@ -1753,6 +1784,7 @@ static CharDriverState *qemu_chr_open_udp(const char *def)
     chr->opaque = s;
     chr->chr_write = udp_chr_write;
     chr->chr_update_read_handler = udp_chr_update_read_handler;
+    chr->chr_close = udp_chr_close;
     return chr;
 
 return_err:
@@ -1955,10 +1987,14 @@ static void tcp_chr_accept(void *opaque)
 static void tcp_chr_close(CharDriverState *chr)
 {
     TCPCharDriver *s = chr->opaque;
-    if (s->fd >= 0)
+    if (s->fd >= 0) {
+        qemu_set_fd_handler(s->fd, NULL, NULL, NULL);
         closesocket(s->fd);
-    if (s->listen_fd >= 0)
+    }
+    if (s->listen_fd >= 0) {
+        qemu_set_fd_handler(s->listen_fd, NULL, NULL, NULL);
         closesocket(s->listen_fd);
+    }
     qemu_free(s);
 }
 
@@ -2068,9 +2104,6 @@ static CharDriverState *qemu_chr_open_tcp(const char *host_str,
     qemu_free(chr);
     return NULL;
 }
-
-static TAILQ_HEAD(CharDriverStateHead, CharDriverState) chardevs
-= TAILQ_HEAD_INITIALIZER(chardevs);
 
 CharDriverState *qemu_chr_open(const char *label, const char *filename, void (*init)(struct CharDriverState *s))
 {

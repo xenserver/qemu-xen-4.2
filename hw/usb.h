@@ -253,7 +253,7 @@ USBDevice *usb_keyboard_init(void);
 void usb_hid_datain_cb(USBDevice *dev, void *opaque, void (*datain)(void *));
 
 /* usb-msd.c */
-USBDevice *usb_msd_init(const char *filename);
+USBDevice *usb_msd_init(const char *filename, BlockDriverState **pbs);
 
 /* usb-net.c */
 USBDevice *usb_net_init(NICInfo *nd);

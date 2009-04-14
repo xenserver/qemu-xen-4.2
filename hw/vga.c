@@ -1550,7 +1550,7 @@ void vga_invalidate_scanlines(VGAState *s, int y1, int y2)
 static void vga_draw_graphic(VGAState *s, int full_update)
 {
     int y1, y, update, linesize, y_start, double_scan, mask, depth;
-    int width, height, shift_control, line_offset, bwidth, ds_depth, bits;
+    int width, height, shift_control, line_offset, bwidth, bits;
     ram_addr_t page0, page1;
     int disp_width, multi_scan, multi_run;
     uint8_t *d;
@@ -1584,7 +1584,16 @@ static void vga_draw_graphic(VGAState *s, int full_update)
         disp_width <<= 1;
     }
 
-    ds_depth = ds_get_bits_per_pixel(s->ds);
+    if (shift_control == 0) {
+        if (s->sr[0x01] & 8) {
+            disp_width <<= 1;
+        }
+    } else if (shift_control == 1) {
+        if (s->sr[0x01] & 8) {
+            disp_width <<= 1;
+        }
+    }
+
     depth = s->get_bpp(s);
     if (s->line_offset != s->last_line_offset || 
         disp_width != s->last_width ||
@@ -2667,6 +2676,17 @@ int isa_vga_init(uint8_t *vga_ram_base,
     return 0;
 }
 
+static void pci_vga_write_config(PCIDevice *d,
+                                 uint32_t address, uint32_t val, int len)
+{
+    PCIVGAState *pvs = container_of(d, PCIVGAState, dev);
+    VGAState *s = &pvs->vga_state;
+
+    vga_dirty_log_stop(s);
+    pci_default_write_config(d, address, val, len);
+    vga_dirty_log_start(s);
+}
+
 int pci_vga_init(PCIBus *bus, uint8_t *vga_ram_base,
                  unsigned long vga_ram_offset, int vga_ram_size,
                  unsigned long vga_bios_offset, int vga_bios_size)
@@ -2677,7 +2697,7 @@ int pci_vga_init(PCIBus *bus, uint8_t *vga_ram_base,
 
     d = (PCIVGAState *)pci_register_device(bus, "VGA",
                                            sizeof(PCIVGAState),
-                                           -1, NULL, NULL);
+                                           -1, NULL, pci_vga_write_config);
     if (!d)
         return -1;
     s = &d->vga_state;
@@ -2808,4 +2828,5 @@ static void vga_screen_dump(void *opaque, const char *filename)
 
     qemu_free_displaysurface(ds);
     s->ds = saved_ds;
+    vga_invalidate_display(s);
 }

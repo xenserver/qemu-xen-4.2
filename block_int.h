@@ -80,6 +80,11 @@ struct BlockDriver {
                               QEMUSnapshotInfo **psn_info);
     int (*bdrv_get_info)(BlockDriverState *bs, BlockDriverInfo *bdi);
 
+    int (*bdrv_put_buffer)(BlockDriverState *bs, const uint8_t *buf,
+                           int64_t pos, int size);
+    int (*bdrv_get_buffer)(BlockDriverState *bs, uint8_t *buf,
+                           int64_t pos, int size);
+
     /* removable device specific */
     int (*bdrv_is_inserted)(BlockDriverState *bs);
     int (*bdrv_media_changed)(BlockDriverState *bs);
@@ -101,6 +106,7 @@ struct BlockDriverState {
     int removable; /* if true, the media can be removed */
     int locked;    /* if true, the media cannot temporarily be ejected */
     int encrypted; /* if true, the media is encrypted */
+    int valid_key; /* if true, a valid encryption key has been set */
     int sg;        /* if true, the device is a /dev/sg* */
     int extendable;/* if true, we may write out of original range */
     /* event callback when inserting/removing */
