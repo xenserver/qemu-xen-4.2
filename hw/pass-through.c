@@ -3436,7 +3436,7 @@ static int pt_msgaddr32_reg_write(struct pt_dev *ptdev,
     /* update MSI */
     if (cfg_entry->data != old_addr)
     {
-        if (ptdev->msi->flags & PCI_MSI_FLAGS_ENABLE)
+        if (ptdev->msi->flags & PT_MSI_MAPPED)
             pt_msi_update(ptdev);
     }
 
@@ -3474,7 +3474,7 @@ static int pt_msgaddr64_reg_write(struct pt_dev *ptdev,
     /* update MSI */
     if (cfg_entry->data != old_addr)
     {
-        if (ptdev->msi->flags & PCI_MSI_FLAGS_ENABLE)
+        if (ptdev->msi->flags & PT_MSI_MAPPED)
             pt_msi_update(ptdev);
     }
 
@@ -3516,7 +3516,7 @@ static int pt_msgdata_reg_write(struct pt_dev *ptdev,
     /* update MSI */
     if (cfg_entry->data != old_data)
     {
-        if (flags & PCI_MSI_FLAGS_ENABLE)
+        if (flags & PT_MSI_MAPPED)
             pt_msi_update(ptdev);
     }
 

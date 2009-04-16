@@ -110,10 +110,6 @@ uint32_t __get_msi_gflags(uint32_t data, uint64_t addr)
     return result;
 }
 
-/*
- * Update msi mapping, usually called when MSI enabled,
- * except the first time
- */
 int pt_msi_update(struct pt_dev *d)
 {
     uint8_t gvec = 0;
@@ -126,7 +122,8 @@ int pt_msi_update(struct pt_dev *d)
     addr = (uint64_t)d->msi->addr_hi << 32 | d->msi->addr_lo;
     gflags = __get_msi_gflags(d->msi->data, addr);
 
-    PT_LOG("Update msi with pirq %x gvec %x\n", d->msi->pirq, gvec);
+    PT_LOG("Update msi with pirq %x gvec %x gflags %x\n",
+           d->msi->pirq, gvec, gflags);
 
     ret = xc_domain_update_msi_irq(xc_handle, domid, gvec,
                                      d->msi->pirq, gflags, 0);
