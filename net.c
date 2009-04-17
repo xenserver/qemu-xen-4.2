@@ -977,6 +977,20 @@ static int tap_open(char *ifname, int ifname_size)
     fcntl(fd, F_SETFL, O_NONBLOCK);
     return fd;
 }
+#elif defined(CONFIG_STUBDOM)
+#include <netfront.h>
+static int tap_open(char *ifname, int ifname_size)
+{
+    char nodename[64];
+    static int num = 1; // 0 is for our own TCP/IP networking
+    snprintf(nodename, sizeof(nodename), "device/vif/%d", num++);
+    return netfront_tap_open(nodename);
+}
+
+#undef DEFAULT_NETWORK_SCRIPT
+#define DEFAULT_NETWORK_SCRIPT ""
+#undef DEFAULT_NETWORK_DOWN_SCRIPT
+#define DEFAULT_NETWORK_DOWN_SCRIPT ""
 #endif
 
 static int launch_script(const char *setup_script, const char *ifname,
@@ -1023,10 +1037,6 @@ static int net_tap_init(VLANState *vlan, const char *model,
                         const char *setup_script, const char *down_script,
                         const char *script_arg)
 {
-#ifdef CONFIG_STUBDOM
-    errno = ENOSYS;
-    return -1;
-#else
     TAPState *s;
     int fd;
     char ifname[128];
@@ -1060,7 +1070,6 @@ static int net_tap_init(VLANState *vlan, const char *model,
     else
         s->script_arg[0] = '\0';
     return 0;
-#endif
 }
 
 #endif /* !_WIN32 */
