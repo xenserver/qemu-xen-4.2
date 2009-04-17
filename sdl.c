@@ -198,7 +198,7 @@ static void do_sdl_resize(int new_width, int new_height, int bpp)
             opengl_enabled = 0;
             dcl->dpy_update = sdl_update;
             dcl->dpy_setdata = sdl_setdata;
-            do_sdl_resize(real_screen->w, real_screen->h, real_screen->format->BitsPerPixel);
+            do_sdl_resize(width, height, bpp);
             return;
         }
         fprintf(stderr, "Could not open SDL display\n");
