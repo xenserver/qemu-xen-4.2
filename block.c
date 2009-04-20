@@ -405,6 +405,8 @@ int bdrv_open2(BlockDriverState *bs, const char *filename, int flags,
     pstrcpy(bs->filename, sizeof(bs->filename), filename);
     if (flags & BDRV_O_FILE) {
         drv = find_protocol(filename);
+        if (!drv)
+            drv = &bdrv_raw;
     } else if (!drv) {
         drv = find_image_format(filename);
     }
