@@ -3192,12 +3192,6 @@ static void cirrus_reset(void *opaque)
         s->sr[0x15] = 0x03; /* memory size, 3=2MB, 4=4MB */
     }
     s->cr[0x27] = s->device_id;
-
-    if (s->vram_ptr)
-        /* Win2K seems to assume that the pattern buffer is at 0xff
-           initially ! */
-        memset(s->vram_ptr, 0xff, s->real_vram_size);
-
     s->cirrus_hidden_dac_lockindex = 5;
     s->cirrus_hidden_dac_data = 0;
 }

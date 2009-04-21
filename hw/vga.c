@@ -158,6 +158,7 @@ static uint32_t expand4[256];
 static uint16_t expand2[256];
 static uint8_t expand4to8[16];
 
+static void vga_bios_init(VGAState *s);
 static void vga_screen_dump(void *opaque, const char *filename);
 
 static void vga_dumb_update_retrace_info(VGAState *s)
@@ -1957,6 +1958,7 @@ void vga_reset(void *opaque)
         memset(&s->retrace_info, 0, sizeof (s->retrace_info));
         break;
     }
+    vga_bios_init(s);
 }
 
 #define TEXTMODE_X(x)	((x) % width)
@@ -2584,7 +2586,6 @@ void vga_common_init(VGAState *s, uint8_t *vga_ram_base,
         s->vram_gmfn = VRAM_RESERVED_ADDRESS;
     }
 
-    vga_bios_init(s);
     switch (vga_retrace_method) {
     case VGA_RETRACE_DUMB:
         s->retrace = vga_dumb_retrace;
