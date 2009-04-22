@@ -3169,6 +3169,15 @@ exit:
     throughable_mask = ~bar_emu_mask & valid_mask;
     *value = PT_MERGE_VALUE(*value, dev_value, throughable_mask);
 
+    /* After BAR reg update, we need to remap BAR*/
+    reg_grp_entry = pt_find_reg_grp(ptdev, PCI_COMMAND);
+    if (reg_grp_entry)
+    {
+        reg_entry = pt_find_reg(reg_grp_entry, PCI_COMMAND);
+        if (reg_entry)
+            pt_bar_mapping(ptdev, reg_entry->data & PCI_COMMAND_IO,
+                                  reg_entry->data & PCI_COMMAND_MEMORY);
+    }
     return 0;
 }
 
