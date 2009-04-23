@@ -981,10 +981,7 @@ static int tap_open(char *ifname, int ifname_size)
 #include <netfront.h>
 static int tap_open(char *ifname, int ifname_size)
 {
-    char nodename[64];
-    static int num = 1; // 0 is for our own TCP/IP networking
-    snprintf(nodename, sizeof(nodename), "device/vif/%d", num++);
-    return netfront_tap_open(nodename);
+    return netfront_tap_open(NULL);
 }
 
 #undef DEFAULT_NETWORK_SCRIPT
