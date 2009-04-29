@@ -3972,13 +3972,6 @@ static int unregister_real_device(int slot)
     /* unregister real device's MMIO/PIO BARs */
     pt_unregister_regions(assigned_device);
 
-    /* deassign the dev to dom0 */
-    bdf |= (pci_dev->bus  & 0xff) << 16;
-    bdf |= (pci_dev->dev  & 0x1f) << 11;
-    bdf |= (pci_dev->func & 0x1f) << 8;
-    if ( (rc = xc_deassign_device(xc_handle, domid, bdf)) != 0)
-        PT_LOG("Error: Revoking the device failed! rc=%d\n", rc);
-
     /* mark this slot as free */
     php_dev->valid = 0;
     php_dev->pt_dev = NULL;
