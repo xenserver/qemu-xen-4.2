@@ -199,7 +199,7 @@ static BlockDriverState *bdrv_new_open(const char *filename,
         if (!drv)
             error("Unknown file format '%s'", fmt);
     } else {
-        drv = NULL;
+        drv = &bdrv_raw;
     }
     if (bdrv_open2(bs, filename, BRDV_O_FLAGS, drv) < 0) {
         error("Could not open '%s'", filename);
