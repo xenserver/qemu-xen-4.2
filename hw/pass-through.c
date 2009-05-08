@@ -1796,6 +1796,8 @@ static void pt_bar_mapping_one(struct pt_dev *ptdev, int bar, int io_enable,
 {
     PCIDevice *dev = (PCIDevice *)&ptdev->dev;
     PCIIORegion *r;
+    struct pt_reg_grp_tbl *reg_grp_entry = NULL;
+    struct pt_reg_tbl *reg_entry = NULL;
     struct pt_region *base = NULL;
     uint32_t r_size = 0, r_addr = -1;
     int ret = 0;
@@ -1821,10 +1823,13 @@ static void pt_bar_mapping_one(struct pt_dev *ptdev, int bar, int io_enable,
         r_addr = -1;
     if ( (bar == PCI_ROM_SLOT) && (r_addr != -1) )
     {
-        uint32_t rom_reg;
-        rom_reg = pt_pci_read_config(&ptdev->dev, PCI_ROM_ADDRESS, 4);
-        if ( !(rom_reg & PCI_ROM_ADDRESS_ENABLE) )
-            r_addr = -1;
+        reg_grp_entry = pt_find_reg_grp(ptdev, PCI_ROM_ADDRESS);
+        if (reg_grp_entry)
+        {
+            reg_entry = pt_find_reg(reg_grp_entry, PCI_ROM_ADDRESS);
+            if (reg_entry && !(reg_entry->data & PCI_ROM_ADDRESS_ENABLE))
+                r_addr = -1;
+        }
     }
 
     /* prevent guest software mapping memory resource to 00000000h */
@@ -3011,7 +3016,7 @@ static int pt_cmd_reg_write(struct pt_dev *ptdev,
         emu_mask |= PCI_COMMAND_MEMORY;
 
     /* modify emulate register */
-    writable_mask = emu_mask & ~reg->ro_mask & valid_mask;
+    writable_mask = ~reg->ro_mask & valid_mask;
     cfg_entry->data = PT_MERGE_VALUE(*value, cfg_entry->data, writable_mask);
 
     /* create value for writing to I/O device register */
@@ -3061,7 +3066,6 @@ static int pt_bar_reg_write(struct pt_dev *ptdev,
     uint32_t prev_offset;
     uint32_t r_size = 0;
     int index = 0;
-    uint16_t cmd;
 
     /* get BAR index */
     index = pt_bar_offset_to_index(reg->offset);
@@ -3181,9 +3185,14 @@ exit:
     *value = PT_MERGE_VALUE(*value, dev_value, throughable_mask);
 
     /* After BAR reg update, we need to remap BAR*/
-    cmd = pt_pci_read_config(&ptdev->dev, PCI_COMMAND, 2);
-    pt_bar_mapping_one(ptdev, index, cmd & PCI_COMMAND_IO,
-        cmd & PCI_COMMAND_MEMORY);
+    reg_grp_entry = pt_find_reg_grp(ptdev, PCI_COMMAND);
+    if (reg_grp_entry)
+    {
+        reg_entry = pt_find_reg(reg_grp_entry, PCI_COMMAND);
+        if (reg_entry)
+            pt_bar_mapping_one(ptdev, index, reg_entry->data & PCI_COMMAND_IO,
+                               reg_entry->data & PCI_COMMAND_MEMORY);
+    }
 
     return 0;
 }
@@ -3194,6 +3203,8 @@ static int pt_exp_rom_bar_reg_write(struct pt_dev *ptdev,
         uint32_t *value, uint32_t dev_value, uint32_t valid_mask)
 {
     struct pt_reg_info_tbl *reg = cfg_entry->reg;
+    struct pt_reg_grp_tbl *reg_grp_entry = NULL;
+    struct pt_reg_tbl *reg_entry = NULL;
     struct pt_region *base = NULL;
     PCIDevice *d = (PCIDevice *)&ptdev->dev;
     PCIIORegion *r;
@@ -3202,7 +3213,6 @@ static int pt_exp_rom_bar_reg_write(struct pt_dev *ptdev,
     uint32_t r_size = 0;
     uint32_t bar_emu_mask = 0;
     uint32_t bar_ro_mask = 0;
-    uint16_t cmd;
 
     r = &d->io_regions[PCI_ROM_SLOT];
     r_size = r->size;
@@ -3212,10 +3222,10 @@ static int pt_exp_rom_bar_reg_write(struct pt_dev *ptdev,
 
     /* set emulate mask and read-only mask */
     bar_emu_mask = reg->emu_mask;
-    bar_ro_mask = reg->ro_mask | (r_size - 1);
+    bar_ro_mask = (reg->ro_mask | (r_size - 1)) & ~PCI_ROM_ADDRESS_ENABLE;
 
     /* modify emulate register */
-    writable_mask = bar_emu_mask & ~bar_ro_mask & valid_mask;
+    writable_mask = ~bar_ro_mask & valid_mask;
     cfg_entry->data = PT_MERGE_VALUE(*value, cfg_entry->data, writable_mask);
 
     /* update the corresponding virtual region address */
@@ -3226,9 +3236,15 @@ static int pt_exp_rom_bar_reg_write(struct pt_dev *ptdev,
     *value = PT_MERGE_VALUE(*value, dev_value, throughable_mask);
 
     /* After BAR reg update, we need to remap BAR*/
-    cmd = pt_pci_read_config(&ptdev->dev, PCI_COMMAND, 2);
-    pt_bar_mapping_one(ptdev, PCI_ROM_SLOT, cmd & PCI_COMMAND_IO,
-        cmd & PCI_COMMAND_MEMORY);
+    reg_grp_entry = pt_find_reg_grp(ptdev, PCI_COMMAND);
+    if (reg_grp_entry)
+    {
+        reg_entry = pt_find_reg(reg_grp_entry, PCI_COMMAND);
+        if (reg_entry)
+            pt_bar_mapping_one(ptdev, PCI_ROM_SLOT,
+                               reg_entry->data & PCI_COMMAND_IO,
+                               reg_entry->data & PCI_COMMAND_MEMORY);
+    }
 
     return 0;
 }
