@@ -34,8 +34,20 @@ static inline void flush_icache_range(unsigned long start, unsigned long stop)
     asm volatile ("isync" : : : "memory");
 }
 
+#elif defined (__ia64__)
+static inline void flush_icache_range(unsigned long start, unsigned long stop)
+{
+    while (start < stop) {
+	    asm volatile ("fc %0" :: "r"(start));
+	    start += 32;
+    }
+    asm volatile (";;sync.i;;srlz.i;;");
+}
+
+#define qemu_cache_utils_init(envp) do { (void) (envp); } while (0)
 #else
 #define qemu_cache_utils_init(envp) do { (void) (envp); } while (0)
 #endif
+
 
 #endif /* QEMU_CACHE_UTILS_H */

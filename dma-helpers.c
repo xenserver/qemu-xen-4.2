@@ -9,6 +9,7 @@
 
 #include "dma.h"
 #include "block_int.h"
+#include "cache-utils.h"
 
 void qemu_sglist_init(QEMUSGList *qsg, int alloc_hint)
 {
@@ -135,6 +136,19 @@ static BlockDriverAIOCB *dma_bdrv_io(
     dbs->bh = NULL;
     qemu_iovec_init(&dbs->iov, sg->nsg);
     dma_bdrv_cb(dbs, 0);
+
+#ifdef __ia64__
+    if (!is_write) {
+    	int i;
+    	QEMUIOVector *qiov;
+        qiov = &dbs->iov;
+        for (i = 0; i < qiov->niov; ++i) {
+           flush_icache_range((unsigned long)qiov->iov[i].iov_base,
+                 (unsigned long)(qiov->iov[i].iov_base + qiov->iov[i].iov_len));
+	}
+    }
+#endif
+
     return dbs->acb;
 }
 
