@@ -695,8 +695,6 @@ static void xenfb_update(void *opaque)
 {
     struct XenFB *xenfb = opaque;
     struct DisplayChangeListener *l;
-    int dw = ds_get_width(xenfb->c.ds);
-    int dh = ds_get_height(xenfb->c.ds);
     int i;
 
     if (xenfb->c.xendev.be_state != XenbusStateConnected)
