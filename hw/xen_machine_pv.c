@@ -82,12 +82,3 @@ QEMUMachine xenpv_machine = {
     .max_cpus = 1,
     .nodisk_ok = 1,
 };
-
-/*
- * Local variables:
- *  indent-tabs-mode: nil
- *  c-indent-level: 4
- *  c-basic-offset: 4
- *  tab-width: 4
- * End:
- */
