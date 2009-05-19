@@ -38,8 +38,6 @@
 #include "qemu-char.h"
 #include "xen_backend.h"
 
-#define dolog(val, fmt, ...) fprintf(stderr, fmt "\n", ## __VA_ARGS__)
-
 struct buffer {
     uint8_t *data;
     size_t consumed;
@@ -75,10 +73,6 @@ static void buffer_append(struct XenConsole *con)
     if ((buffer->capacity - buffer->size) < size) {
 	buffer->capacity += (size + 1024);
 	buffer->data = qemu_realloc(buffer->data, buffer->capacity);
-	if (buffer->data == NULL) {
-	    dolog(LOG_ERR, "Memory allocation failed");
-	    exit(ENOMEM);
-	}
     }
 
     while (cons != prod)

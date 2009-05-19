@@ -813,15 +813,14 @@ static void xenfb_handle_events(struct XenFB *xenfb)
 	    w = MIN(event->update.width, xenfb->width - x);
 	    h = MIN(event->update.height, xenfb->height - y);
 	    if (w < 0 || h < 0) {
-		fprintf(stderr, "xen be: %s: bogus update ignored\n",
-			xenfb->c.xendev.name);
+                xen_be_printf(&xenfb->c.xendev, 1, "bogus update ignored\n");
 		break;
 	    }
-	    if (x != event->update.x || y != event->update.y
-		|| w != event->update.width
-		|| h != event->update.height) {
-		fprintf(stderr, "xen be: %s: bogus update clipped\n",
-			xenfb->c.xendev.name);
+	    if (x != event->update.x ||
+                y != event->update.y ||
+		w != event->update.width ||
+		h != event->update.height) {
+                xen_be_printf(&xenfb->c.xendev, 1, "bogus update clipped\n");
 	    }
 	    if (w == xenfb->width && h > xenfb->height / 2) {
 		/* scroll detector: updated more than 50% of the lines,
@@ -993,7 +992,7 @@ wait_more:
     if (!xfb || !xin) {
         if (i < 256)
             goto wait_more;
-        fprintf(stderr, "%s: displaystate setup failed\n", __FUNCTION__);
+        xen_be_printf(NULL, 1, "displaystate setup failed\n");
         return;
     }
 

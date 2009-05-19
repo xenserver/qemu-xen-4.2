@@ -209,7 +209,7 @@ static struct XenDevice *xen_be_get_xendev(const char *type, int dom, int dev,
 
     xendev->evtchndev = xc_evtchn_open();
     if (xendev->evtchndev < 0) {
-	fprintf(stderr, "can't open evtchn device\n");
+	xen_be_printf(NULL, 0, "can't open evtchn device\n");
 	qemu_free(xendev);
 	return NULL;
     }
@@ -218,7 +218,7 @@ static struct XenDevice *xen_be_get_xendev(const char *type, int dom, int dev,
     if (ops->flags & DEVOPS_FLAG_NEED_GNTDEV) {
 	xendev->gnttabdev = xc_gnttab_open();
 	if (xendev->gnttabdev < 0) {
-	    fprintf(stderr, "can't open gnttab device\n");
+	    xen_be_printf(NULL, 0, "can't open gnttab device\n");
 	    xc_evtchn_close(xendev->evtchndev);
 	    qemu_free(xendev);
 	    return NULL;
@@ -511,7 +511,7 @@ static int xenstore_scan(const char *type, int dom, struct XenDevOps *ops)
     snprintf(path, sizeof(path), "%s/backend/%s/%d", dom0, type, dom);
     free(dom0);
     if (!xs_watch(xenstore, path, token)) {
-	fprintf(stderr, "xen be: watching backend path (%s) failed\n", path);
+	xen_be_printf(NULL, 0, "xen be: watching backend path (%s) failed\n", path);
 	return -1;
     }
 
@@ -620,7 +620,7 @@ int xen_be_init(void)
 {
     xenstore = xs_daemon_open();
     if (!xenstore) {
-	fprintf(stderr, "can't connect to xenstored\n");
+	xen_be_printf(NULL, 0, "can't connect to xenstored\n");
 	return -1;
     }
 
@@ -629,7 +629,7 @@ int xen_be_init(void)
 
     xen_xc = xc_interface_open();
     if (xen_xc == -1) {
-	fprintf(stderr, "can't open xen interface\n");
+	xen_be_printf(NULL, 0, "can't open xen interface\n");
 	goto err;
     }
     return 0;
@@ -680,19 +680,35 @@ int xen_be_send_notify(struct XenDevice *xendev)
 
 /*
  * msg_level:
- *  0 == errors.
- *  1 == informative debug messages.
- *  2 == noisy debug messages.
- *  3 == will flood your log.
+ *  0 == errors (stderr + logfile).
+ *  1 == informative debug messages (logfile only).
+ *  2 == noisy debug messages (logfile only).
+ *  3 == will flood your log (logfile only).
  */
 void xen_be_printf(struct XenDevice *xendev, int msg_level, const char *fmt, ...)
 {
     va_list args;
 
-    if (msg_level > xendev->debug)
-	return;
-    fprintf(stderr, "xen be: %s: ", xendev->name);
+    if (xendev) {
+        if (msg_level > xendev->debug)
+            return;
+        qemu_log("xen be: %s: ", xendev->name);
+        if (msg_level == 0)
+            fprintf(stderr, "xen be: %s: ", xendev->name);
+    } else {
+        if (msg_level > debug)
+            return;
+        qemu_log("xen be core: ");
+        if (msg_level == 0)
+            fprintf(stderr, "xen be core: ");
+    }
     va_start(args, fmt);
-    vfprintf(stderr, fmt, args);
+    qemu_log_vprintf(fmt, args);
     va_end(args);
+    if (msg_level == 0) {
+        va_start(args, fmt);
+        vfprintf(stderr, fmt, args);
+        va_end(args);
+    }
+    qemu_log_flush();
 }
