@@ -483,8 +483,6 @@ static int xenfb_map_fb(struct XenFB *xenfb)
 
     pgmfns = qemu_mallocz(sizeof(unsigned long) * n_fbdirs);
     fbmfns = qemu_mallocz(sizeof(unsigned long) * xenfb->fbpages);
-    if (!pgmfns || !fbmfns)
-	goto out;
 
     xenfb_copy_mfns(mode, n_fbdirs, pgmfns, pd);
     map = xc_map_foreign_pages(xen_xc, xenfb->c.xendev.dom,

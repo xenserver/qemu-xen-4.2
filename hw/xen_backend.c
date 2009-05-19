@@ -67,9 +67,17 @@ char *xenstore_read_str(const char *base, const char *node)
 {
     char abspath[XEN_BUFSIZE];
     unsigned int len;
+    char *str, *ret = NULL;
 
     snprintf(abspath, sizeof(abspath), "%s/%s", base, node);
-    return xs_read(xenstore, 0, abspath, &len);
+    str = xs_read(xenstore, 0, abspath, &len);
+    if (str != NULL) {
+        /* move to qemu-allocated memory to make sure
+         * callers can savely qemu_free() stuff. */
+        ret = qemu_strdup(str);
+        free(str);
+    }
+    return ret;
 }
 
 int xenstore_write_int(const char *base, const char *node, int ival)
@@ -184,8 +192,6 @@ static struct XenDevice *xen_be_get_xendev(const char *type, int dom, int dev,
 
     /* init new xendev */
     xendev = qemu_mallocz(ops->size);
-    if (!xendev)
-        return NULL;
     xendev->type  = type;
     xendev->dom   = dom;
     xendev->dev   = dev;
@@ -519,7 +525,7 @@ static int xenstore_scan(const char *type, int dom, struct XenDevOps *ops)
 	    continue;
 	xen_be_check_state(xendev);
     }
-    qemu_free(dev);
+    free(dev);
     return 0;
 }
 
