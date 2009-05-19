@@ -62,7 +62,7 @@ static void xen_init_pv(ram_addr_t ram_size, int vga_ram_size,
     env->halted = 1;
 
     /* Initialize backend core & drivers */
-    if (-1 == xen_be_init()) {
+    if (xen_be_init() != 0) {
         fprintf(stderr, "%s: xen backend core setup failed\n", __FUNCTION__);
         exit(1);
     }

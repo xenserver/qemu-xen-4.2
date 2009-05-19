@@ -11,9 +11,9 @@
  *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  *  GNU General Public License for more details.
  *
- *  You should have received a copy of the GNU General Public License
- *  along with this program; if not, write to the Free Software
- *  Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ *  You should have received a copy of the GNU General Public License along
+ *  with this program; if not, write to the Free Software Foundation, Inc.,
+ *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
 /*
@@ -162,7 +162,7 @@ struct XenDevice *xen_be_find_xendev(const char *type, int dom, int dev)
 	    continue;
 	if (xendev->dev != dev)
 	    continue;
-	if (0 != strcmp(xendev->type, type))
+	if (strcmp(xendev->type, type) != 0)
 	    continue;
 	return xendev;
     }
@@ -278,8 +278,8 @@ static struct XenDevice *xen_be_del_xendev(int dom, int dev)
  */
 static void xen_be_backend_changed(struct XenDevice *xendev, const char *node)
 {
-    if (NULL == node  ||  0 == strcmp(node, "online")) {
-	if (-1 == xenstore_read_be_int(xendev, "online", &xendev->online))
+    if (node == NULL  ||  strcmp(node, "online") == 0) {
+	if (xenstore_read_be_int(xendev, "online", &xendev->online) == -1)
 	    xendev->online = 0;
     }
 
@@ -294,8 +294,8 @@ static void xen_be_frontend_changed(struct XenDevice *xendev, const char *node)
 {
     int fe_state;
 
-    if (NULL == node  ||  0 == strcmp(node, "state")) {
-	if (-1 == xenstore_read_fe_int(xendev, "state", &fe_state))
+    if (node == NULL  ||  strcmp(node, "state") == 0) {
+	if (xenstore_read_fe_int(xendev, "state", &fe_state) == -1)
 	    fe_state = XenbusStateUnknown;
 	if (xendev->fe_state != fe_state)
 	    xen_be_printf(xendev, 1, "frontend state: %s -> %s\n",
@@ -303,7 +303,7 @@ static void xen_be_frontend_changed(struct XenDevice *xendev, const char *node)
 			  xenbus_strstate(fe_state));
 	xendev->fe_state = fe_state;
     }
-    if (NULL == node  ||  0 == strcmp(node, "protocol")) {
+    if (node == NULL  ||  strcmp(node, "protocol") == 0) {
 	qemu_free(xendev->protocol);
 	xendev->protocol = xenstore_read_fe_str(xendev, "protocol");
 	if (xendev->protocol)
@@ -333,7 +333,7 @@ static int xen_be_try_setup(struct XenDevice *xendev)
     char token[XEN_BUFSIZE];
     int be_state;
 
-    if (-1 == xenstore_read_be_int(xendev, "state", &be_state)) {
+    if (xenstore_read_be_int(xendev, "state", &be_state) == -1) {
 	xen_be_printf(xendev, 0, "reading backend state failed\n");
 	return -1;
     }
@@ -345,7 +345,7 @@ static int xen_be_try_setup(struct XenDevice *xendev)
     }
 
     xendev->fe = xenstore_read_be_str(xendev, "frontend");
-    if (NULL == xendev->fe) {
+    if (xendev->fe == NULL) {
 	xen_be_printf(xendev, 0, "reading frontend path failed\n");
 	return -1;
     }
@@ -383,7 +383,7 @@ static int xen_be_try_init(struct XenDevice *xendev)
 
     if (xendev->ops->init)
 	rc = xendev->ops->init(xendev);
-    if (0 != rc) {
+    if (rc != 0) {
 	xen_be_printf(xendev, 1, "init() failed\n");
 	return rc;
     }
@@ -416,7 +416,7 @@ static int xen_be_try_connect(struct XenDevice *xendev)
 
     if (xendev->ops->connect)
 	rc = xendev->ops->connect(xendev);
-    if (0 != rc) {
+    if (rc != 0) {
 	xen_be_printf(xendev, 0, "connect() failed\n");
 	return rc;
     }
@@ -485,7 +485,7 @@ void xen_be_check_state(struct XenDevice *xendev)
 	default:
 	    rc = -1;
 	}
-	if (0 != rc)
+	if (rc != 0)
 	    break;
     }
 }
@@ -515,7 +515,7 @@ static int xenstore_scan(const char *type, int dom, struct XenDevOps *ops)
 	return 0;
     for (j = 0; j < cdev; j++) {
 	xendev = xen_be_get_xendev(type, dom, atoi(dev[j]), ops);
-	if (NULL == xendev)
+	if (xendev == NULL)
 	    continue;
 	xen_be_check_state(xendev);
     }
@@ -533,14 +533,14 @@ static void xenstore_update_be(char *watch, char *type, int dom,
     dom0 = xs_get_domain_path(xenstore, 0);
     len = snprintf(path, sizeof(path), "%s/backend/%s/%d", dom0, type, dom);
     free(dom0);
-    if (0 != strncmp(path, watch, len))
+    if (strncmp(path, watch, len) != 0)
 	return;
-    if (2 != sscanf(watch+len, "/%u/%255s", &dev, path)) {
+    if (sscanf(watch+len, "/%u/%255s", &dev, path) != 2) {
 	strcpy(path, "");
-	if (1 != sscanf(watch+len, "/%u", &dev))
+	if (sscanf(watch+len, "/%u", &dev) != 1)
 	    dev = -1;
     }
-    if (-1 == dev)
+    if (dev == -1)
 	return;
 
     if (0) {
@@ -549,7 +549,7 @@ static void xenstore_update_be(char *watch, char *type, int dom,
     }
 
     xendev = xen_be_get_xendev(type, dom, dev, ops);
-    if (NULL != xendev) {
+    if (xendev != NULL) {
 	xen_be_backend_changed(xendev, path);
 	xen_be_check_state(xendev);
     }
@@ -561,7 +561,7 @@ static void xenstore_update_fe(char *watch, struct XenDevice *xendev)
     unsigned int len;
 
     len = strlen(xendev->fe);
-    if (0 != strncmp(xendev->fe, watch, len))
+    if (strncmp(xendev->fe, watch, len) != 0)
 	return;
     if (watch[len] != '/')
 	return;
@@ -578,13 +578,13 @@ static void xenstore_update(void *unused)
     unsigned int dom, count;
 
     vec = xs_read_watch(xenstore, &count);
-    if (NULL == vec)
+    if (vec == NULL)
 	goto cleanup;
 
-    if (3 == sscanf(vec[XS_WATCH_TOKEN], "be:%" PRIxPTR ":%d:%" PRIxPTR,
-		    &type, &dom, &ops))
+    if (sscanf(vec[XS_WATCH_TOKEN], "be:%" PRIxPTR ":%d:%" PRIxPTR,
+               &type, &dom, &ops) == 3)
 	xenstore_update_be(vec[XS_WATCH_PATH], (void*)type, dom, (void*)ops);
-    if (1 == sscanf(vec[XS_WATCH_TOKEN], "fe:%" PRIxPTR, &ptr))
+    if (sscanf(vec[XS_WATCH_TOKEN], "fe:%" PRIxPTR, &ptr) == 1)
 	xenstore_update_fe(vec[XS_WATCH_PATH], (void*)ptr);
 
 cleanup:
@@ -622,7 +622,7 @@ int xen_be_init(void)
 	goto err;
 
     xen_xc = xc_interface_open();
-    if (-1 == xen_xc) {
+    if (xen_xc == -1) {
 	fprintf(stderr, "can't open xen interface\n");
 	goto err;
     }
@@ -647,7 +647,7 @@ int xen_be_bind_evtchn(struct XenDevice *xendev)
 	return 0;
     xendev->local_port = xc_evtchn_bind_interdomain
 	(xendev->evtchndev, xendev->dom, xendev->remote_port);
-    if (-1 == xendev->local_port) {
+    if (xendev->local_port == -1) {
 	xen_be_printf(xendev, 0, "xc_evtchn_bind_interdomain failed\n");
 	return -1;
     }

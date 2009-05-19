@@ -15,9 +15,9 @@
  *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  *  GNU General Public License for more details.
  *
- *  You should have received a copy of the GNU General Public License
- *  along with this program; if not, write to the Free Software
- *  Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ *  You should have received a copy of the GNU General Public License along
+ *  with this program; if not, write to the Free Software Foundation, Inc.,
+ *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
 #include <stdlib.h>
@@ -214,11 +214,11 @@ static int con_connect(struct XenDevice *xendev)
     struct XenConsole *con = container_of(xendev, struct XenConsole, xendev);
     int limit;
 
-    if (-1 == xenstore_read_int(con->console, "ring-ref", &con->ring_ref))
+    if (xenstore_read_int(con->console, "ring-ref", &con->ring_ref) == -1)
 	return -1;
-    if (-1 == xenstore_read_int(con->console, "port", &con->xendev.remote_port))
+    if (xenstore_read_int(con->console, "port", &con->xendev.remote_port) == -1)
 	return -1;
-    if (0 == xenstore_read_int(con->console, "limit", &limit))
+    if (xenstore_read_int(con->console, "limit", &limit) == 0)
 	con->buffer.max_capacity = limit;
 
     con->sring = xc_map_foreign_range(xen_xc, con->xendev.dom,

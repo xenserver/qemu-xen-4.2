@@ -20,9 +20,9 @@
  *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  *  GNU General Public License for more details.
  *
- *  You should have received a copy of the GNU General Public License
- *  along with this program; if not, write to the Free Software
- *  Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ *  You should have received a copy of the GNU General Public License along
+ *  with this program; if not, write to the Free Software Foundation, Inc.,
+ *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
 #include <stdarg.h>
@@ -102,15 +102,15 @@ static int common_bind(struct common *c)
 {
     int mfn;
 
-    if (-1 == xenstore_read_fe_int(&c->xendev, "page-ref", &mfn))
+    if (xenstore_read_fe_int(&c->xendev, "page-ref", &mfn) == -1)
 	return -1;
-    if (-1 == xenstore_read_fe_int(&c->xendev, "event-channel", &c->xendev.remote_port))
+    if (xenstore_read_fe_int(&c->xendev, "event-channel", &c->xendev.remote_port) == -1)
 	return -1;
 
     c->page = xc_map_foreign_range(xen_xc, c->xendev.dom,
 				   XC_PAGE_SIZE,
 				   PROT_READ | PROT_WRITE, mfn);
-    if (NULL == c->page)
+    if (c->page == NULL)
 	return -1;
 
     xen_be_bind_evtchn(&c->xendev);
@@ -366,11 +366,12 @@ static int input_connect(struct XenDevice *xendev)
     struct XenInput *in = container_of(xendev, struct XenInput, c.xendev);
     int rc;
 
-    if (-1 == xenstore_read_fe_int(xendev, "request-abs-pointer", &in->abs_pointer_wanted))
+    if (xenstore_read_fe_int(xendev, "request-abs-pointer",
+                             &in->abs_pointer_wanted) == -1)
 	in->abs_pointer_wanted = 0;
 
     rc = common_bind(&in->c);
-    if (0 != rc)
+    if (rc != 0)
 	return rc;
 
     qemu_add_kbd_event_handler(xenfb_key_event, in);
@@ -450,7 +451,7 @@ static int xenfb_map_fb(struct XenFB *xenfb)
 	ptr64 = (void*)page->pd;
 #endif
 	if (ptr32) {
-	    if (0 == ptr32[1]) {
+	    if (ptr32[1] == 0) {
 		mode = 32;
 		pd   = ptr32;
 	    } else {
@@ -459,12 +460,12 @@ static int xenfb_map_fb(struct XenFB *xenfb)
 	    }
 	}
 #if defined(__x86_64__)
-    } else if (0 == strcmp(protocol, XEN_IO_PROTO_ABI_X86_32)) {
+    } else if (strcmp(protocol, XEN_IO_PROTO_ABI_X86_32) == 0) {
 	/* 64bit dom0, 32bit domU */
 	mode = 32;
 	pd   = ((void*)page->pd) - 4;
 #elif defined(__i386__)
-    } else if (0 == strcmp(protocol, XEN_IO_PROTO_ABI_X86_64)) {
+    } else if (strcmp(protocol, XEN_IO_PROTO_ABI_X86_64) == 0) {
 	/* 32bit dom0, 64bit domU */
 	mode = 64;
 	pd   = ((void*)page->pd) + 4;
@@ -874,22 +875,22 @@ static int fb_connect(struct XenDevice *xendev)
     int videoram;
     int rc;
 
-    if (-1 == xenstore_read_fe_int(xendev, "videoram", &videoram))
+    if (xenstore_read_fe_int(xendev, "videoram", &videoram) == -1)
 	videoram = 0;
 
     rc = common_bind(&fb->c);
-    if (0 != rc)
+    if (rc != 0)
 	return rc;
 
     fb_page = fb->c.page;
     rc = xenfb_configure_fb(fb, videoram * 1024 * 1024U,
 			    fb_page->width, fb_page->height, fb_page->depth,
 			    fb_page->mem_length, 0, fb_page->line_length);
-    if (0 != rc)
+    if (rc != 0)
 	return rc;
 
     rc = xenfb_map_fb(fb);
-    if (0 != rc)
+    if (rc != 0)
 	return rc;
 
 #if 0  /* handled in xen_init_display() for now */
@@ -903,7 +904,7 @@ static int fb_connect(struct XenDevice *xendev)
     }
 #endif
 
-    if (-1 == xenstore_read_fe_int(xendev, "feature-update", &fb->feature_update))
+    if (xenstore_read_fe_int(xendev, "feature-update", &fb->feature_update) == -1)
 	fb->feature_update = 0;
     if (fb->feature_update)
 	xenstore_write_be_int(xendev, "request-update", 1);
@@ -939,7 +940,7 @@ static void fb_frontend_changed(struct XenDevice *xendev, const char *node)
      * to connected.  We must trigger the watch a second time to
      * workaround a frontend bug.
      */
-    if (0 == fb->bug_trigger && 0 == strcmp(node, "state") &&
+    if (fb->bug_trigger == 0 && strcmp(node, "state") == 0 &&
         xendev->fe_state == XenbusStateConnected &&
         xendev->be_state == XenbusStateConnected) {
         xen_be_printf(xendev, 2, "re-trigger connected (frontend bug)\n");
