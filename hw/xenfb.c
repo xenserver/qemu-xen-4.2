@@ -86,6 +86,8 @@ struct XenFB {
     int               feature_update;
     int               refresh_period;
     int               bug_trigger;
+    int               have_console;
+    int               do_resize;
 
     struct {
 	int x,y,w,h;
@@ -129,10 +131,11 @@ static void common_unbind(struct common *c)
 
 /* -------------------------------------------------------------------- */
 
+#ifdef CONFIG_STUBDOM
 /*
- * These two tables are not needed any more here, but left in here
- * intentionally as documentation, to show how scancode2linux[] was
- * generated, and also because xenfbfront needs them.
+ * These two tables are not needed any more, but left in here
+ * intentionally as documentation, to show how scancode2linux[]
+ * was generated.
  *
  * Tables to map from scancode to Linux input layer keycode.
  * Scancodes are hardware-specific.  These maps assumes a
@@ -172,6 +175,7 @@ const unsigned char atkbd_unxlate_table[128] = {
      19, 25, 57, 81, 83, 92, 95, 98, 99,100,101,103,104,106,109,110
 
 };
+#endif
 
 /*
  * for (i = 0; i < 128; i++) {
@@ -320,12 +324,14 @@ static void xenfb_mouse_event(void *opaque,
 			      int dx, int dy, int dz, int button_state)
 {
     struct XenInput *xenfb = opaque;
+    int dw = ds_get_width(xenfb->c.ds);
+    int dh = ds_get_height(xenfb->c.ds);
     int i;
 
     if (xenfb->abs_pointer_wanted)
 	xenfb_send_position(xenfb,
-			    dx * (ds_get_width(xenfb->c.ds) - 1) / 0x7fff,
-			    dy * (ds_get_height(xenfb->c.ds) - 1) / 0x7fff,
+			    dx * (dw - 1) / 0x7fff,
+			    dy * (dh - 1) / 0x7fff,
 			    dz);
     else
 	xenfb_send_motion(xenfb, dx, dy, dz);
@@ -345,6 +351,11 @@ static void xenfb_mouse_event(void *opaque,
 static int input_init(struct XenDevice *xendev)
 {
     struct XenInput *in = container_of(xendev, struct XenInput, c.xendev);
+
+    if (!in->c.ds) {
+        xen_be_printf(xendev, 1, "ds not set (yet)\n");
+	return -1;
+    }
 
     xenstore_write_be_int(xendev, "feature-abs-pointer", 1);
     return 0;
@@ -547,6 +558,8 @@ static int xenfb_configure_fb(struct XenFB *xenfb, size_t fb_len_lim,
     xenfb->width = width;
     xenfb->height = height;
     xenfb->offset = offset;
+    xenfb->up_fullscreen = 1;
+    xenfb->do_resize = 1;
     xen_be_printf(&xenfb->c.xendev, 1, "framebuffer %dx%dx%d offset %d stride %d\n",
 		  width, height, depth, offset, row_stride);
     return 0;
@@ -559,9 +572,9 @@ static int xenfb_configure_fb(struct XenFB *xenfb, size_t fb_len_lim,
 			       + xenfb->offset				\
 			       + (line * xenfb->row_stride)		\
 			       + (x * xenfb->depth / 8));		\
-	DST_T *dst = (DST_T *)(ds_get_data(xenfb->c.ds)				\
-			       + (line * ds_get_linesize(xenfb->c.ds))		\
-			       + (x * ds_get_bytes_per_pixel(xenfb->c.ds)));		\
+	DST_T *dst = (DST_T *)(data					\
+			       + (line * linesize)			\
+			       + (x * bpp / 8));			\
 	int col;							\
 	const int RSS = 32 - (RSB + GSB + BSB);				\
 	const int GSS = 32 - (GSB + BSB);				\
@@ -581,55 +594,52 @@ static int xenfb_configure_fb(struct XenFB *xenfb, size_t fb_len_lim,
 		(((spix << GSS) & GSM & GDM) >> GDS) |			\
 		(((spix << BSS) & BSM & BDM) >> BDS);			\
 	    src = (SRC_T *) ((unsigned long) src + xenfb->depth / 8);	\
-	    dst = (DST_T *) ((unsigned long) dst + ds_get_bytes_per_pixel(xenfb->c.ds)); \
+	    dst = (DST_T *) ((unsigned long) dst + bpp / 8);		\
 	}								\
     }
 
 
-/* This copies data from the guest framebuffer region, into QEMU's copy
- * NB. QEMU's copy is stored in the pixel format of a) the local X
- * server (SDL case) or b) the current VNC client pixel format.
- * When shifting between colour depths we preserve the MSB.
+/*
+ * This copies data from the guest framebuffer region, into QEMU's
+ * displaysurface. qemu uses 16 or 32 bpp.  In case the pv framebuffer
+ * uses something else we must convert and copy, otherwise we can
+ * supply the buffer directly and no thing here.
  */
 static void xenfb_guest_copy(struct XenFB *xenfb, int x, int y, int w, int h)
 {
-    int line;
+    int line, oops = 0;
+    int bpp = ds_get_bits_per_pixel(xenfb->c.ds);
+    int linesize = ds_get_linesize(xenfb->c.ds);
+    uint8_t *data = ds_get_data(xenfb->c.ds);
 
     if (!is_buffer_shared(xenfb->c.ds->surface)) {
-	if (xenfb->depth == ds_get_bits_per_pixel(xenfb->c.ds)) { /* Perfect match can use fast path */
-	    for (line = y ; line < (y+h) ; line++) {
-		memcpy(ds_get_data(xenfb->c.ds) + (line * ds_get_linesize(xenfb->c.ds)) + (x * ds_get_bytes_per_pixel(xenfb->c.ds)),
-		       xenfb->pixels + xenfb->offset + (line * xenfb->row_stride) + (x * xenfb->depth / 8),
-		       w * xenfb->depth / 8);
-	    }
-	} else { /* Mismatch requires slow pixel munging */
-	    /* 8 bit == r:3 g:3 b:2 */
-	    /* 16 bit == r:5 g:6 b:5 */
-	    /* 24 bit == r:8 g:8 b:8 */
-	    /* 32 bit == r:8 g:8 b:8 (padding:8) */
-	    if (xenfb->depth == 8) {
-		if (ds_get_bits_per_pixel(xenfb->c.ds) == 16) {
-		    BLT(uint8_t, uint16_t,   3, 3, 2,   5, 6, 5);
-		} else if (ds_get_bits_per_pixel(xenfb->c.ds) == 32) {
-		    BLT(uint8_t, uint32_t,   3, 3, 2,   8, 8, 8);
-		}
-	    } else if (xenfb->depth == 16) {
-		if (ds_get_bits_per_pixel(xenfb->c.ds) == 8) {
-		    BLT(uint16_t, uint8_t,   5, 6, 5,   3, 3, 2);
-		} else if (ds_get_bits_per_pixel(xenfb->c.ds) == 32) {
-		    BLT(uint16_t, uint32_t,  5, 6, 5,   8, 8, 8);
-		}
-	    } else if (xenfb->depth == 24 || xenfb->depth == 32) {
-		if (ds_get_bits_per_pixel(xenfb->c.ds) == 8) {
-		    BLT(uint32_t, uint8_t,   8, 8, 8,   3, 3, 2);
-		} else if (ds_get_bits_per_pixel(xenfb->c.ds) == 16) {
-		    BLT(uint32_t, uint16_t,  8, 8, 8,   5, 6, 5);
-		} else if (ds_get_bits_per_pixel(xenfb->c.ds) == 32) {
-		    BLT(uint32_t, uint32_t,  8, 8, 8,   8, 8, 8);
-		}
-	    }
+        switch (xenfb->depth) {
+        case 8:
+            if (bpp == 16) {
+                BLT(uint8_t, uint16_t,   3, 3, 2,   5, 6, 5);
+            } else if (bpp == 32) {
+                BLT(uint8_t, uint32_t,   3, 3, 2,   8, 8, 8);
+            } else {
+                oops = 1;
+            }
+            break;
+        case 24:
+            if (bpp == 16) {
+                BLT(uint32_t, uint16_t,  8, 8, 8,   5, 6, 5);
+            } else if (bpp == 32) {
+                BLT(uint32_t, uint32_t,  8, 8, 8,   8, 8, 8);
+            } else {
+                oops = 1;
+            }
+            break;
+        default:
+            oops = 1;
 	}
     }
+    if (oops) /* should not happen */
+        xen_be_printf(&xenfb->c.xendev, 0, "%s: oops: convert %d -> %d bpp?\n",
+                      __FUNCTION__, xenfb->depth, bpp);
+
     dpy_update(xenfb->c.ds, x, y, w, h);
 }
 
@@ -685,10 +695,12 @@ static void xenfb_send_refresh_period(struct XenFB *xenfb, int period)
 static void xenfb_update(void *opaque)
 {
     struct XenFB *xenfb = opaque;
-    int i;
     struct DisplayChangeListener *l;
+    int dw = ds_get_width(xenfb->c.ds);
+    int dh = ds_get_height(xenfb->c.ds);
+    int i;
 
-    if (!xenfb->width || !xenfb->height)
+    if (xenfb->c.xendev.be_state != XenbusStateConnected)
         return;
 
     if (xenfb->feature_update) {
@@ -712,11 +724,12 @@ static void xenfb_update(void *opaque)
             }
         }
         if (idle)
-            period = XENFB_NO_REFRESH;
+	    period = XENFB_NO_REFRESH;
 
 	if (xenfb->refresh_period != period) {
 	    xenfb_send_refresh_period(xenfb, period);
 	    xenfb->refresh_period = period;
+            xen_be_printf(&xenfb->c.xendev, 1, "refresh period: %d\n", period);
 	}
 #else
 	; /* nothing */
@@ -728,11 +741,8 @@ static void xenfb_update(void *opaque)
     }
 
     /* resize if needed */
-    if (xenfb->width != ds_get_width(xenfb->c.ds) ||
-        xenfb->height != ds_get_height(xenfb->c.ds) ||
-        xenfb->depth != ds_get_bits_per_pixel(xenfb->c.ds) ||
-        xenfb->row_stride != ds_get_linesize(xenfb->c.ds) ||
-        xenfb->pixels + xenfb->offset != ds_get_data(xenfb->c.ds)) {
+    if (xenfb->do_resize) {
+        xenfb->do_resize = 0;
         switch (xenfb->depth) {
         case 16:
         case 32:
@@ -747,9 +757,10 @@ static void xenfb_update(void *opaque)
             qemu_resize_displaysurface(xenfb->c.ds, xenfb->width, xenfb->height);
             break;
         }
+        xen_be_printf(&xenfb->c.xendev, 1, "update: resizing: %dx%d @ %d bpp%s\n",
+                      xenfb->width, xenfb->height, xenfb->depth,
+                      is_buffer_shared(xenfb->c.ds->surface) ? " (shared)" : "");
         dpy_resize(xenfb->c.ds);
-        xen_be_printf(&xenfb->c.xendev, 1, "update: resizing: %dx%d\n",
-                      xenfb->width, xenfb->height);
         xenfb->up_fullscreen = 1;
     }
 
@@ -881,6 +892,17 @@ static int fb_connect(struct XenDevice *xendev)
     if (0 != rc)
 	return rc;
 
+#if 0  /* handled in xen_init_display() for now */
+    if (!fb->have_console) {
+        fb->c.ds = graphic_console_init(xenfb_update,
+                                        xenfb_invalidate,
+                                        NULL,
+                                        NULL,
+                                        fb);
+        fb->have_console = 1;
+    }
+#endif
+
     if (-1 == xenstore_read_fe_int(xendev, "feature-update", &fb->feature_update))
 	fb->feature_update = 0;
     if (fb->feature_update)
@@ -888,7 +910,6 @@ static int fb_connect(struct XenDevice *xendev)
 
     xen_be_printf(xendev, 1, "feature-update=%d, videoram=%d\n",
 		  fb->feature_update, videoram);
-
     return 0;
 }
 
@@ -954,31 +975,43 @@ struct XenDevOps xen_framebuffer_ops = {
     .frontend_changed = fb_frontend_changed,
 };
 
-static void xen_set_display_type(int domid, const char *type, DisplayState *ds)
+/*
+ * FIXME/TODO: Kill this.
+ * Temporary needed while DisplayState reorganization is in flight.
+ */
+void xen_init_display(int domid)
 {
-    struct XenDevice *xendev;
-    struct common *c;
+    struct XenDevice *xfb, *xin;
+    struct XenFB *fb;
+    struct XenInput *in;
+    int i = 0;
 
-    xendev = xen_be_find_xendev(type, domid, 0);
-    if (!xendev)
-	return;
-    c = container_of(xendev, struct common, xendev);
-    c->ds = ds;
-    xen_be_printf(xendev, 1, "ds is %p\n", ds);
+wait_more:
+    i++;
+    main_loop_wait(10); /* miliseconds */
+    xfb = xen_be_find_xendev("vfb", domid, 0);
+    xin = xen_be_find_xendev("vkbd", domid, 0);
+    if (!xfb || !xin) {
+        if (i < 256)
+            goto wait_more;
+        fprintf(stderr, "%s: displaystate setup failed\n", __FUNCTION__);
+        return;
+    }
+
+    /* vfb */
+    fb = container_of(xfb, struct XenFB, c.xendev);
+    fb->c.ds = graphic_console_init(xenfb_update,
+                                    xenfb_invalidate,
+                                    NULL,
+                                    NULL,
+                                    fb);
+    fb->have_console = 1;
+
+    /* vkbd */
+    in = container_of(xin, struct XenInput, c.xendev);
+    in->c.ds = fb->c.ds;
+
     /* retry ->init() */
-    xen_be_check_state(xendev);
-}
-
-void xen_set_display(int domid)
-{
-    struct XenDevice *xendev = xen_be_find_xendev("vfb", domid, 0);
-    struct XenFB *fb = container_of(xendev, struct XenFB, c.xendev);
-    DisplayState *ds = graphic_console_init(xenfb_update,
-            xenfb_invalidate,
-            NULL,
-            NULL,
-            fb);
-
-    xen_set_display_type(domid, "vkbd", ds);
-    xen_set_display_type(domid, "vfb", ds);
+    xen_be_check_state(xin);
+    xen_be_check_state(xfb);
 }

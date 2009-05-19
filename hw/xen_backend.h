@@ -89,6 +89,6 @@ extern struct XenDevOps xen_console_ops;      /* xen_console.c     */
 extern struct XenDevOps xen_kbdmouse_ops;     /* xen_framebuffer.c */
 extern struct XenDevOps xen_framebuffer_ops;  /* xen_framebuffer.c */
 
-void xen_set_display(int domid);
+void xen_init_display(int domid);
 
 #endif /* QEMU_HW_XEN_BACKEND_H */
