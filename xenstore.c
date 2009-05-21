@@ -476,9 +476,8 @@ void xenstore_parse_domain_config(int hvm_domid)
             continue;
 	if (bdrv_open2(bs, danger_buf, BDRV_O_CACHE_WB /* snapshot and write-back */, &bdrv_raw) == 0) {
 	    pstrcpy(bs->filename, sizeof(bs->filename), params);
-	} else
-#endif
-
+	}
+#else
         if (params[0]) {
 	    if (!format) {
 		if (!drv) {
@@ -503,6 +502,8 @@ void xenstore_parse_domain_config(int hvm_domid)
             if (bdrv_open2(bs, params, BDRV_O_CACHE_WB /* snapshot and write-back */, format) < 0)
                 fprintf(stderr, "qemu: could not open vbd '%s' or hard disk image '%s' (drv '%s' format '%s')\n", buf, params, drv ? drv : "?", format ? format->format_name : "0");
         }
+
+#endif
 
 	drives_table[nb_drives].bdrv = bs;
 	drives_table[nb_drives].used = 1;
@@ -955,23 +956,22 @@ void xenstore_process_event(void *opaque)
     fprintf(stderr,"medium change watch on `%s' (index: %d): %s\n",
 	    vec[XS_WATCH_TOKEN], hd_index, image ? image : "<none>");
 
-    if (image == NULL)
-        goto out;  /* gone */
+    if (image != NULL) {
+        /* Strip off blktap sub-type prefix */
+        bpath = strdup(vec[XS_WATCH_PATH]); 
+        if (bpath == NULL)
+            goto out;
+        if ((offset = strrchr(bpath, '/')) != NULL) 
+            *offset = '\0';
+        if (pasprintf(&buf, "%s/type", bpath) == -1) 
+            goto out;
+        drv = xs_read(xsh, XBT_NULL, buf, &len);
+        if (drv && !strcmp(drv, "tap") && ((offset = strchr(image, ':')) != NULL))
+            memmove(image, offset+1, strlen(offset+1)+1);
 
-    /* Strip off blktap sub-type prefix */
-    bpath = strdup(vec[XS_WATCH_PATH]); 
-    if (bpath == NULL)
-        goto out;
-    if ((offset = strrchr(bpath, '/')) != NULL) 
-        *offset = '\0';
-    if (pasprintf(&buf, "%s/type", bpath) == -1) 
-        goto out;
-    drv = xs_read(xsh, XBT_NULL, buf, &len);
-    if (drv && !strcmp(drv, "tap") && ((offset = strchr(image, ':')) != NULL))
-        memmove(image, offset+1, strlen(offset+1)+1);
-
-    if (!strcmp(image, drives_table[hd_index].bdrv->filename))
-        goto out;  /* identical */
+        if (!strcmp(image, drives_table[hd_index].bdrv->filename))
+            goto out;  /* identical */
+    }
 
     drives_table[hd_index].bdrv->filename[0] = '\0';
     bdrv_close(drives_table[hd_index].bdrv);
@@ -980,8 +980,16 @@ void xenstore_process_event(void *opaque)
         media_filename[hd_index] = NULL;
     }
 
-    if (image[0]) {
+    if (image && image[0]) {
+#ifdef CONFIG_STUBDOM
+        char path[strlen(vec[XS_WATCH_PATH]) - 6 + 8];
+        path[0] = '\0';
+        strncat(path, vec[XS_WATCH_PATH], strlen(vec[XS_WATCH_PATH]) - 6);
+        strcat(path, "frontend");
+        media_filename[hd_index] = xs_read(xsh, XBT_NULL, path, &len);
+#else
         media_filename[hd_index] = strdup(image);
+#endif
         xenstore_check_new_media_present(5000);
     }
 
