@@ -88,8 +88,12 @@ static int vbd_open(BlockDriverState *bs, const char *filename, int flags)
     if (!s->dev)
 	return -EIO;
 
-    if (SECTOR_SIZE % s->info.sector_size) {
-	printf("sector size is %d, we only support sector sizes that divide %d\n", s->info.sector_size, SECTOR_SIZE);
+    if (s->info.sector_size % SECTOR_SIZE) {
+	printf("sector size is %d, we only support sector sizes that are multiple of %d\n", s->info.sector_size, SECTOR_SIZE);
+	return -EIO;
+    }
+    if (PAGE_SIZE % s->info.sector_size) {
+	printf("sector size is %d, we only support sector sizes that divide %llu\n", s->info.sector_size, PAGE_SIZE);
 	return -EIO;
     }
 
@@ -101,8 +105,16 @@ static int vbd_open(BlockDriverState *bs, const char *filename, int flags)
     return 0;
 }
 
+struct vbd_align {
+    uint8_t *src;
+    uint8_t *dst;
+    int64_t offset;
+    int bytes;
+};
+
 typedef struct VbdAIOCB {
     BlockDriverAIOCB common;
+    struct vbd_align align;
     struct blkfront_aiocb aiocb;
 } VbdAIOCB;
 
@@ -147,10 +159,16 @@ static void vbd_do_aio(struct blkfront_aiocb *aiocbp, int ret) {
         blkfront_aio(aiocbp, aiocbp->is_write);
         return;
     }
+    if (acb->align.bytes)
+        memcpy(acb->align.dst, acb->align.src + acb->align.offset, acb->align.bytes);
+    if (acb->align.src)
+        qemu_free(acb->align.src);
 
     acb->common.cb(acb->common.opaque, ret);
     qemu_aio_release(acb);
 }
+
+static int vbd_read(BlockDriverState *bs, int64_t sector_num, uint8_t *buf, int nb_sectors);
 
 static VbdAIOCB *vbd_aio_setup(BlockDriverState *bs,
         int64_t sector_num, uint8_t *buf, int nb_sectors,
@@ -158,20 +176,60 @@ static VbdAIOCB *vbd_aio_setup(BlockDriverState *bs,
 {
     BDRVVbdState *s = bs->opaque;
     VbdAIOCB *acb;
+    int64_t sector_num_aligned  = sector_num;
+    int nb_sectors_aligned = nb_sectors;
+    uint8_t *buf_aligned = buf;
+    int sector_alignment_offset = 0;
+    int misalign = 0;
 
     acb = qemu_aio_get(bs, cb, opaque);
     if (!acb)
 	return NULL;
+
+    memset(&acb->align, 0x00, sizeof(struct vbd_align));
+    /* non-sector-aligned location */
+    if ((sector_num * SECTOR_SIZE) & (s->info.sector_size - 1)) {
+        sector_num_aligned = sector_num & (~((s->info.sector_size >> 9) - 1));
+        sector_alignment_offset = sector_num - sector_num_aligned;
+        misalign = 1;
+    }
+    /* non-sector-sized amounts */
+    if ((nb_sectors * SECTOR_SIZE) & (s->info.sector_size - 1)) {
+        nb_sectors_aligned = (nb_sectors + (s->info.sector_size / SECTOR_SIZE - 1)) & (~((s->info.sector_size >> 9) - 1));
+        misalign = 1;
+    }
+    /* non-sector-aligned buffer */
+    if (misalign || ((uintptr_t)buf & (s->info.sector_size - 1))) {
+        int sm = s->info.sector_size / SECTOR_SIZE;
+        nb_sectors_aligned += sector_alignment_offset;
+        buf_aligned = qemu_memalign(s->info.sector_size, nb_sectors_aligned * SECTOR_SIZE);
+        if (is_write) {
+            if (sector_alignment_offset > 0)
+                vbd_read(bs, sector_num_aligned, buf_aligned, sm);
+            if (nb_sectors_aligned != nb_sectors)
+                vbd_read(bs, sector_num_aligned + nb_sectors_aligned - sm,
+                         buf_aligned + (nb_sectors_aligned - sm) * SECTOR_SIZE,
+                         sm);
+            memcpy(buf_aligned + (sector_alignment_offset * SECTOR_SIZE), buf, nb_sectors * SECTOR_SIZE);
+            acb->align.src = buf_aligned;
+        } else {
+            acb->align.src = buf_aligned;
+            acb->align.dst = buf;
+            acb->align.offset = sector_alignment_offset * SECTOR_SIZE;
+            acb->align.bytes = nb_sectors * SECTOR_SIZE;
+        }
+    }
+
     acb->aiocb.aio_dev = s->dev;
-    acb->aiocb.aio_buf = buf;
-    acb->aiocb.aio_offset = sector_num * SECTOR_SIZE;
+    acb->aiocb.aio_buf = buf_aligned;
+    acb->aiocb.aio_offset = sector_num_aligned * SECTOR_SIZE;
     if (nb_sectors <= IDE_DMA_BUF_SECTORS)
-        acb->aiocb.aio_nbytes = nb_sectors * SECTOR_SIZE;
+        acb->aiocb.aio_nbytes = nb_sectors_aligned * SECTOR_SIZE;
     else
         acb->aiocb.aio_nbytes = IDE_DMA_BUF_BYTES;
     acb->aiocb.aio_cb = vbd_do_aio;
 
-    acb->aiocb.total_bytes = nb_sectors * SECTOR_SIZE;
+    acb->aiocb.total_bytes = nb_sectors_aligned * SECTOR_SIZE;
     acb->aiocb.is_write = is_write;
     acb->aiocb.data = acb;
 
@@ -226,41 +284,13 @@ static int vbd_aligned_io(BlockDriverState *bs,
 static int vbd_read(BlockDriverState *bs,
 	int64_t sector_num, uint8_t *buf, int nb_sectors)
 {
-    uint8_t *iobuf;
-    int ret;
-    /* page alignment would be a bit better, but that's still fine compared to
-     * copying */
-    if (!((uintptr_t)buf & (SECTOR_SIZE-1)))
-	return vbd_aligned_io(bs, sector_num, buf, nb_sectors, 0);
-    iobuf = qemu_memalign(PAGE_SIZE, nb_sectors * SECTOR_SIZE);
-    ret = vbd_aligned_io(bs, sector_num, iobuf, nb_sectors, 0);
-    memcpy(buf, iobuf, nb_sectors * SECTOR_SIZE);
-    free(iobuf);
-    if (ret < 0)
-	return ret;
-    else if (ret != nb_sectors * SECTOR_SIZE)
-	return -EINVAL;
-    else
-	return 0;
+    return vbd_aligned_io(bs, sector_num, buf, nb_sectors, 0);
 }
 
 static int vbd_write(BlockDriverState *bs,
 	int64_t sector_num, const uint8_t *buf, int nb_sectors)
 {
-    uint8_t *iobuf;
-    int ret;
-    if (!((uintptr_t)buf & (SECTOR_SIZE-1)))
-	return vbd_aligned_io(bs, sector_num, (uint8_t*) buf, nb_sectors, 1);
-    iobuf = qemu_memalign(PAGE_SIZE, nb_sectors * SECTOR_SIZE);
-    memcpy(iobuf, buf, nb_sectors * SECTOR_SIZE);
-    ret = vbd_aligned_io(bs, sector_num, iobuf, nb_sectors, 1);
-    free(iobuf);
-    if (ret < 0)
-	return ret;
-    else if (ret != nb_sectors * SECTOR_SIZE)
-	return -EINVAL;
-    else
-	return 0;
+    return vbd_aligned_io(bs, sector_num, (uint8_t*) buf, nb_sectors, 1);
 }
 
 static void vbd_aio_cancel(BlockDriverAIOCB *blockacb)
