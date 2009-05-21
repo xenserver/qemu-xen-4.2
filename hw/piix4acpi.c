@@ -508,7 +508,7 @@ void acpi_php_add(int slot)
     power_on_php_slot(slot);
 
     /* tell Control panel which slot for the new pass-throgh dev */
-    sprintf(ret_str, "0x%x", slot);
+    sprintf(ret_str, "0x%02x", slot);
     xenstore_record_dm("parameter", ret_str);
 
     /* signal the CP ACPI hot insert done */
