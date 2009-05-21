@@ -4801,7 +4801,6 @@ int main(int argc, char **argv, char **envp)
     machine = first_machine;
     cpu_model = NULL;
     initrd_filename = NULL;
-    ram_size = VGA_RAM_SIZE;
 #ifdef CONFIG_GDBSTUB
     use_gdbstub = 0;
     gdbstub_port = DEFAULT_GDBSTUB_PORT;
@@ -5654,13 +5653,6 @@ int main(int argc, char **argv, char **envp)
     }
 #endif
 
-#if defined (__ia64__)
-    if (ram_size > VGA_IO_START)
-        ram_size += VGA_IO_SIZE; /* skip VGA I/O hole */
-    if (ram_size > MMIO_START)
-        ram_size += 1 * MEM_G; /* skip 3G-4G MMIO, LEGACY_IO_SPACE etc. */
-#endif
-
     /* init the bluetooth world */
     for (i = 0; i < nb_bt_opts; i++)
         if (bt_parse(bt_opts[i]))
@@ -5676,6 +5668,14 @@ int main(int argc, char **argv, char **envp)
     }
 
     phys_ram_size = (machine->ram_require + vga_ram_size) & ~RAMSIZE_FIXED;
+
+#if defined (__ia64__)
+    ram_size = vga_ram_size;
+    if (ram_size > VGA_IO_START)
+        ram_size += VGA_IO_SIZE; /* skip VGA I/O hole */
+    if (ram_size > MMIO_START)
+        ram_size += 1 * MEM_G; /* skip 3G-4G MMIO, LEGACY_IO_SPACE etc. */
+#endif
 
     if (machine->ram_require & RAMSIZE_FIXED) {
         if (ram_size > 0) {
