@@ -276,6 +276,8 @@ static int platform_fixed_ioport_load(QEMUFile *f, void *opaque, int version_id)
 void platform_fixed_ioport_init(void)
 {
     struct stat stbuf;
+    char *throttling;
+    int len = 1;
 
     register_savevm("platform_fixed_ioport", 0, 1, platform_fixed_ioport_save,
                     platform_fixed_ioport_load, NULL);
@@ -286,8 +288,11 @@ void platform_fixed_ioport_init(void)
     register_ioport_read(0x10, 16, 2, platform_fixed_ioport_read2, NULL);
     register_ioport_read(0x10, 16, 1, platform_fixed_ioport_read1, NULL);
 
-    if (stat("/etc/disable-guest-log-throttle", &stbuf) == 0)
-        throttling_disabled = 1;
+    throttling = xenstore_vm_read(domid, "log-throttling", &len);
+    if (throttling != NULL) {
+        throttling_disabled = (throttling[0] - '0');
+        free(throttling);
+    }
 
     platform_fixed_ioport_write1(NULL, 0x10, 0);
 }
