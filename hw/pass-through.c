@@ -88,7 +88,10 @@
 #include "pci/pci.h"
 #include "pt-msi.h"
 #include "qemu-xen.h"
+#include "iomulti.h"
+
 #include <unistd.h>
+#include <sys/ioctl.h>
 
 struct php_dev {
     struct pt_dev *pt_dev;
@@ -1051,6 +1054,170 @@ static void pt_iomem_map(PCIDevice *d, int i, uint32_t e_phys, uint32_t e_size,
     }
 }
 
+#define PCI_IOMUL_DEV_PATH      "/dev/xen/pci_iomul"
+static void pt_iomul_init(struct pt_dev *assigned_device,
+                          uint8_t r_bus, uint8_t r_dev, uint8_t r_func)
+{
+    int fd = PCI_IOMUL_INVALID_FD;
+    struct pci_iomul_setup setup = {
+        .segment = 0,
+        .bus = r_bus,
+        .dev = r_dev,
+        .func = r_func,
+    };
+
+    fd = open(PCI_IOMUL_DEV_PATH, O_RDWR);
+    if ( fd < 0 ) {
+        PT_LOG("Error: %s can't open file %s: %s: 0x%x:0x%x.0x%x\n",
+               __func__, PCI_IOMUL_DEV_PATH, strerror(errno),
+               r_bus, r_dev, r_func);
+        fd = PCI_IOMUL_INVALID_FD;
+    }
+
+    if ( fd >= 0 && ioctl(fd, PCI_IOMUL_SETUP, &setup) )
+    {
+        PT_LOG("Error: %s: %s: setup io multiplexing failed! 0x%x:0x%x.0x%x\n",
+               __func__, strerror(errno), r_bus, r_dev, r_func);
+        close(fd);
+        fd = PCI_IOMUL_INVALID_FD;
+    }
+
+    assigned_device->fd = fd;
+    if (fd != PCI_IOMUL_INVALID_FD)
+        PT_LOG("io mul: 0x%x:0x%x.0x%x\n", r_bus, r_dev, r_func);
+}
+
+static void pt_iomul_free(struct pt_dev *assigned_device)
+{
+    if ( !pt_is_iomul(assigned_device) )
+        return;
+
+    close(assigned_device->fd);
+    assigned_device->fd = PCI_IOMUL_INVALID_FD;
+}
+
+static void pt_iomul_get_bar_offset(struct pt_dev *assigned_device,
+                                    uint32_t addr,
+                                    uint8_t *bar, uint64_t *offset)
+{
+    for ( *bar = 0; *bar < PCI_BAR_ENTRIES; (*bar)++ )
+    {
+        const struct pt_region* r = &assigned_device->bases[*bar];
+        if ( r->bar_flag != PT_BAR_FLAG_IO )
+            continue;
+
+        if ( r->e_physbase <= addr && addr < r->e_physbase + r->e_size )
+        {
+            *offset = addr - r->e_physbase;
+            return;
+        }
+    }
+}
+
+static void pt_iomul_ioport_write(struct pt_dev *assigned_device,
+                                  uint32_t addr, uint32_t val, int size)
+{
+    uint8_t bar;
+    uint64_t offset;
+    struct pci_iomul_out out;
+
+    if ( !assigned_device->io_enable )
+        return;
+
+    pt_iomul_get_bar_offset(assigned_device, addr, &bar, &offset);
+    if ( bar >= PCI_BAR_ENTRIES )
+    {
+        PT_LOG("error: %s: addr 0x%x val 0x%x size %d\n",
+               __func__, addr, val, size);
+        return;
+    }
+
+    out.bar = bar;
+    out.offset = offset;
+    out.size = size;
+    out.value = val;
+    if ( ioctl(assigned_device->fd, PCI_IOMUL_OUT, &out) )
+        PT_LOG("error: %s: %s addr 0x%x size %d bar %d offset 0x%lx\n",
+               __func__, strerror(errno), addr, size, bar, offset);
+}
+
+static uint32_t pt_iomul_ioport_read(struct pt_dev *assigned_device,
+                                     uint32_t addr, int size)
+{
+    uint8_t bar;
+    uint64_t offset;
+    struct pci_iomul_in in;
+
+    if ( !assigned_device->io_enable )
+        return -1;
+
+    pt_iomul_get_bar_offset(assigned_device, addr, &bar, &offset);
+    if ( bar >= PCI_BAR_ENTRIES )
+    {
+        PT_LOG("error: %s: addr 0x%x size %d\n", __func__, addr, size);
+        return -1;
+    }
+
+    in.bar = bar;
+    in.offset = offset;
+    in.size = size;
+    if ( ioctl(assigned_device->fd, PCI_IOMUL_IN, &in) )
+    {
+        PT_LOG("error: %s: %s addr 0x%x size %d bar %d offset 0x%lx\n",
+               __func__, strerror(errno), addr, size, bar, offset);
+        in.value = -1;
+    }
+
+    return in.value;
+}
+
+#define DEFINE_PT_IOMUL_WRITE(size)                                     \
+    static void pt_iomul_ioport_write ## size                           \
+    (void *opaque, uint32_t addr, uint32_t val)                         \
+    {                                                                   \
+        pt_iomul_ioport_write((struct pt_dev *)opaque, addr, val,       \
+                              (size));                                  \
+    }
+
+DEFINE_PT_IOMUL_WRITE(1)
+DEFINE_PT_IOMUL_WRITE(2)
+DEFINE_PT_IOMUL_WRITE(4)
+
+#define DEFINE_PT_IOMUL_READ(size)                                      \
+    static uint32_t pt_iomul_ioport_read ## size                        \
+    (void *opaque, uint32_t addr)                                       \
+    {                                                                   \
+        return pt_iomul_ioport_read((struct pt_dev *)opaque, addr,      \
+                                    (size));                            \
+    }
+
+DEFINE_PT_IOMUL_READ(1)
+DEFINE_PT_IOMUL_READ(2)
+DEFINE_PT_IOMUL_READ(4)
+
+static void pt_iomul_ioport_map(struct pt_dev *assigned_device,
+                                uint32_t old_ebase, uint32_t e_phys,
+                                uint32_t e_size, int first_map)
+{
+    /* map only valid guest address (include 0) */
+    if (e_phys != -1)
+    {
+        /* Create new mapping */
+        register_ioport_write(e_phys, e_size, 1,
+                              pt_iomul_ioport_write1, assigned_device);
+        register_ioport_write(e_phys, e_size, 2,
+                              pt_iomul_ioport_write2, assigned_device);
+        register_ioport_write(e_phys, e_size, 4,
+                              pt_iomul_ioport_write4, assigned_device);
+        register_ioport_read(e_phys, e_size, 1,
+                             pt_iomul_ioport_read1, assigned_device);
+        register_ioport_read(e_phys, e_size, 2,
+                             pt_iomul_ioport_read2, assigned_device);
+        register_ioport_read(e_phys, e_size, 4,
+                             pt_iomul_ioport_read4, assigned_device);
+    }
+}
+
 /* Being called each time a pio region has been updated */
 static void pt_ioport_map(PCIDevice *d, int i,
                           uint32_t e_phys, uint32_t e_size, int type)
@@ -1069,6 +1236,13 @@ static void pt_ioport_map(PCIDevice *d, int i,
 
     if ( e_size == 0 )
         return;
+
+    if ( pt_is_iomul(assigned_device) )
+    {
+        pt_iomul_ioport_map(assigned_device,
+                            old_ebase, e_phys, e_size, first_map);
+        return;
+    }
 
     if ( !first_map && old_ebase != -1 )
     {
@@ -2868,6 +3042,8 @@ static int pt_cmd_reg_read(struct pt_dev *ptdev,
 
     if ( ptdev->is_virtfn )
         emu_mask |= PCI_COMMAND_MEMORY;
+    if ( pt_is_iomul(ptdev) )
+        emu_mask |= PCI_COMMAND_IO;
 
     /* emulate word register */
     valid_emu_mask = emu_mask & valid_mask;
@@ -3014,6 +3190,8 @@ static int pt_cmd_reg_write(struct pt_dev *ptdev,
 
     if ( ptdev->is_virtfn )
         emu_mask |= PCI_COMMAND_MEMORY;
+    if ( pt_is_iomul(ptdev) )
+        emu_mask |= PCI_COMMAND_IO;
 
     /* modify emulate register */
     writable_mask = ~reg->ro_mask & valid_mask;
@@ -3044,6 +3222,12 @@ static int pt_cmd_reg_write(struct pt_dev *ptdev,
     pt_bar_mapping(ptdev, wr_value & PCI_COMMAND_IO,
                           wr_value & PCI_COMMAND_MEMORY);
 
+    if ( pt_is_iomul(ptdev) )
+    {
+        *value &= ~PCI_COMMAND_IO;
+        if (ioctl(ptdev->fd, PCI_IOMUL_DISABLE_IO))
+            PT_LOG("error: %s: %s\n", __func__, strerror(errno));
+    }
     return 0;
 }
 
@@ -3662,6 +3846,11 @@ static int pt_cmd_reg_restore(struct pt_dev *ptdev,
      */
     restorable_mask = reg->emu_mask & ~PCI_COMMAND_FAST_BACK;
     *value = PT_MERGE_VALUE(*value, dev_value, restorable_mask);
+    if ( pt_is_iomul(ptdev) ) {
+        *value &= ~PCI_COMMAND_IO;
+        if (ioctl(ptdev->fd, PCI_IOMUL_DISABLE_IO))
+            PT_LOG("error: %s: %s\n", __func__, strerror(errno));
+    }
 
     if (!ptdev->machine_irq)
         *value |= PCI_COMMAND_DISABLE_INTx;
@@ -3845,6 +4034,7 @@ static struct pt_dev * register_real_device(PCIBus *e_bus,
     assigned_device->msi_trans_cap = msi_translate;
     assigned_device->power_mgmt = power_mgmt;
     assigned_device->is_virtfn = pt_dev_is_virtfn(pci_dev);
+    pt_iomul_init(assigned_device, r_bus, r_dev, r_func);
 
     /* Assign device */
     machine_bdf.reg = 0;
@@ -4000,6 +4190,8 @@ static int unregister_real_device(int slot)
 
     /* unregister real device's MMIO/PIO BARs */
     pt_unregister_regions(assigned_device);
+
+    pt_iomul_free(assigned_device);
 
     /* mark this slot as free */
     php_dev->valid = 0;

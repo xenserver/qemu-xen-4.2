@@ -226,7 +226,17 @@ struct pt_dev {
     unsigned power_mgmt:1;
     struct pt_pm_info *pm_state;                /* PM virtualization */
     unsigned is_virtfn:1;
+
+    /* io port multiplexing */
+#define PCI_IOMUL_INVALID_FD    (-1)
+    int fd;
+    unsigned io_enable:1;
 };
+
+static inline int pt_is_iomul(struct pt_dev *dev)
+{
+    return (dev->fd != PCI_IOMUL_INVALID_FD);
+}
 
 /* Used for formatting PCI BDF into cf8 format */
 struct pci_config_cf8 {
