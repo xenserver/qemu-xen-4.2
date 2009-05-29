@@ -3864,11 +3864,13 @@ static int pt_cmd_reg_restore(struct pt_dev *ptdev,
      */
     restorable_mask = reg->emu_mask & ~PCI_COMMAND_FAST_BACK;
     *value = PT_MERGE_VALUE(*value, dev_value, restorable_mask);
+#ifndef CONFIG_STUBDOM
     if ( pt_is_iomul(ptdev) ) {
         *value &= ~PCI_COMMAND_IO;
         if (ioctl(ptdev->fd, PCI_IOMUL_DISABLE_IO))
             PT_LOG("error: %s: %s\n", __func__, strerror(errno));
     }
+#endif
 
     if (!ptdev->machine_irq)
         *value |= PCI_COMMAND_DISABLE_INTx;
