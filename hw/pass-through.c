@@ -1054,6 +1054,8 @@ static void pt_iomem_map(PCIDevice *d, int i, uint32_t e_phys, uint32_t e_size,
     }
 }
 
+#ifndef CONFIG_STUBDOM
+
 #define PCI_IOMUL_DEV_PATH      "/dev/xen/pci_iomul"
 static void pt_iomul_init(struct pt_dev *assigned_device,
                           uint8_t r_bus, uint8_t r_dev, uint8_t r_func)
@@ -1217,6 +1219,20 @@ static void pt_iomul_ioport_map(struct pt_dev *assigned_device,
                              pt_iomul_ioport_read4, assigned_device);
     }
 }
+
+#else /* CONFIG_STUBDOM */
+
+static void pt_iomul_init(struct pt_dev *assigned_device,
+                          uint8_t r_bus, uint8_t r_dev, uint8_t r_func) {
+    fprintf(stderr, "warning: pt_iomul not supported in stubdom"
+	    " %02x:%02x.%x\n", r_bus,r_dev,r_func);
+}
+static void pt_iomul_ioport_map(struct pt_dev *assigned_device,
+                                uint32_t old_ebase, uint32_t e_phys,
+				uint32_t e_size, int first_map) { abort(); }
+static void pt_iomul_free(struct pt_dev *assigned_device) { }
+
+#endif /* !CONFIG_STUBDOM */
 
 /* Being called each time a pio region has been updated */
 static void pt_ioport_map(PCIDevice *d, int i,
@@ -3222,12 +3238,14 @@ static int pt_cmd_reg_write(struct pt_dev *ptdev,
     pt_bar_mapping(ptdev, wr_value & PCI_COMMAND_IO,
                           wr_value & PCI_COMMAND_MEMORY);
 
+#ifndef CONFIG_STUBDOM
     if ( pt_is_iomul(ptdev) )
     {
         *value &= ~PCI_COMMAND_IO;
         if (ioctl(ptdev->fd, PCI_IOMUL_DISABLE_IO))
             PT_LOG("error: %s: %s\n", __func__, strerror(errno));
     }
+#endif
     return 0;
 }
 
