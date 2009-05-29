@@ -1139,7 +1139,7 @@ static void pt_iomul_ioport_write(struct pt_dev *assigned_device,
     out.size = size;
     out.value = val;
     if ( ioctl(assigned_device->fd, PCI_IOMUL_OUT, &out) )
-        PT_LOG("error: %s: %s addr 0x%x size %d bar %d offset 0x%lx\n",
+        PT_LOG("error: %s: %s addr 0x%x size %d bar %d offset 0x%"PRIx64"\n",
                __func__, strerror(errno), addr, size, bar, offset);
 }
 
@@ -1165,7 +1165,7 @@ static uint32_t pt_iomul_ioport_read(struct pt_dev *assigned_device,
     in.size = size;
     if ( ioctl(assigned_device->fd, PCI_IOMUL_IN, &in) )
     {
-        PT_LOG("error: %s: %s addr 0x%x size %d bar %d offset 0x%lx\n",
+        PT_LOG("error: %s: %s addr 0x%x size %d bar %d offset 0x%"PRIx64"\n",
                __func__, strerror(errno), addr, size, bar, offset);
         in.value = -1;
     }
