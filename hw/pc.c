@@ -787,8 +787,7 @@ static void pc_init1(ram_addr_t ram_size, int vga_ram_size,
                      const char *boot_device,
                      const char *kernel_filename, const char *kernel_cmdline,
                      const char *initrd_filename,
-                     int pci_enabled, const char *cpu_model,
-		     const char *direct_pci)
+                     int pci_enabled, const char *cpu_model)
 {
     char buf[1024];
     int ret, linux_boot, i;
@@ -1017,7 +1016,7 @@ vga_bios_error:
      */
     if ( pci_enabled )
     {
-        rc = pt_init(pci_bus, direct_pci); 
+        rc = pt_init(pci_bus);
         if ( rc < 0 )
         {
             fprintf(logfile, "Error: Initialization failed for pass-through devices\n");
@@ -1205,8 +1204,7 @@ static void pc_init_pci(ram_addr_t ram_size, int vga_ram_size,
 {
     pc_init1(ram_size, vga_ram_size, boot_device,
              kernel_filename, kernel_cmdline,
-             initrd_filename, 1, cpu_model,
-             direct_pci);
+             initrd_filename, 1, cpu_model);
 }
 
 static void pc_init_isa(ram_addr_t ram_size, int vga_ram_size,
@@ -1219,8 +1217,7 @@ static void pc_init_isa(ram_addr_t ram_size, int vga_ram_size,
 {
     pc_init1(ram_size, vga_ram_size, boot_device,
              kernel_filename, kernel_cmdline,
-             initrd_filename, 0, cpu_model,
-             direct_pci);
+             initrd_filename, 0, cpu_model);
 }
 
 /* set CMOS shutdown status register (index 0xF) as S3_resume(0xFE)

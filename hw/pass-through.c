@@ -4247,16 +4247,9 @@ int power_off_php_slot(int php_slot)
     return unregister_real_device(php_slot);
 }
 
-int pt_init(PCIBus *e_bus, const char *direct_pci)
+int pt_init(PCIBus *e_bus)
 {
-    int seg, b, d, f, s, status = -1;
-    struct pt_dev *pt_dev;
     struct pci_access *pci_access;
-    char *vslots;
-    char slot_str[8];
-    char *direct_pci_head = NULL;
-    char *direct_pci_p = NULL;
-    char *opt;
 
     /* Initialize libpci */
     pci_access = pci_alloc();
@@ -4272,56 +4265,6 @@ int pt_init(PCIBus *e_bus, const char *direct_pci)
     dpci_infos.pci_access = pci_access;
     dpci_infos.e_bus      = e_bus;
 
-    if ( !direct_pci || strlen(direct_pci) == 0 ) {
-        return 0;
-    }
-
-    if ( !(direct_pci_head = direct_pci_p = strdup(direct_pci)) )
-        return 0;
-
-    /* The minimal format of direct_pci: xxxx:xx:xx.x-xxxx:xx:xx.x-... It may
-     * be even longer considering the per-device opts(see the parsing for
-     * '/local/domain/0/backend/pci/XX/YY/opts-ZZ' in
-     * xenstore_parse_domain_config().
-     *
-     * The format of vslots(virtual pci slots of all pass-through devs):
-     * 0xXX;0xXX;... (see the code below).
-     *
-     * We're sure the length of direct_pci is bigger than that of vslots.
-     */
-    vslots = qemu_mallocz(strlen(direct_pci) + 1);
-    if ( vslots == NULL )
-    {
-        status = -1;
-        goto err;
-    }
-
-    /* Assign given devices to guest */
-    while ( next_bdf(&direct_pci_p, &seg, &b, &d, &f, &opt, &s) )
-    {
-        /* Register real device with the emulated bus */
-        pt_dev = register_real_device(e_bus, "DIRECT PCI", s,
-            b, d, f, PT_MACHINE_IRQ_AUTO, pci_access, opt);
-        if ( pt_dev == NULL )
-        {
-            PT_LOG("Error: Registration failed (%02x:%02x.%x)\n", b, d, f);
-            goto err;
-        }
-
-        /* Record the virtual slot info */
-        sprintf(slot_str, "0x%02x;", PCI_SLOT(pt_dev->dev.devfn));
-
-        strcat(vslots, slot_str);
-    }
-
-    /* Write virtual slots info to xenstore for Control panel use */
-    xenstore_write_vslots(vslots);
-
-    status = 0;
-err:
-    qemu_free(vslots);
-    free(direct_pci_head);
-
-    return status;
+    return 0;
 }
 

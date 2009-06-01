@@ -337,6 +337,6 @@ PCIBus *sh_pci_register_bus(pci_set_irq_fn set_irq, pci_map_irq_fn map_irq,
                             qemu_irq *pic, int devfn_min, int nirq);
 
 /* pass-through.c */
-int pt_init(PCIBus *e_bus, const char *direct_pci_opt);
+int pt_init(PCIBus *e_bus);
 
 #endif

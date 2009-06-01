@@ -301,10 +301,8 @@ static const char *xenstore_get_guest_uuid(void)
     return already_computed;
 }
 
-#define DIRECT_PCI_STR_LEN 512
 #define PT_PCI_MSITRANSLATE_DEFAULT 1
 #define PT_PCI_POWER_MANAGEMENT_DEFAULT 0
-char direct_pci_str[DIRECT_PCI_STR_LEN];
 int direct_pci_msitranslate;
 int direct_pci_power_mgmt;
 void xenstore_parse_domain_config(int hvm_domid)
@@ -566,62 +564,6 @@ void xenstore_parse_domain_config(int hvm_domid)
     if (params == NULL)
         goto out;
     num = atoi(params);
-
-    for ( i = 0; i < num; i++ ) {
-        if (pasprintf(&buf, "/local/domain/0/backend/pci/%u/%u/dev-%d",
-                    hvm_domid, pci_devid, i) != -1) {
-            free(dev);
-            dev = xs_read(xsh, XBT_NULL, buf, &len);
-
-            if ( strlen(dev) + strlen(direct_pci_str) > DIRECT_PCI_STR_LEN - 1) {
-                fprintf(stderr, "qemu: too many pci pass-through devices\n");
-                memset(direct_pci_str, 0, DIRECT_PCI_STR_LEN);
-                goto out;
-            }
-
-
-            /* append to direct_pci_str */
-            if ( !dev )
-                continue;
-
-            strcat(direct_pci_str, dev);
-
-            if (pasprintf(&buf, "/local/domain/0/backend/pci/%u/%u/vslot-%d",
-                          hvm_domid, pci_devid, i) != -1) {
-                free(dev);
-                dev = xs_read(xsh, XBT_NULL, buf, &len);
-            }
-            if ( dev ) {
-                if (strlen(dev) + strlen(direct_pci_str) >
-                    DIRECT_PCI_STR_LEN - 2) {
-                    fprintf(stderr, "qemu: too many pci pass-through "
-                            "devices\n");
-                    memset(direct_pci_str, 0, DIRECT_PCI_STR_LEN);
-                    goto out;
-                }
-                strcat(direct_pci_str, "@");
-                strcat(direct_pci_str, dev);
-            }
-
-
-            if (pasprintf(&buf, "/local/domain/0/backend/pci/%u/%u/opts-%d",
-                          hvm_domid, pci_devid, i) != -1) {
-                free(dev);
-                dev = xs_read(xsh, XBT_NULL, buf, &len);
-            }
-            if ( dev ) {
-                if ( strlen(dev) + strlen(direct_pci_str) > DIRECT_PCI_STR_LEN - 2) {
-                    fprintf(stderr, "qemu: too many pci pass-through devices\n");
-                    memset(direct_pci_str, 0, DIRECT_PCI_STR_LEN);
-                    goto out;
-                }
-                strcat(direct_pci_str, ",");
-                strcat(direct_pci_str, dev);
-            }
-
-            strcat(direct_pci_str, "-");
-        }
-    }
 
     /* get the pci pass-through parameter */
     if (pasprintf(&buf, "/local/domain/0/backend/pci/%u/%u/msitranslate",

@@ -5829,9 +5829,6 @@ int main(int argc, char **argv, char **envp)
         }
     }
 
-    if (strlen(direct_pci_str) > 0)
-        direct_pci = direct_pci_str;
-
     machine->init(ram_size, vga_ram_size, boot_devices,
                   kernel_filename, kernel_cmdline, initrd_filename, cpu_model,
 		  direct_pci);
