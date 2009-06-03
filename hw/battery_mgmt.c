@@ -60,7 +60,7 @@
 static enum POWER_MGMT_MODE power_mgmt_mode = PM_MODE_NONE;
 static battery_state_info battery_info;
 
-int is_battery_pt_feasible(void)
+static int is_battery_pt_feasible(void)
 {
     int val;
 
@@ -82,7 +82,7 @@ int is_battery_pt_feasible(void)
     return val;
 }
 
-void battery_mgmt_pt_mode_init(void)
+static void battery_mgmt_pt_mode_init(void)
 {
     int xc;
 
@@ -128,7 +128,7 @@ static void battery_dbg_port_86_input(void *opaque, uint32_t addr, uint32_t val)
 }
 #endif //BATTERY_MGMT_DEBUG_EXT
 
-void get_battery_data_from_xenstore(void)
+static void get_battery_data_from_xenstore(void)
 {
     battery_info.battery_data = 0;
     battery_info.current_index = 0;
@@ -139,7 +139,7 @@ void get_battery_data_from_xenstore(void)
         battery_info.battery_data = xenstore_read_battery_data(1/*battery status*/);
 }
 
-void write_battery_data_to_port(void)
+static void write_battery_data_to_port(void)
 {
     char temp[3];
     char *data;
@@ -239,7 +239,7 @@ static uint32_t battery_port_3_readb(void *opaque, uint32_t addr)
 }
 
 
-void battery_mgmt_non_pt_mode_init(PCIDevice *device)
+static void battery_mgmt_non_pt_mode_init(PCIDevice *device)
 {
     memset(&battery_info, 0, sizeof(battery_state_info));
     register_ioport_read(BATTERY_PORT_1, 2, 1, battery_port_1_readb, device);

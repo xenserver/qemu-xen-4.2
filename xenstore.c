@@ -1241,7 +1241,7 @@ int xenstore_vm_write(int domid, const char *key, const char *value)
     return rc;
 }
 
-char *xenstore_device_model_read(int domid, char *key, unsigned int *len)
+char *xenstore_device_model_read(int domid, const char *key, unsigned int *len)
 {
     char *path = NULL, *value = NULL;
 

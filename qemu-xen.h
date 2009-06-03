@@ -107,7 +107,7 @@ int xenstore_unsubscribe_from_hotplug_status(struct xs_handle *handle,
 
 int xenstore_vm_write(int domid, const char *key, const char *val);
 char *xenstore_vm_read(int domid, const char *key, unsigned int *len);
-char *xenstore_device_model_read(int domid, char *key, unsigned int *len);
+char *xenstore_device_model_read(int domid, const char *key, unsigned int *len);
 char *xenstore_read_battery_data(int battery_status);
 int xenstore_refresh_battery_status(void);
 int xenstore_pv_driver_build_blacklisted(uint16_t product_number,
