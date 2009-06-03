@@ -917,9 +917,6 @@ static int __insert_to_pci_slot(int bus, int dev, int func, int slot,
         if ( !test_pci_slot(slot) &&
              !pci_devfn_in_use(e_bus, PCI_DEVFN(slot, 0)) )
             goto found;
-        if ( pci_slot_match(bus, dev, func, slot) )
-            /* The slot is already here, just return */
-            return slot;
         return -2;
     }
 
@@ -3986,12 +3983,6 @@ static struct pt_dev * register_real_device(PCIBus *e_bus,
     }
     pci_fill_info(pci_dev, PCI_FILL_IRQ | PCI_FILL_BASES | PCI_FILL_ROM_BASE | PCI_FILL_SIZES);
     pt_libpci_fixup(pci_dev);
-
-    e_slot = __insert_to_pci_slot(r_bus, r_dev, r_func, e_slot, NULL);
-    if ( e_slot < 0 ) {
-        PT_LOG("Error: no free virtual PCI slot\n");
-        return NULL;
-    }
 
     msi_translate = direct_pci_msitranslate;
     power_mgmt = direct_pci_power_mgmt;
