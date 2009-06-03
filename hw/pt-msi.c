@@ -73,7 +73,8 @@ int pt_msi_setup(struct pt_dev *dev)
     }
 
     if ( xc_physdev_map_pirq_msi(xc_handle, domid, AUTO_ASSIGN, &pirq,
-                                 dev->pci_dev->dev << 3 | dev->pci_dev->func,
+                                 PCI_DEVFN(dev->pci_dev->dev,
+                                           dev->pci_dev->func),
                                  dev->pci_dev->bus, 0, 0) )
     {
         PT_LOG("Error: Mapping of MSI failed.\n");
@@ -151,7 +152,7 @@ void pt_msi_disable(struct pt_dev *dev)
 
     msi_set_enable(dev, 0);
 
-    e_device = (dev->dev.devfn >> 3) & 0x1f;
+    e_device = PCI_SLOT(dev->dev.devfn);
     /* fix virtual interrupt pin to INTA# */
     e_intx = 0;
 
@@ -179,8 +180,7 @@ void pt_msi_disable(struct pt_dev *dev)
                                         dev->msi->pirq, gflags))
         {
             PT_LOG("Error: Unbinding of MSI failed. [%02x:%02x.%x]\n",
-                pci_bus_num(d->bus),
-                ((d->devfn >> 3) & 0x1F), (d->devfn & 0x7));
+                pci_bus_num(d->bus), PCI_SLOT(d->devfn), PCI_FUNC(d->devfn));
             goto out;
         }
     }
@@ -192,8 +192,7 @@ void pt_msi_disable(struct pt_dev *dev)
         if (xc_physdev_unmap_pirq(xc_handle, domid, dev->msi->pirq))
         {
             PT_LOG("Error: Unmapping of MSI failed. [%02x:%02x.%x]\n",
-               pci_bus_num(d->bus),
-               ((d->devfn >> 3) & 0x1F), (d->devfn & 0x7));
+               pci_bus_num(d->bus), PCI_SLOT(d->devfn), PCI_FUNC(d->devfn));
             goto out;
         }
     }
@@ -223,7 +222,7 @@ int pt_enable_msi_translate(struct pt_dev* dev)
         return -1;
     }
 
-    e_device = (dev->dev.devfn >> 3) & 0x1f;
+    e_device = PCI_SLOT(dev->dev.devfn);
     /* fix virtual interrupt pin to INTA# */
     e_intx = 0;
 
@@ -253,7 +252,7 @@ void pt_disable_msi_translate(struct pt_dev *dev)
     /* MSI_ENABLE bit should be disabed until the new handler is set */
     msi_set_enable(dev, 0);
 
-    e_device = (dev->dev.devfn >> 3) & 0x1f;
+    e_device = PCI_SLOT(dev->dev.devfn);
     /* fix virtual interrupt pin to INTA# */
     e_intx = 0;
 
@@ -297,7 +296,8 @@ static int pt_msix_update_one(struct pt_dev *dev, int entry_nr)
     if ( entry->pirq == -1 )
     {
         ret = xc_physdev_map_pirq_msi(xc_handle, domid, AUTO_ASSIGN, &pirq,
-                                dev->pci_dev->dev << 3 | dev->pci_dev->func,
+                                PCI_DEVFN(dev->pci_dev->dev,
+                                          dev->pci_dev->func),
                                 dev->pci_dev->bus, entry_nr,
                                 dev->msix->table_base);
         if ( ret )
@@ -369,8 +369,7 @@ void pt_msix_disable(struct pt_dev *dev)
         if (xc_domain_unbind_msi_irq(xc_handle, domid, gvec,
                                         entry->pirq, gflags))
             PT_LOG("Error: Unbinding of MSI-X failed. [%02x:%02x.%x]\n",
-                pci_bus_num(d->bus),
-                ((d->devfn >> 3) & 0x1F), (d->devfn & 0x7));
+                pci_bus_num(d->bus), PCI_SLOT(d->devfn), PCI_FUNC(d->devfn));
         else
         {
             PT_LOG("Unmap msix with pirq %x\n", entry->pirq);
@@ -379,7 +378,7 @@ void pt_msix_disable(struct pt_dev *dev)
                                          domid, entry->pirq))
                 PT_LOG("Error: Unmapping of MSI-X failed. [%02x:%02x.%x]\n",
                     pci_bus_num(d->bus),
-                    ((d->devfn >> 3) & 0x1F), (d->devfn & 0x7));
+                    PCI_SLOT(d->devfn), PCI_FUNC(d->devfn));
         }
         /* clear msi-x info */
         entry->pirq = -1;

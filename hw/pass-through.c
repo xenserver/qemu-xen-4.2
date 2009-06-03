@@ -914,7 +914,8 @@ static int __insert_to_pci_slot(int bus, int dev, int func, int slot,
     /* preferred virt pci slot */
     if ( slot != AUTO_PHP_SLOT)
     {
-        if ( !test_pci_slot(slot) && !pci_devfn_in_use(e_bus, slot << 3) )
+        if ( !test_pci_slot(slot) &&
+             !pci_devfn_in_use(e_bus, PCI_DEVFN(slot, 0)) )
             goto found;
         if ( pci_slot_match(bus, dev, func, slot) )
             /* The slot is already here, just return */
@@ -925,7 +926,8 @@ static int __insert_to_pci_slot(int bus, int dev, int func, int slot,
     /* slot == 0, pick up a free one */
     for ( slot = 0; slot < NR_PCI_DEV; slot++ )
     {
-        if ( !test_pci_slot(slot) && !pci_devfn_in_use(e_bus, slot << 3) )
+        if ( !test_pci_slot(slot) &&
+             !pci_devfn_in_use(e_bus, PCI_DEVFN(slot, 0)) )
             goto found;
     }
 
@@ -1374,7 +1376,7 @@ static void pt_pci_write_config(PCIDevice *d, uint32_t address, uint32_t val,
 
 #ifdef PT_DEBUG_PCI_CONFIG_ACCESS
     PT_LOG("[%02x:%02x.%x]: address=%04x val=0x%08x len=%d\n",
-       pci_bus_num(d->bus), (d->devfn >> 3) & 0x1F, (d->devfn & 0x7),
+       pci_bus_num(d->bus), PCI_SLOT(d->devfn), PCI_FUNC(d->devfn),
        address, val, len);
 #endif
 
@@ -1383,7 +1385,7 @@ static void pt_pci_write_config(PCIDevice *d, uint32_t address, uint32_t val,
     {
         PT_LOG("Error: Failed to write register with offset exceeding FFh. "
             "[%02x:%02x.%x][Offset:%02xh][Length:%d]\n",
-            pci_bus_num(d->bus), ((d->devfn >> 3) & 0x1F), (d->devfn & 0x7),
+            pci_bus_num(d->bus), PCI_SLOT(d->devfn), PCI_FUNC(d->devfn),
             address, len);
         goto exit;
     }
@@ -1393,7 +1395,7 @@ static void pt_pci_write_config(PCIDevice *d, uint32_t address, uint32_t val,
     {
         PT_LOG("Error: Failed to write register with invalid access length. "
             "[%02x:%02x.%x][Offset:%02xh][Length:%d]\n",
-            pci_bus_num(d->bus), ((d->devfn >> 3) & 0x1F), (d->devfn & 0x7),
+            pci_bus_num(d->bus), PCI_SLOT(d->devfn), PCI_FUNC(d->devfn),
             address, len);
         goto exit;
     }
@@ -1403,7 +1405,7 @@ static void pt_pci_write_config(PCIDevice *d, uint32_t address, uint32_t val,
     {
         PT_LOG("Error: Failed to write register with invalid access size "
             "alignment. [%02x:%02x.%x][Offset:%02xh][Length:%d]\n",
-            pci_bus_num(d->bus), ((d->devfn >> 3) & 0x1F), (d->devfn & 0x7),
+            pci_bus_num(d->bus), PCI_SLOT(d->devfn), PCI_FUNC(d->devfn),
             address, len);
         goto exit;
     }
@@ -1415,8 +1417,8 @@ static void pt_pci_write_config(PCIDevice *d, uint32_t address, uint32_t val,
     {
         PT_LOG("Warning: Guest attempt to set address to unused Base Address "
             "Register. [%02x:%02x.%x][Offset:%02xh][Length:%d]\n",
-            pci_bus_num(d->bus), ((d->devfn >> 3) & 0x1F),
-            (d->devfn & 0x7), address, len);
+            pci_bus_num(d->bus), PCI_SLOT(d->devfn), PCI_FUNC(d->devfn),
+            address, len);
     }
 
     /* check power state transition flags */
@@ -1437,8 +1439,8 @@ static void pt_pci_write_config(PCIDevice *d, uint32_t address, uint32_t val,
             /* ignore silently */
             PT_LOG("Warning: Access to 0 Hardwired register. "
                 "[%02x:%02x.%x][Offset:%02xh][Length:%d]\n",
-                pci_bus_num(d->bus), ((d->devfn >> 3) & 0x1F),
-                (d->devfn & 0x7), address, len);
+                pci_bus_num(d->bus), PCI_SLOT(d->devfn), PCI_FUNC(d->devfn),
+                address, len);
             goto exit;
         }
     }
@@ -1566,7 +1568,7 @@ static uint32_t pt_pci_read_config(PCIDevice *d, uint32_t address, int len)
     {
         PT_LOG("Error: Failed to read register with offset exceeding FFh. "
             "[%02x:%02x.%x][Offset:%02xh][Length:%d]\n",
-            pci_bus_num(d->bus), ((d->devfn >> 3) & 0x1F), (d->devfn & 0x7),
+            pci_bus_num(d->bus), PCI_SLOT(d->devfn), PCI_FUNC(d->devfn),
             address, len);
         goto exit;
     }
@@ -1576,7 +1578,7 @@ static uint32_t pt_pci_read_config(PCIDevice *d, uint32_t address, int len)
     {
         PT_LOG("Error: Failed to read register with invalid access length. "
             "[%02x:%02x.%x][Offset:%02xh][Length:%d]\n",
-            pci_bus_num(d->bus), ((d->devfn >> 3) & 0x1F), (d->devfn & 0x7),
+            pci_bus_num(d->bus), PCI_SLOT(d->devfn), PCI_FUNC(d->devfn),
             address, len);
         goto exit;
     }
@@ -1586,7 +1588,7 @@ static uint32_t pt_pci_read_config(PCIDevice *d, uint32_t address, int len)
     {
         PT_LOG("Error: Failed to read register with invalid access size "
             "alignment. [%02x:%02x.%x][Offset:%02xh][Length:%d]\n",
-            pci_bus_num(d->bus), ((d->devfn >> 3) & 0x1F), (d->devfn & 0x7),
+            pci_bus_num(d->bus), PCI_SLOT(d->devfn), PCI_FUNC(d->devfn),
             address, len);
         goto exit;
     }
@@ -1700,7 +1702,7 @@ exit:
 
 #ifdef PT_DEBUG_PCI_CONFIG_ACCESS
     PT_LOG("[%02x:%02x.%x]: address=%04x val=0x%08x len=%d\n",
-       pci_bus_num(d->bus), (d->devfn >> 3) & 0x1F, (d->devfn & 0x7),
+       pci_bus_num(d->bus), PCI_SLOT(d->devfn), PCI_FUNC(d->devfn),
        address, val, len);
 #endif
 
@@ -2036,8 +2038,7 @@ static void pt_bar_mapping_one(struct pt_dev *ptdev, int bar, int io_enable,
     if (ret > 0)
         PT_LOG("Warning: ptdev[%02x:%02x.%x][Region:%d][Address:%08xh]"
             "[Size:%08xh] is overlapped.\n", pci_bus_num(dev->bus),
-            (dev->devfn >> 3) & 0x1F, (dev->devfn & 0x7),
-            bar, r_addr, r_size);
+            PCI_SLOT(dev->devfn), PCI_FUNC(dev->devfn), bar, r_addr, r_size);
 
     /* check whether we need to update the mapping or not */
     if (r_addr != ptdev->bases[bar].e_physbase)
@@ -2073,7 +2074,7 @@ static int check_power_state(struct pt_dev *ptdev)
     {
         PT_LOG("Error: Failed to change power state. "
             "[%02x:%02x.%x][requested state:%d][current state:%d]\n",
-            pci_bus_num(d->bus), ((d->devfn >> 3) & 0x1F), (d->devfn & 0x7),
+            pci_bus_num(d->bus), PCI_SLOT(d->devfn), PCI_FUNC(d->devfn),
             pm_state->req_state, cur_state);
         return -1;
     }
@@ -2235,7 +2236,7 @@ static void pt_config_restore(struct pt_dev *ptdev)
 
 #ifdef PT_DEBUG_PCI_CONFIG_ACCESS
             PT_LOG("[%02x:%02x.%x]: address=%04x val=0x%08x len=%d\n",
-                pci_bus_num(d->bus), (d->devfn >> 3) & 0x1F, (d->devfn & 0x7),
+                pci_bus_num(d->bus), PCI_SLOT(d->devfn), PCI_FUNC(d->devfn),
                 real_offset, val, reg->size);
 #endif
 
@@ -2283,7 +2284,7 @@ static int pt_init_pci_config(struct pt_dev *ptdev)
 
     PT_LOG("Reinitialize PCI configuration registers "
         "due to power state transition with internal reset. [%02x:%02x.%x]\n",
-        pci_bus_num(d->bus), ((d->devfn >> 3) & 0x1F), (d->devfn & 0x7));
+        pci_bus_num(d->bus), PCI_SLOT(d->devfn), PCI_FUNC(d->devfn));
 
     /* restore a part of I/O device register */
     pt_config_restore(ptdev);
@@ -2297,7 +2298,7 @@ static int pt_init_pci_config(struct pt_dev *ptdev)
     /* rebind machine_irq to device */
     if (ret < 0 && ptdev->machine_irq != 0)
     {
-        uint8_t e_device = (ptdev->dev.devfn >> 3) & 0x1f;
+        uint8_t e_device = PCI_SLOT(ptdev->dev.devfn);
         /* fix virtual interrupt pin to INTA# */
         uint8_t e_intx = 0;
 
@@ -3327,8 +3328,7 @@ static int pt_bar_reg_write(struct pt_dev *ptdev,
                 PT_LOG("Warning: Guest attempt to set Base Address "
                     "over the 64KB. "
                     "[%02x:%02x.%x][Offset:%02xh][Address:%08xh][Size:%08xh]\n",
-                    pci_bus_num(d->bus),
-                    ((d->devfn >> 3) & 0x1F), (d->devfn & 0x7),
+                    pci_bus_num(d->bus), PCI_SLOT(d->devfn), PCI_FUNC(d->devfn),
                     reg->offset, new_addr, r_size);
             }
             /* just remove mapping */
@@ -3344,9 +3344,8 @@ static int pt_bar_reg_write(struct pt_dev *ptdev,
                 PT_LOG("Warning: Guest attempt to set high MMIO Base Address. "
                     "Ignore mapping. "
                     "[%02x:%02x.%x][Offset:%02xh][High Address:%08xh]\n",
-                    pci_bus_num(d->bus),
-                    ((d->devfn >> 3) & 0x1F), (d->devfn & 0x7),
-                    reg->offset, cfg_entry->data);
+                    pci_bus_num(d->bus), PCI_SLOT(d->devfn),
+                    PCI_FUNC(d->devfn), reg->offset, cfg_entry->data);
             }
             /* clear lower address */
             d->io_regions[index-1].addr = -1;
@@ -3495,7 +3494,7 @@ static int pt_pmcsr_reg_write(struct pt_dev *ptdev,
     {
         PT_LOG("Error: Invalid power transition. "
             "[%02x:%02x.%x][requested state:%d][current state:%d]\n",
-            pci_bus_num(d->bus), ((d->devfn >> 3) & 0x1F), (d->devfn & 0x7),
+            pci_bus_num(d->bus), PCI_SLOT(d->devfn), PCI_FUNC(d->devfn),
             pm_state->req_state, pm_state->cur_state);
 
         return 0;
@@ -3508,7 +3507,7 @@ static int pt_pmcsr_reg_write(struct pt_dev *ptdev,
     {
         PT_LOG("Error: Invalid power transition. "
             "[%02x:%02x.%x][requested state:%d][current state:%d]\n",
-            pci_bus_num(d->bus), ((d->devfn >> 3) & 0x1F), (d->devfn & 0x7),
+            pci_bus_num(d->bus), PCI_SLOT(d->devfn), PCI_FUNC(d->devfn),
             pm_state->req_state, pm_state->cur_state);
 
         return 0;
@@ -4114,7 +4113,7 @@ static struct pt_dev * register_real_device(PCIBus *e_bus,
     /* bind machine_irq to device */
     if (rc < 0 && machine_irq != 0)
     {
-        e_device = (assigned_device->dev.devfn >> 3) & 0x1f;
+        e_device = PCI_SLOT(assigned_device->dev.devfn);
         /* fix virtual interrupt pin to INTA# */
         e_intx = 0;
 
@@ -4173,7 +4172,7 @@ static int unregister_real_device(int slot)
     pci_hide_device((PCIDevice*)assigned_device);
 
     /* Unbind interrupt */
-    e_device = (assigned_device->dev.devfn >> 3) & 0x1f;
+    e_device = PCI_SLOT(assigned_device->dev.devfn);
     /* fix virtual interrupt pin to INTA# */
     e_intx = 0;
     machine_irq = assigned_device->machine_irq;
