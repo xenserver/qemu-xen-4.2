@@ -103,9 +103,21 @@ struct qemu_alarm_timer;
 void do_pci_del(char *devname)
 {
     int pci_slot;
+    char *devname_cpy;
+
+    devname_cpy = strdup(devname);
+    if (!devname_cpy)
+        return;
+
     pci_slot = bdf_to_slot(devname);
 
-    acpi_php_del(pci_slot);
+    if (pci_slot < 0)
+        fprintf(logfile, "Device \"%s\" is not used by a hotplug device.\n",
+                devname_cpy);
+    else
+        acpi_php_del(pci_slot);
+
+    free(devname_cpy);
 }
 
 void do_pci_add(char *devname)
