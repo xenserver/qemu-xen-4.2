@@ -5670,7 +5670,6 @@ int main(int argc, char **argv, char **envp)
     phys_ram_size = (machine->ram_require + vga_ram_size) & ~RAMSIZE_FIXED;
 
 #if defined (__ia64__)
-    ram_size = vga_ram_size;
     if (ram_size > VGA_IO_START)
         ram_size += VGA_IO_SIZE; /* skip VGA I/O hole */
     if (ram_size > MMIO_START)
