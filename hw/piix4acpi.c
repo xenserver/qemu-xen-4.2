@@ -29,9 +29,16 @@
 #include "sysemu.h"
 #include "qemu-xen.h"
 #include "battery_mgmt.h"
+#include "qemu-log.h"
 
 #include <xen/hvm/ioreq.h>
 #include <xen/hvm/params.h>
+
+#define PIIX4ACPI_LOG_ERROR 0
+#define PIIX4ACPI_LOG_INFO 1
+#define PIIX4ACPI_LOG_DEBUG 2
+#define PIIX4ACPI_LOGLEVEL PIIX4ACPI_LOG_INFO
+#define PIIX4ACPI_LOG(level, fmt, ...) do { if (level <= PIIX4ACPI_LOGLEVEL) qemu_log(fmt, ## __VA_ARGS__); } while (0)
 
 /* PM1a_CNT bits, as defined in the ACPI specification. */
 #define SCI_EN            (1 <<  0)
@@ -209,13 +216,10 @@ static inline void clear_bit(uint8_t *map, int bit)
     map[bit / 8] &= ~(1 << (bit % 8));
 }
 
-extern FILE *logfile;
 static void acpi_dbg_writel(void *opaque, uint32_t addr, uint32_t val)
 {
-#if defined(DEBUG)
-    printf("ACPI: DBG: 0x%08x\n", val);
-#endif
-    fprintf(logfile, "ACPI:debug: write addr=0x%x, val=0x%x.\n", addr, val);
+    PIIX4ACPI_LOG(PIIX4ACPI_LOG_DEBUG, "ACPI: DBG: 0x%08x\n", val);
+    PIIX4ACPI_LOG(PIIX4ACPI_LOG_INFO, "ACPI:debug: write addr=0x%x, val=0x%x.\n", addr, val);
 }
 
 /*
@@ -246,7 +250,7 @@ static uint32_t acpi_php_readb(void *opaque, uint32_t addr)
         val = hotplug_slots->status[num];
     }
 
-    fprintf(logfile, "ACPI PCI hotplug: read addr=0x%x, val=0x%x.\n",
+    PIIX4ACPI_LOG(PIIX4ACPI_LOG_DEBUG, "ACPI PCI hotplug: read addr=0x%x, val=0x%x.\n",
             addr, val);
 
     return val;
@@ -257,7 +261,7 @@ static void acpi_php_writeb(void *opaque, uint32_t addr, uint32_t val)
     PHPSlots *hotplug_slots = opaque;
     int slot;
 
-    fprintf(logfile, "ACPI PCI hotplug: write addr=0x%x, val=0x%x.\n",
+    PIIX4ACPI_LOG(PIIX4ACPI_LOG_DEBUG, "ACPI PCI hotplug: write addr=0x%x, val=0x%x.\n",
             addr, val);
 
     switch (addr)
@@ -343,14 +347,14 @@ static void gpe_sts_write(void *opaque, uint32_t addr, uint32_t val)
     GPEState *s = opaque;
     int hotplugged = 0;
 
-    fprintf(logfile, "gpe_sts_write: addr=0x%x, val=0x%x.\n", addr, val);
+    PIIX4ACPI_LOG(PIIX4ACPI_LOG_DEBUG, "gpe_sts_write: addr=0x%x, val=0x%x.\n", addr, val);
 
     hotplugged = test_bit(&s->gpe0_sts[0], ACPI_PHP_GPE_BIT);
     s->gpe0_sts[addr - ACPI_GPE0_BLK_ADDRESS] &= ~val;
     if ( s->sci_asserted &&
          hotplugged &&
          !test_bit(&s->gpe0_sts[0], ACPI_PHP_GPE_BIT)) {
-        fprintf(logfile, "Clear the GPE0_STS bit for ACPI hotplug & deassert the IRQ.\n");
+        PIIX4ACPI_LOG(PIIX4ACPI_LOG_INFO, "Clear the GPE0_STS bit for ACPI hotplug & deassert the IRQ.\n");
         qemu_irq_lower(sci_irq);
     }
 
@@ -369,7 +373,7 @@ static void gpe_en_write(void *opaque, uint32_t addr, uint32_t val)
     GPEState *s = opaque;
     int reg_count;
 
-    fprintf(logfile, "gpe_en_write: addr=0x%x, val=0x%x.\n", addr, val);
+    PIIX4ACPI_LOG(PIIX4ACPI_LOG_DEBUG, "gpe_en_write: addr=0x%x, val=0x%x.\n", addr, val);
     reg_count = addr - (ACPI_GPE0_BLK_ADDRESS + ACPI_GPE0_BLK_LEN / 2);
     s->gpe0_en[reg_count] = val;
     /* If disable GPE bit right after generating SCI on it, 
@@ -378,7 +382,7 @@ static void gpe_en_write(void *opaque, uint32_t addr, uint32_t val)
     if ( s->sci_asserted &&
          reg_count == (ACPI_PHP_GPE_BIT / 8) &&
          !(val & (1 << (ACPI_PHP_GPE_BIT % 8))) ) {
-        fprintf(logfile, "deassert due to disable GPE bit.\n");
+        PIIX4ACPI_LOG(PIIX4ACPI_LOG_INFO, "deassert due to disable GPE bit.\n");
         s->sci_asserted = 0;
         qemu_irq_lower(sci_irq);
     }
@@ -397,7 +401,7 @@ static void gpe_save(QEMUFile* f, void* opaque)
 
     qemu_put_8s(f, &s->sci_asserted);
     if ( s->sci_asserted ) {
-        fprintf(logfile, "gpe_save with sci asserted!\n");
+        PIIX4ACPI_LOG(PIIX4ACPI_LOG_INFO, "gpe_save with sci asserted!\n");
     }
 }
 
@@ -455,7 +459,7 @@ static void acpi_sci_intr(GPEState *s)
         set_bit(&s->gpe0_sts[0], ACPI_PHP_GPE_BIT);
         s->sci_asserted = 1;
         qemu_irq_raise(sci_irq);
-        fprintf(logfile, "generate a sci for PHP.\n");
+        PIIX4ACPI_LOG(PIIX4ACPI_LOG_INFO, "generate a sci for PHP.\n");
     }
 }
 
@@ -464,7 +468,7 @@ void acpi_php_del(int slot)
     GPEState *s = &gpe_state;
 
     if ( test_pci_slot(slot) < 0 ) {
-        fprintf(logfile, "hot remove: pci slot %d "
+        PIIX4ACPI_LOG(PIIX4ACPI_LOG_ERROR, "hot remove: pci slot %d "
                 "is not used by a hotplug device.\n", slot);
 
         return;
@@ -484,7 +488,7 @@ void acpi_php_add(int slot)
     char ret_str[30];
 
     if ( slot < 0 ) {
-        fprintf(logfile, "hot add pci slot %d exceed.\n", slot);
+        PIIX4ACPI_LOG(PIIX4ACPI_LOG_ERROR, "hot add pci slot %d exceed.\n", slot);
 
         if ( slot == -1 )
             sprintf(ret_str, "no free hotplug slots");
@@ -577,7 +581,7 @@ i2c_bus *piix4_pm_init(PCIBus *bus, int devfn, uint32_t smb_io_base,
 
 void qemu_system_hot_add_init() { }
 void qemu_system_device_hot_add(int bus, int slot, int state) {
-    fputs("qemu-upstream PCI hotplug not supported in qemu-dm\n",stderr);
+    PIIX4ACPI_LOG(PIIX4ACPI_LOG_ERROR, "qemu-upstream PCI hotplug not supported in qemu-dm\n");
     exit(-1);
 }
 
