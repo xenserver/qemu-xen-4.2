@@ -756,6 +756,9 @@ static void xenstore_process_dm_command_event(void)
     if (!command)
         goto out;
     
+    if (!xs_rm(xsh, XBT_NULL, path))
+        fprintf(logfile, "xs_rm failed: path=%s\n", path);
+
     if (!strncmp(command, "save", len)) {
         fprintf(logfile, "dm-command: pause and save state\n");
         xen_pause_requested = 1;
