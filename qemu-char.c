@@ -1120,6 +1120,26 @@ static CharDriverState *qemu_chr_open_tty(const char *filename)
     qemu_chr_reset(chr);
     return chr;
 }
+#elif CONFIG_STUBDOM
+#include <fcntl.h>
+static CharDriverState *qemu_chr_open_pty(void)
+{
+    CharDriverState *chr;
+    int fd;
+
+    fd = posix_openpt(O_RDWR|O_NOCTTY);
+    if (fd < 0)
+        return NULL;
+
+    chr = qemu_chr_open_fd(fd, fd);
+    if (!chr) {
+        close(fd);
+        return NULL;
+    }
+
+    qemu_chr_reset(chr);
+    return chr;
+}
 #else  /* ! __linux__ && ! __sun__ */
 static CharDriverState *qemu_chr_open_pty(void)
 {
