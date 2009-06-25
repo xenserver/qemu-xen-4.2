@@ -2296,8 +2296,7 @@ static int pt_init_pci_config(struct pt_dev *ptdev)
     if (ret < 0 && ptdev->machine_irq != 0)
     {
         uint8_t e_device = PCI_SLOT(ptdev->dev.devfn);
-        /* fix virtual interrupt pin to INTA# */
-        uint8_t e_intx = 0;
+        uint8_t e_intx = pci_intx(ptdev);
 
         ret = xc_domain_bind_pt_pci_irq(xc_handle, domid, ptdev->machine_irq,
                                        0, e_device, e_intx);
@@ -3580,7 +3579,6 @@ static int pt_msgctrl_reg_write(struct pt_dev *ptdev,
     uint16_t writable_mask = 0;
     uint16_t throughable_mask = 0;
     uint16_t old_ctrl = cfg_entry->data;
-    uint8_t e_device, e_intx;
     PCIDevice *pd = (PCIDevice *)ptdev;
     uint16_t val;
 
@@ -4106,7 +4104,7 @@ static struct pt_dev * register_real_device(PCIBus *e_bus,
     {
         e_device = PCI_SLOT(assigned_device->dev.devfn);
         /* fix virtual interrupt pin to INTA# */
-        e_intx = 0;
+        e_intx = pci_intx(assigned_device);
 
         rc = xc_domain_bind_pt_pci_irq(xc_handle, domid, machine_irq, 0,
                                        e_device, e_intx);
@@ -4164,8 +4162,7 @@ static int unregister_real_device(int slot)
 
     /* Unbind interrupt */
     e_device = PCI_SLOT(assigned_device->dev.devfn);
-    /* fix virtual interrupt pin to INTA# */
-    e_intx = 0;
+    e_intx = pci_intx(assigned_device);
     machine_irq = assigned_device->machine_irq;
 
     if ( assigned_device->msi_trans_en == 0 && machine_irq ) {
@@ -4258,3 +4255,60 @@ int pt_init(PCIBus *e_bus)
     return 0;
 }
 
+/* The PCI Local Bus Specification, Rev. 3.0,
+ * Section 6.2.4 Miscellaneous Registers, pp 223
+ * outlines 5 valid values for the intertupt pin (intx).
+ *  0: For devices (or device functions) that don't use an interrupt in
+ *  1: INTA#
+ *  2: INTB#
+ *  3: INTC#
+ *  4: INTD#
+ *
+ * Xen uses the following 4 values for intx
+ *  0: INTA#
+ *  1: INTB#
+ *  2: INTC#
+ *  3: INTD#
+ *
+ * Observing that these list of values are not the same, pci_read_intx()
+ * uses the following mapping from hw to xen values.
+ * This seems to reflect the current usage within Xen.
+ *
+ * PCI hardware    | Xen | Notes
+ * ----------------+-----+----------------------------------------------------
+ * 0               | 0   | No interrupt
+ * 1               | 0   | INTA#
+ * 2               | 1   | INTB#
+ * 3               | 2   | INTC#
+ * 4               | 3   | INTD#
+ * any other value | 0   | This should never happen, log error message
+ */
+static uint8_t pci_read_intx(struct pt_dev *ptdev)
+{
+    uint8_t r_val = pci_read_byte(ptdev->pci_dev, PCI_INTERRUPT_PIN);
+
+    PT_LOG("intx=%i\n", r_val);
+    if (r_val < 1 || r_val > 4)
+    {
+        PT_LOG("Interrupt pin read from hardware is out of range: "
+               "value=%i, acceptable range is 1 - 4\n", r_val);
+        r_val = 0;
+    }
+    else
+    {
+        r_val -= 1;
+    }
+
+    return r_val;
+}
+
+/*
+ * For virtual function 0, always use INTA#,
+ * otherwise use the hardware value
+ */
+uint8_t pci_intx(struct pt_dev *ptdev)
+{
+    if (!PCI_FUNC(ptdev->dev.devfn))
+        return 0;
+    return pci_read_intx(ptdev);
+}
