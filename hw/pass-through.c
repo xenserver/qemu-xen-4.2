@@ -859,7 +859,7 @@ static int parse_bdf(char **str, int *seg, int *bus, int *dev, int *func,
     }
     else
     {
-        *vdevfn = AUTO_PHP_DEVFN;
+        *vdevfn = AUTO_PHP_SLOT;
         *opt = token;
     }
 
@@ -902,8 +902,32 @@ static int pci_devfn_match(int bus, int dev, int func, int devfn)
     return 0;
 }
 
+static int find_free_vslot(void)
+{
+    PCIBus *e_bus = dpci_infos.e_bus;
+    int slot, func, devfn;
+
+    for ( slot = 0; slot < NR_PCI_DEV; slot++ )
+    {
+        for ( func = 0; func < NR_PCI_FUNC; func++ )
+        {
+            devfn = PCI_DEVFN(slot, func);
+            if ( test_pci_devfn(devfn) || pci_devfn_in_use(e_bus, devfn) )
+            {
+                break;
+            }
+        }
+        if (func == NR_PCI_FUNC)
+            return slot;
+    }
+
+    /* not found */
+    return -1;
+}
+
+
 /* Insert a new pass-through device into a specific pci devfn.
- * input  dom:bus:dev.func@devfn, chose free one if devfn == AUTO_PHP_DEVFN
+ * input  dom:bus:dev.func@devfn, chose free one if devfn & AUTO_PHP_SLOT
  * return -2: requested devfn not available
  *        -1: no free devfns
  *        >=0: the new hotplug devfn
@@ -912,28 +936,23 @@ static int __insert_to_pci_devfn(int bus, int dev, int func, int devfn,
                                  char *opt)
 {
     PCIBus *e_bus = dpci_infos.e_bus;
-    int slot;
+    int vslot;
 
-    /* preferred virt pci devfn */
-    if ( devfn != AUTO_PHP_DEVFN )
+    if ( devfn & AUTO_PHP_SLOT )
     {
-        if ( !test_pci_devfn(devfn) && !pci_devfn_in_use(e_bus, devfn) )
-            goto found;
-        return -2;
+        vslot = find_free_vslot();
+        if (vslot < 0)
+            return -1;
+        /* The vfunc is provided in the devfn paramter */
+        devfn = PCI_DEVFN(vslot, PCI_FUNC(devfn));
+    }
+    else
+    {
+        /* Prefered devfn */
+        if ( test_pci_devfn(devfn) || pci_devfn_in_use(e_bus, devfn) )
+            return -2;
     }
 
-    /* pick a free slot */
-    for ( slot = 0; slot < NR_PCI_DEV; slot++ )
-    {
-        devfn = PCI_DEVFN(slot, 0);
-        if ( !test_pci_devfn(devfn) && !pci_devfn_in_use(e_bus, devfn) )
-            goto found;
-    }
-
-    /* not found */
-    return -1;
-
-found:
     dpci_infos.php_devs[devfn].valid  = 1;
     dpci_infos.php_devs[devfn].r_bus  = bus;
     dpci_infos.php_devs[devfn].r_dev  = dev;
