@@ -278,7 +278,7 @@ static void acpi_php_writeb(void *opaque, uint32_t addr, uint32_t val)
             hotplug_slots->plug_slot = 0;
 
             /* power off the slot */
-            power_off_php_slot(PCI_DEVFN(slot, 0));
+            power_off_php_devfn(PCI_DEVFN(slot, 0));
 
             /* signal the CP ACPI hot remove done. */
             xenstore_record_dm_state("pci-removed");
@@ -318,7 +318,7 @@ static void php_slots_init(void)
 
     /* update the pci slot status */
     for ( i = 0; i < NR_PCI_DEV; i++ ) {
-        if ( test_pci_slot(i) )
+        if ( test_pci_devfn(i) )
             php_slots.status[i] = 0xf;
     }
 
@@ -469,7 +469,7 @@ void acpi_php_del(int devfn)
     slot = PCI_SLOT(devfn);
     func = PCI_FUNC(devfn);
 
-    if ( test_pci_slot(devfn) < 0 ) {
+    if ( test_pci_devfn(devfn) < 0 ) {
         fprintf(logfile, "hot remove: pci slot 0x%02x, function 0x%x "
                 "is not used by a hotplug device.\n", slot, func);
 
@@ -537,7 +537,7 @@ void acpi_php_add(int devfn)
     }
 
     /* power on the function */
-    power_on_php_slot(devfn);
+    power_on_php_devfn(devfn);
 
     /* tell Control panel which slot for the new pass-throgh dev */
     sprintf(ret_str, "0x%02x", devfn);

@@ -261,11 +261,11 @@ PCIBus *pci_bridge_init(PCIBus *bus, int devfn, uint16_t vid, uint16_t did,
 #define AUTO_PHP_SLOT  NR_PCI_DEV
 #define AUTO_PHP_DEVFN NR_PCI_DEVFN
 
-int insert_to_pci_slot(char*);
-int test_pci_slot(int);
-int bdf_to_slot(char*);
-int power_on_php_slot(int);
-int power_off_php_slot(int);
+int insert_to_pci_devfn(char *bdf_devfn);
+int test_pci_devfn(int devfn);
+int bdf_to_devfn(char *bdf_str);
+int power_on_php_devfn(int devfn);
+int power_off_php_devfn(int devfn);
 
 /* pci_emulation.c */
 #include "hw/pci_emulation.h"

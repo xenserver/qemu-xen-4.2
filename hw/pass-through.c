@@ -831,7 +831,7 @@ static int token_value(char *token)
 }
 
 static int parse_bdf(char **str, int *seg, int *bus, int *dev, int *func,
-                     char **opt, int *vslot)
+                     char **opt, int *vdevfn)
 {
     char *token, *endptr;
     const char *delim = ":.";
@@ -855,11 +855,11 @@ static int parse_bdf(char **str, int *seg, int *bus, int *dev, int *func,
     if (*opt)
     {
         *(*opt)++ = '\0';
-        *vslot = token_value(*opt);
+        *vdevfn = token_value(*opt);
     }
     else
     {
-        *vslot = AUTO_PHP_DEVFN;
+        *vdevfn = AUTO_PHP_DEVFN;
         *opt = token;
     }
 
@@ -892,24 +892,24 @@ static int get_next_keyval(char **option, char **key, char **val)
     return 0;
 }
 
-static int pci_slot_match(int bus, int dev, int func, int slot)
+static int pci_devfn_match(int bus, int dev, int func, int devfn)
 {
-    if (test_pci_slot(slot) == 1 &&
-        dpci_infos.php_devs[slot].r_bus == bus &&
-        dpci_infos.php_devs[slot].r_dev  == dev &&
-        dpci_infos.php_devs[slot].r_func == func )
+    if (test_pci_devfn(devfn) == 1 &&
+        dpci_infos.php_devs[devfn].r_bus == bus &&
+        dpci_infos.php_devs[devfn].r_dev  == dev &&
+        dpci_infos.php_devs[devfn].r_func == func )
         return 1;
     return 0;
 }
 
-/* Insert a new pass-through device into a specific pci slot.
- * input  dom:bus:dev.func@slot, chose free one if slot == AUTO_PHP_DEVFN
- * return -2: requested slot not available
- *        -1: no free slots
- *        >=0: the new hotplug slot
+/* Insert a new pass-through device into a specific pci devfn.
+ * input  dom:bus:dev.func@devfn, chose free one if devfn == AUTO_PHP_DEVFN
+ * return -2: requested devfn not available
+ *        -1: no free devfns
+ *        >=0: the new hotplug devfn
  */
-static int __insert_to_pci_slot(int bus, int dev, int func, int devfn,
-                                char *opt)
+static int __insert_to_pci_devfn(int bus, int dev, int func, int devfn,
+                                 char *opt)
 {
     PCIBus *e_bus = dpci_infos.e_bus;
     int slot;
@@ -917,7 +917,7 @@ static int __insert_to_pci_slot(int bus, int dev, int func, int devfn,
     /* preferred virt pci devfn */
     if ( devfn != AUTO_PHP_DEVFN )
     {
-        if ( !test_pci_slot(devfn) && !pci_devfn_in_use(e_bus, devfn) )
+        if ( !test_pci_devfn(devfn) && !pci_devfn_in_use(e_bus, devfn) )
             goto found;
         return -2;
     }
@@ -926,7 +926,7 @@ static int __insert_to_pci_slot(int bus, int dev, int func, int devfn,
     for ( slot = 0; slot < NR_PCI_DEV; slot++ )
     {
         devfn = PCI_DEVFN(slot, 0);
-        if ( !test_pci_slot(devfn) && !pci_devfn_in_use(e_bus, devfn) )
+        if ( !test_pci_devfn(devfn) && !pci_devfn_in_use(e_bus, devfn) )
             goto found;
     }
 
@@ -942,54 +942,54 @@ found:
     return devfn;
 }
 
-/* Insert a new pass-through device into a specific pci slot.
- * input  dom:bus:dev.func@slot
+/* Insert a new pass-through device into a specific pci devfn.
+ * input  dom:bus:dev.func@devfn
  */
-int insert_to_pci_slot(char *bdf_slt)
+int insert_to_pci_devfn(char *bdf_slt)
 {
-    int seg, bus, dev, func, slot;
+    int seg, bus, dev, func, devfn;
     char *opt;
 
-    if ( !parse_bdf(&bdf_slt, &seg, &bus, &dev, &func, &opt, &slot) )
+    if ( !parse_bdf(&bdf_slt, &seg, &bus, &dev, &func, &opt, &devfn) )
     {
         return -1;
     }
 
-    return __insert_to_pci_slot(bus, dev, func, slot, opt);
+    return __insert_to_pci_devfn(bus, dev, func, devfn, opt);
 
 }
 
-/* Test if a pci slot has a PHP device
+/* Test if a pci devfn has a PHP device
  * 1:  present
  * 0:  not present
- * -1: invalid pci slot input
+ * -1: invalid pci devfn input
  */
-int test_pci_slot(int slot)
+int test_pci_devfn(int devfn)
 {
-    if ( slot < 0 || slot >= NR_PCI_DEVFN )
+    if ( devfn < 0 || devfn >= NR_PCI_DEVFN )
         return -1;
 
-    if ( dpci_infos.php_devs[slot].valid )
+    if ( dpci_infos.php_devs[devfn].valid )
         return 1;
 
     return 0;
 }
 
-/* find the pci slot for pass-through dev with specified BDF */
-int bdf_to_slot(char *bdf_str)
+/* find the pci devfn for pass-through dev with specified BDF */
+int bdf_to_devfn(char *bdf_str)
 {
-    int seg, bus, dev, func, slot, i;
+    int seg, bus, dev, func, devfn, i;
     char *opt;
 
-    if ( !parse_bdf(&bdf_str, &seg, &bus, &dev, &func, &opt, &slot))
+    if ( !parse_bdf(&bdf_str, &seg, &bus, &dev, &func, &opt, &devfn))
     {
         return -1;
     }
 
-    /* locate the virtual pci slot for this VTd device */
+    /* locate the virtual pci devfn for this VTd device */
     for ( i = 0; i < NR_PCI_DEVFN; i++ )
     {
-        if ( pci_slot_match(bus, dev, func, i) )
+        if ( pci_devfn_match(bus, dev, func, i) )
             return i;
     }
 
@@ -3960,7 +3960,7 @@ static int pt_pmcsr_reg_restore(struct pt_dev *ptdev,
 }
 
 static struct pt_dev * register_real_device(PCIBus *e_bus,
-        const char *e_dev_name, int e_slot, uint8_t r_bus, uint8_t r_dev,
+        const char *e_dev_name, int e_devfn, uint8_t r_bus, uint8_t r_dev,
         uint8_t r_func, uint32_t machine_irq, struct pci_access *pci_access,
         char *opt)
 {
@@ -4037,7 +4037,7 @@ static struct pt_dev * register_real_device(PCIBus *e_bus,
 
     /* Register device */
     assigned_device = (struct pt_dev *) pci_register_device(e_bus, e_dev_name,
-                                sizeof(struct pt_dev), e_slot,
+                                sizeof(struct pt_dev), e_devfn,
                                 pt_pci_read_config, pt_pci_write_config);
     if ( assigned_device == NULL )
     {
@@ -4045,7 +4045,7 @@ static struct pt_dev * register_real_device(PCIBus *e_bus,
         return NULL;
     }
 
-    dpci_infos.php_devs[e_slot].pt_dev = assigned_device;
+    dpci_infos.php_devs[e_devfn].pt_dev = assigned_device;
 
     assigned_device->pci_dev = pci_dev;
     assigned_device->msi_trans_cap = msi_translate;
@@ -4145,7 +4145,7 @@ out:
     return assigned_device;
 }
 
-static int unregister_real_device(int slot)
+static int unregister_real_device(int devfn)
 {
     struct php_dev *php_dev;
     struct pci_dev *pci_dev;
@@ -4155,10 +4155,10 @@ static int unregister_real_device(int slot)
     uint32_t bdf = 0;
     int rc = -1;
 
-    if ( test_pci_slot(slot) != 1 )
+    if ( test_pci_devfn(devfn) != 1 )
        return -1;
 
-    php_dev = &dpci_infos.php_devs[slot];
+    php_dev = &dpci_infos.php_devs[devfn];
     assigned_device = php_dev->pt_dev;
 
     if ( !assigned_device )
@@ -4209,7 +4209,7 @@ static int unregister_real_device(int slot)
 
     pt_iomul_free(assigned_device);
 
-    /* mark this slot as free */
+    /* mark this devfn as free */
     php_dev->valid = 0;
     php_dev->pt_dev = NULL;
     qemu_free(assigned_device);
@@ -4217,14 +4217,14 @@ static int unregister_real_device(int slot)
     return 0;
 }
 
-int power_on_php_slot(int slot)
+int power_on_php_devfn(int devfn)
 {
-    struct php_dev *php_dev = &dpci_infos.php_devs[slot];
+    struct php_dev *php_dev = &dpci_infos.php_devs[devfn];
     struct pt_dev *pt_dev;
     pt_dev =
         register_real_device(dpci_infos.e_bus,
             "DIRECT PCI",
-            slot,
+            devfn,
             php_dev->r_bus,
             php_dev->r_dev,
             php_dev->r_func,
@@ -4238,9 +4238,9 @@ int power_on_php_slot(int slot)
 
 }
 
-int power_off_php_slot(int php_slot)
+int power_off_php_devfn(int php_devfn)
 {
-    return unregister_real_device(php_slot);
+    return unregister_real_device(php_devfn);
 }
 
 int pt_init(PCIBus *e_bus)
