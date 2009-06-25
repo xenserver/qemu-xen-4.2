@@ -153,8 +153,7 @@ void pt_msi_disable(struct pt_dev *dev)
     msi_set_enable(dev, 0);
 
     e_device = PCI_SLOT(dev->dev.devfn);
-    /* fix virtual interrupt pin to INTA# */
-    e_intx = 0;
+    e_intx = pci_intx(dev);
 
     if (dev->msi_trans_en)
     {
@@ -224,7 +223,7 @@ int pt_enable_msi_translate(struct pt_dev* dev)
 
     e_device = PCI_SLOT(dev->dev.devfn);
     /* fix virtual interrupt pin to INTA# */
-    e_intx = 0;
+    e_intx = pci_intx(dev);
 
     if (xc_domain_bind_pt_irq(xc_handle, domid, dev->msi->pirq,
                                PT_IRQ_TYPE_MSI_TRANSLATE, 0,
@@ -253,8 +252,7 @@ void pt_disable_msi_translate(struct pt_dev *dev)
     msi_set_enable(dev, 0);
 
     e_device = PCI_SLOT(dev->dev.devfn);
-    /* fix virtual interrupt pin to INTA# */
-    e_intx = 0;
+    e_intx = pci_intx(dev);
 
     if (xc_domain_unbind_pt_irq(xc_handle, domid, dev->msi->pirq,
                                  PT_IRQ_TYPE_MSI_TRANSLATE, 0,

@@ -103,7 +103,7 @@ struct php_dev {
 };
 struct dpci_infos {
 
-    struct php_dev php_devs[NR_PCI_DEV];
+    struct php_dev php_devs[NR_PCI_DEVFN];
 
     PCIBus *e_bus;
     struct pci_access *pci_access;
@@ -144,6 +144,8 @@ static uint32_t pt_msgaddr64_reg_init(struct pt_dev *ptdev,
 static uint32_t pt_msgdata_reg_init(struct pt_dev *ptdev,
     struct pt_reg_info_tbl *reg, uint32_t real_offset);
 static uint32_t pt_msixctrl_reg_init(struct pt_dev *ptdev,
+    struct pt_reg_info_tbl *reg, uint32_t real_offset);
+static uint32_t pt_header_type_reg_init(struct pt_dev *ptdev,
     struct pt_reg_info_tbl *reg, uint32_t real_offset);
 static uint8_t pt_reg_grp_size_init(struct pt_dev *ptdev,
     struct pt_reg_grp_info_tbl *grp_reg, uint32_t base_offset);
@@ -324,7 +326,7 @@ static struct pt_reg_info_tbl pt_emu_reg_header0_tbl[] = {
         .init_val   = 0x00,
         .ro_mask    = 0x00,
         .emu_mask   = 0xFF,
-        .init       = pt_common_reg_init,
+        .init       = pt_header_type_reg_init,
         .u.b.read   = pt_byte_reg_read,
         .u.b.write  = pt_byte_reg_write,
         .u.b.restore  = pt_byte_reg_restore,
@@ -829,7 +831,7 @@ static int token_value(char *token)
 }
 
 static int parse_bdf(char **str, int *seg, int *bus, int *dev, int *func,
-                     char **opt, int *vslot)
+                     char **opt, int *vdevfn)
 {
     char *token, *endptr;
     const char *delim = ":.";
@@ -853,11 +855,11 @@ static int parse_bdf(char **str, int *seg, int *bus, int *dev, int *func,
     if (*opt)
     {
         *(*opt)++ = '\0';
-        *vslot = token_value(*opt);
+        *vdevfn = token_value(*opt);
     }
     else
     {
-        *vslot = AUTO_PHP_SLOT;
+        *vdevfn = AUTO_PHP_SLOT;
         *opt = token;
     }
 
@@ -890,104 +892,123 @@ static int get_next_keyval(char **option, char **key, char **val)
     return 0;
 }
 
-static int pci_slot_match(int bus, int dev, int func, int slot)
+static int pci_devfn_match(int bus, int dev, int func, int devfn)
 {
-    if (test_pci_slot(slot) == 1 &&
-        dpci_infos.php_devs[slot].r_bus == bus &&
-        dpci_infos.php_devs[slot].r_dev  == dev &&
-        dpci_infos.php_devs[slot].r_func == func )
+    if (test_pci_devfn(devfn) == 1 &&
+        dpci_infos.php_devs[devfn].r_bus == bus &&
+        dpci_infos.php_devs[devfn].r_dev  == dev &&
+        dpci_infos.php_devs[devfn].r_func == func )
         return 1;
     return 0;
 }
 
-/* Insert a new pass-through device into a specific pci slot.
- * input  dom:bus:dev.func@slot, chose free one if slot == AUTO_PHP_SLOT
- * return -2: requested slot not available
- *        -1: no free slots
- *        >=0: the new hotplug slot
- */
-static int __insert_to_pci_slot(int bus, int dev, int func, int slot,
-                                char *opt)
+static int find_free_vslot(void)
 {
     PCIBus *e_bus = dpci_infos.e_bus;
+    int slot, func, devfn;
 
-    /* preferred virt pci slot */
-    if ( slot != AUTO_PHP_SLOT)
-    {
-        if ( !test_pci_slot(slot) &&
-             !pci_devfn_in_use(e_bus, PCI_DEVFN(slot, 0)) )
-            goto found;
-        return -2;
-    }
-
-    /* slot == 0, pick up a free one */
     for ( slot = 0; slot < NR_PCI_DEV; slot++ )
     {
-        if ( !test_pci_slot(slot) &&
-             !pci_devfn_in_use(e_bus, PCI_DEVFN(slot, 0)) )
-            goto found;
+        for ( func = 0; func < NR_PCI_FUNC; func++ )
+        {
+            devfn = PCI_DEVFN(slot, func);
+            if ( test_pci_devfn(devfn) || pci_devfn_in_use(e_bus, devfn) )
+            {
+                break;
+            }
+        }
+        if (func == NR_PCI_FUNC)
+            return slot;
     }
 
     /* not found */
     return -1;
-
-found:
-    dpci_infos.php_devs[slot].valid  = 1;
-    dpci_infos.php_devs[slot].r_bus  = bus;
-    dpci_infos.php_devs[slot].r_dev  = dev;
-    dpci_infos.php_devs[slot].r_func = func;
-    dpci_infos.php_devs[slot].opt = opt;
-    return slot;
 }
 
-/* Insert a new pass-through device into a specific pci slot.
- * input  dom:bus:dev.func@slot
+
+/* Insert a new pass-through device into a specific pci devfn.
+ * input  dom:bus:dev.func@devfn, chose free one if devfn & AUTO_PHP_SLOT
+ * return -2: requested devfn not available
+ *        -1: no free devfns
+ *        >=0: the new hotplug devfn
  */
-int insert_to_pci_slot(char *bdf_slt)
+static int __insert_to_pci_devfn(int bus, int dev, int func, int devfn,
+                                 char *opt)
 {
-    int seg, bus, dev, func, slot;
+    PCIBus *e_bus = dpci_infos.e_bus;
+    int vslot;
+
+    if ( devfn & AUTO_PHP_SLOT )
+    {
+        vslot = find_free_vslot();
+        if (vslot < 0)
+            return -1;
+        /* The vfunc is provided in the devfn paramter */
+        devfn = PCI_DEVFN(vslot, PCI_FUNC(devfn));
+    }
+    else
+    {
+        /* Prefered devfn */
+        if ( test_pci_devfn(devfn) || pci_devfn_in_use(e_bus, devfn) )
+            return -2;
+    }
+
+    dpci_infos.php_devs[devfn].valid  = 1;
+    dpci_infos.php_devs[devfn].r_bus  = bus;
+    dpci_infos.php_devs[devfn].r_dev  = dev;
+    dpci_infos.php_devs[devfn].r_func = func;
+    dpci_infos.php_devs[devfn].opt = opt;
+    return devfn;
+}
+
+/* Insert a new pass-through device into a specific pci devfn.
+ * input  dom:bus:dev.func@devfn
+ */
+int insert_to_pci_devfn(char *bdf_slt)
+{
+    int seg, bus, dev, func, devfn;
     char *opt;
 
-    if ( !parse_bdf(&bdf_slt, &seg, &bus, &dev, &func, &opt, &slot) )
+    if ( !parse_bdf(&bdf_slt, &seg, &bus, &dev, &func, &opt, &devfn) )
     {
         return -1;
     }
 
-    return __insert_to_pci_slot(bus, dev, func, slot, opt);
+    return __insert_to_pci_devfn(bus, dev, func, devfn, opt);
 
 }
 
-/* Test if a pci slot has a PHP device
+/* Test if a pci devfn has a PHP device
  * 1:  present
  * 0:  not present
- * -1: invalid pci slot input
+ * -1: invalid pci devfn input
  */
-int test_pci_slot(int slot)
+int test_pci_devfn(int devfn)
 {
-    if ( slot < 0 || slot >= NR_PCI_DEV )
+    if ( devfn < 0 || devfn >= NR_PCI_DEVFN )
         return -1;
 
-    if ( dpci_infos.php_devs[slot].valid )
+    if ( dpci_infos.php_devs[devfn].valid )
         return 1;
 
     return 0;
 }
 
-/* find the pci slot for pass-through dev with specified BDF */
-int bdf_to_slot(char *bdf_str)
+/* find the pci devfn for pass-through dev with specified BDF */
+int bdf_to_devfn(char *bdf_str)
 {
-    int seg, bus, dev, func, slot, i;
+    int seg, bus, dev, func, devfn, i;
     char *opt;
 
-    if ( !parse_bdf(&bdf_str, &seg, &bus, &dev, &func, &opt, &slot))
+    if ( !parse_bdf(&bdf_str, &seg, &bus, &dev, &func, &opt, &devfn))
     {
         return -1;
     }
 
-    /* locate the virtual pci slot for this VTd device */
-    for ( i = 0; i < NR_PCI_DEV; i++ )
+    /* locate the virtual pci devfn for this VTd device */
+    for ( i = 0; i < NR_PCI_DEVFN; i++ )
     {
-        if ( pci_slot_match(bus, dev, func, i) )
+        if ( pci_devfn_match(bus, dev, func, i) )
             return i;
     }
 
@@ -2296,8 +2317,7 @@ static int pt_init_pci_config(struct pt_dev *ptdev)
     if (ret < 0 && ptdev->machine_irq != 0)
     {
         uint8_t e_device = PCI_SLOT(ptdev->dev.devfn);
-        /* fix virtual interrupt pin to INTA# */
-        uint8_t e_intx = 0;
+        uint8_t e_intx = pci_intx(ptdev);
 
         ret = xc_domain_bind_pt_pci_irq(xc_handle, domid, ptdev->machine_irq,
                                        0, e_device, e_intx);
@@ -3000,6 +3020,13 @@ static uint8_t pt_pcie_size_init(struct pt_dev *ptdev,
     return pcie_size;
 }
 
+/* read PCI_HEADER_TYPE */
+static uint32_t pt_header_type_reg_init(struct pt_dev *ptdev,
+    struct pt_reg_info_tbl *reg, uint32_t real_offset)
+{
+    return reg->init_val | 0x80;
+}
+
 /* read byte size emulate register */
 static int pt_byte_reg_read(struct pt_dev *ptdev,
         struct pt_reg_tbl *cfg_entry,
@@ -3580,7 +3607,6 @@ static int pt_msgctrl_reg_write(struct pt_dev *ptdev,
     uint16_t writable_mask = 0;
     uint16_t throughable_mask = 0;
     uint16_t old_ctrl = cfg_entry->data;
-    uint8_t e_device, e_intx;
     PCIDevice *pd = (PCIDevice *)ptdev;
     uint16_t val;
 
@@ -3953,7 +3979,7 @@ static int pt_pmcsr_reg_restore(struct pt_dev *ptdev,
 }
 
 static struct pt_dev * register_real_device(PCIBus *e_bus,
-        const char *e_dev_name, int e_slot, uint8_t r_bus, uint8_t r_dev,
+        const char *e_dev_name, int e_devfn, uint8_t r_bus, uint8_t r_dev,
         uint8_t r_func, uint32_t machine_irq, struct pci_access *pci_access,
         char *opt)
 {
@@ -4030,7 +4056,7 @@ static struct pt_dev * register_real_device(PCIBus *e_bus,
 
     /* Register device */
     assigned_device = (struct pt_dev *) pci_register_device(e_bus, e_dev_name,
-                                sizeof(struct pt_dev), PCI_DEVFN(e_slot, 0),
+                                sizeof(struct pt_dev), e_devfn,
                                 pt_pci_read_config, pt_pci_write_config);
     if ( assigned_device == NULL )
     {
@@ -4038,7 +4064,7 @@ static struct pt_dev * register_real_device(PCIBus *e_bus,
         return NULL;
     }
 
-    dpci_infos.php_devs[e_slot].pt_dev = assigned_device;
+    dpci_infos.php_devs[e_devfn].pt_dev = assigned_device;
 
     assigned_device->pci_dev = pci_dev;
     assigned_device->msi_trans_cap = msi_translate;
@@ -4106,7 +4132,7 @@ static struct pt_dev * register_real_device(PCIBus *e_bus,
     {
         e_device = PCI_SLOT(assigned_device->dev.devfn);
         /* fix virtual interrupt pin to INTA# */
-        e_intx = 0;
+        e_intx = pci_intx(assigned_device);
 
         rc = xc_domain_bind_pt_pci_irq(xc_handle, domid, machine_irq, 0,
                                        e_device, e_intx);
@@ -4138,7 +4164,7 @@ out:
     return assigned_device;
 }
 
-static int unregister_real_device(int slot)
+static int unregister_real_device(int devfn)
 {
     struct php_dev *php_dev;
     struct pci_dev *pci_dev;
@@ -4148,10 +4174,10 @@ static int unregister_real_device(int slot)
     uint32_t bdf = 0;
     int rc = -1;
 
-    if ( test_pci_slot(slot) != 1 )
+    if ( test_pci_devfn(devfn) != 1 )
        return -1;
 
-    php_dev = &dpci_infos.php_devs[slot];
+    php_dev = &dpci_infos.php_devs[devfn];
     assigned_device = php_dev->pt_dev;
 
     if ( !assigned_device )
@@ -4164,8 +4190,7 @@ static int unregister_real_device(int slot)
 
     /* Unbind interrupt */
     e_device = PCI_SLOT(assigned_device->dev.devfn);
-    /* fix virtual interrupt pin to INTA# */
-    e_intx = 0;
+    e_intx = pci_intx(assigned_device);
     machine_irq = assigned_device->machine_irq;
 
     if ( assigned_device->msi_trans_en == 0 && machine_irq ) {
@@ -4203,7 +4228,7 @@ static int unregister_real_device(int slot)
 
     pt_iomul_free(assigned_device);
 
-    /* mark this slot as free */
+    /* mark this devfn as free */
     php_dev->valid = 0;
     php_dev->pt_dev = NULL;
     qemu_free(assigned_device);
@@ -4211,14 +4236,14 @@ static int unregister_real_device(int slot)
     return 0;
 }
 
-int power_on_php_slot(int slot)
+int power_on_php_devfn(int devfn)
 {
-    struct php_dev *php_dev = &dpci_infos.php_devs[slot];
+    struct php_dev *php_dev = &dpci_infos.php_devs[devfn];
     struct pt_dev *pt_dev;
     pt_dev =
         register_real_device(dpci_infos.e_bus,
             "DIRECT PCI",
-            slot,
+            devfn,
             php_dev->r_bus,
             php_dev->r_dev,
             php_dev->r_func,
@@ -4232,9 +4257,9 @@ int power_on_php_slot(int slot)
 
 }
 
-int power_off_php_slot(int php_slot)
+int power_off_php_devfn(int php_devfn)
 {
-    return unregister_real_device(php_slot);
+    return unregister_real_device(php_devfn);
 }
 
 int pt_init(PCIBus *e_bus)
@@ -4258,3 +4283,60 @@ int pt_init(PCIBus *e_bus)
     return 0;
 }
 
+/* The PCI Local Bus Specification, Rev. 3.0,
+ * Section 6.2.4 Miscellaneous Registers, pp 223
+ * outlines 5 valid values for the intertupt pin (intx).
+ *  0: For devices (or device functions) that don't use an interrupt in
+ *  1: INTA#
+ *  2: INTB#
+ *  3: INTC#
+ *  4: INTD#
+ *
+ * Xen uses the following 4 values for intx
+ *  0: INTA#
+ *  1: INTB#
+ *  2: INTC#
+ *  3: INTD#
+ *
+ * Observing that these list of values are not the same, pci_read_intx()
+ * uses the following mapping from hw to xen values.
+ * This seems to reflect the current usage within Xen.
+ *
+ * PCI hardware    | Xen | Notes
+ * ----------------+-----+----------------------------------------------------
+ * 0               | 0   | No interrupt
+ * 1               | 0   | INTA#
+ * 2               | 1   | INTB#
+ * 3               | 2   | INTC#
+ * 4               | 3   | INTD#
+ * any other value | 0   | This should never happen, log error message
+ */
+static uint8_t pci_read_intx(struct pt_dev *ptdev)
+{
+    uint8_t r_val = pci_read_byte(ptdev->pci_dev, PCI_INTERRUPT_PIN);
+
+    PT_LOG("intx=%i\n", r_val);
+    if (r_val < 1 || r_val > 4)
+    {
+        PT_LOG("Interrupt pin read from hardware is out of range: "
+               "value=%i, acceptable range is 1 - 4\n", r_val);
+        r_val = 0;
+    }
+    else
+    {
+        r_val -= 1;
+    }
+
+    return r_val;
+}
+
+/*
+ * For virtual function 0, always use INTA#,
+ * otherwise use the hardware value
+ */
+uint8_t pci_intx(struct pt_dev *ptdev)
+{
+    if (!PCI_FUNC(ptdev->dev.devfn))
+        return 0;
+    return pci_read_intx(ptdev);
+}

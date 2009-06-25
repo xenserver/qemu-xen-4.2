@@ -402,5 +402,7 @@ static inline pciaddr_t pt_pci_base_addr(pciaddr_t base)
     return base & PCI_ADDR_MEM_MASK;
 }
 
+uint8_t pci_intx(struct pt_dev *ptdev);
+
 #endif /* __PASSTHROUGH_H__ */
 
