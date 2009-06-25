@@ -56,8 +56,9 @@
 /* The bit in GPE0_STS/EN to notify the pci hotplug event */
 #define ACPI_PHP_GPE_BIT 3
 
-typedef struct AcpiDeviceState AcpiDeviceState;
-AcpiDeviceState *acpi_device_table;
+#define NR_PHP_SLOT_REG (NR_PCI_DEVFN/2)
+#define DEVFN_TO_PHP_SLOT_REG(devfn) (devfn >> 1)
+#define PHP_SLOT_REG_TO_DEVFN(reg, hilo) ((reg << 1) | hilo)
 
 typedef struct PCIAcpiState {
     PCIDevice dev;
@@ -77,17 +78,46 @@ typedef struct GPEState {
 static GPEState gpe_state;
 
 typedef struct PHPSlots {
-    uint8_t status[NR_PCI_DEV]; /* Apaptor stats */
-    uint8_t plug_evt;           /* PHP_EVT_ADD or PHP_EVT_REMOVE
-                                 * PSTA in ASL */
-    uint8_t plug_slot;          /* Slot number
-                                 * PSTB in ASL */
+    uint8_t status[NR_PHP_SLOT_REG]; /* Apaptor n stats | Adaptor n+1 status */
+    uint8_t plug_evt;                /* PHP_EVT_ADD or PHP_EVT_REMOVE
+                                      * PSTA in ASL */
+    uint8_t plug_slot;               /* Slot number
+                                      * PSTB in ASL */
 } PHPSlots;
 
 static PHPSlots php_slots;
 int s3_shutdown_flag;
 static qemu_irq sci_irq;
 
+static void php_reg_set(PHPSlots *hotplug_slots, int devfn, uint8_t val)
+{
+    uint8_t *reg = &(hotplug_slots->status[DEVFN_TO_PHP_SLOT_REG(devfn)]);
+
+    /* Value may only use a nibble */
+    val &= 0xf;
+
+    if (devfn & 0x1)
+        *reg = (*reg & 0x0f) | (val << 4);
+    else
+        *reg = (*reg & 0xf0) | val;
+}
+
+
+static uint8_t php_reg_get(PHPSlots *hotplug_slots, int devfn)
+{
+    uint8_t reg = hotplug_slots->status[DEVFN_TO_PHP_SLOT_REG(devfn)];
+    uint8_t val;
+
+    if (devfn & 0x1)
+        val = (reg & 0xf0) >> 4;
+    else
+        val = reg & 0x0f;
+
+    return val;
+}
+
+typedef struct AcpiDeviceState AcpiDeviceState;
+AcpiDeviceState *acpi_device_table;
 static void piix4acpi_save(QEMUFile *f, void *opaque)
 {
     PCIAcpiState *s = opaque;
@@ -225,8 +255,8 @@ static void acpi_dbg_writel(void *opaque, uint32_t addr, uint32_t val)
  * ACPI_PHP_IO_ADDR + :
  * 0 - the hotplug event
  * 1 - the slot that has a hotplug event
- * 2 - 1st php slot ctr/sts reg
- * 3 - 2nd php slot ctr/sts reg
+ * 2 - 1st php slot ctr/sts reg|2nd php slot ctr/sts reg
+ * 3 - 3rd php slot ctr/sts reg|4th php slot ctr/sts reg
  * ...
  */
 static uint32_t acpi_php_readb(void *opaque, uint32_t addr)
@@ -248,7 +278,7 @@ static uint32_t acpi_php_readb(void *opaque, uint32_t addr)
         val = hotplug_slots->status[num];
     }
 
-    fprintf(logfile, "ACPI PCI hotplug: read addr=0x%x, val=0x%x.\n",
+    fprintf(logfile, "ACPI PCI hotplug: read addr=0x%x, val=0x%02x.\n",
             addr, val);
 
     return val;
@@ -257,9 +287,9 @@ static uint32_t acpi_php_readb(void *opaque, uint32_t addr)
 static void acpi_php_writeb(void *opaque, uint32_t addr, uint32_t val)
 {
     PHPSlots *hotplug_slots = opaque;
-    int slot;
+    int devfn, num, func, i;
 
-    fprintf(logfile, "ACPI PCI hotplug: write addr=0x%x, val=0x%x.\n",
+    fprintf(logfile, "ACPI PCI hotplug: write addr=0x%x, val=0x%02x.\n",
             addr, val);
 
     switch (addr)
@@ -268,17 +298,39 @@ static void acpi_php_writeb(void *opaque, uint32_t addr, uint32_t val)
     case ACPI_PHP_IO_ADDR + 1:
         break;
     default:
-        slot = addr - ACPI_PHP_IO_ADDR - 2;
-        if ( val == 0x1 ) { /* Eject command */
-            /* make _STA of the slot 0 */
-            hotplug_slots->status[slot] = 0;
+        num = addr - ACPI_PHP_IO_ADDR - 2;
+        if ( val == 0x01 || val == 0x10 ) { /* Eject command */
+            if ( val == 0x01 )
+                devfn = PHP_SLOT_REG_TO_DEVFN(num, 0);
+            else
+                devfn = PHP_SLOT_REG_TO_DEVFN(num, 1);
+
+            fprintf(logfile, "ACPI PCI hotplug: write devfn=0x%02x.\n",
+                    devfn);
+
+            if (hotplug_slots->plug_evt != PHP_EVT_REMOVE ||
+                hotplug_slots->plug_slot != devfn )
+            {
+                fprintf(logfile, "ACPI PCI hotplug: not expecting "
+                        "devfn 0x%02x to be removed. Expected event 0x%x "
+                        "for devfn 0x%02x\n", devfn,
+                        hotplug_slots->plug_evt, hotplug_slots->plug_slot);
+                return;
+            }
 
             /* clear the hotplug event */
             hotplug_slots->plug_evt = 0;
-            hotplug_slots->plug_slot = 0;
 
-            /* power off the slot */
-            power_off_php_devfn(PCI_DEVFN(slot, 0));
+            for ( func = NR_PCI_FUNC - 1; func >= 0; func-- )
+            {
+                i = PCI_DEVFN(PCI_SLOT(devfn), func);
+
+                /* make _STA of the slot 0 */
+                php_reg_set(hotplug_slots, i, 0);
+
+                /* power off the slot */
+                power_off_php_devfn(i);
+            }
 
             /* signal the CP ACPI hot remove done. */
             xenstore_record_dm_state("pci-removed");
@@ -290,7 +342,7 @@ static void pcislots_save(QEMUFile* f, void* opaque)
 {
     PHPSlots *hotplug_slots = opaque;
     int i;
-    for ( i = 0; i < NR_PCI_DEV; i++ ) {
+    for ( i = 0; i < NR_PHP_SLOT_REG; i++ ) {
         qemu_put_8s( f, &hotplug_slots->status[i]);
     }
     qemu_put_8s(f, &hotplug_slots->plug_evt);
@@ -303,7 +355,7 @@ static int pcislots_load(QEMUFile* f, void* opaque, int version_id)
     int i;
     if (version_id != 1)
         return -EINVAL;
-    for ( i = 0; i < NR_PCI_DEV; i++ ) {
+    for ( i = 0; i < NR_PHP_SLOT_REG; i++ ) {
         qemu_get_8s( f, &hotplug_slots->status[i]);
     }
     qemu_get_8s(f, &hotplug_slots->plug_evt);
@@ -317,15 +369,15 @@ static void php_slots_init(void)
     memset(&php_slots, 0, sizeof(PHPSlots));
 
     /* update the pci slot status */
-    for ( i = 0; i < NR_PCI_DEV; i++ ) {
+    for ( i = 0; i < NR_PCI_DEVFN; i++ ) {
         if ( test_pci_devfn(i) )
-            php_slots.status[i] = 0xf;
+            php_reg_set(&php_slots, i, 0xf);
     }
 
     /* ACPI PCI hotplug controller */
-    register_ioport_read(ACPI_PHP_IO_ADDR, NR_PCI_DEV + 2, 1,
+    register_ioport_read(ACPI_PHP_IO_ADDR, NR_PHP_SLOT_REG + 2, 1,
                          acpi_php_readb, &php_slots);
-    register_ioport_write(ACPI_PHP_IO_ADDR, NR_PCI_DEV + 2, 1,
+    register_ioport_write(ACPI_PHP_IO_ADDR, NR_PHP_SLOT_REG + 2, 1,
                           acpi_php_writeb, &php_slots);
     register_savevm("pcislots", 0, 1, pcislots_save, pcislots_load,
                     &php_slots);
@@ -489,7 +541,7 @@ void acpi_php_del(int devfn)
 
     /* update the php controller status */
     php_slots.plug_evt = PHP_EVT_REMOVE;
-    php_slots.plug_slot = slot;
+    php_slots.plug_slot = devfn;
 
     /* generate a SCI interrupt */
     acpi_sci_intr(s);
@@ -530,11 +582,11 @@ void acpi_php_add(int devfn)
     {
         /* update the php controller status */
         php_slots.plug_evt = PHP_EVT_ADD;
-        php_slots.plug_slot = slot;
-
-        /* update the slot status as present */
-        php_slots.status[slot] = 0xf;
+        php_slots.plug_slot = devfn;
     }
+
+    /* update the slot status as present */
+    php_reg_set(&php_slots, devfn, 0xf);
 
     /* power on the function */
     power_on_php_devfn(devfn);
