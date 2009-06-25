@@ -255,8 +255,11 @@ void pci_info(void);
 PCIBus *pci_bridge_init(PCIBus *bus, int devfn, uint16_t vid, uint16_t did,
                         pci_map_irq_fn map_irq, const char *name);
 
-#define NR_PCI_DEV 32
-#define AUTO_PHP_SLOT NR_PCI_DEV
+#define NR_PCI_FUNC    8
+#define NR_PCI_DEV     32
+#define NR_PCI_DEVFN   (NR_PCI_FUNC * NR_PCI_DEV)
+#define AUTO_PHP_SLOT  NR_PCI_DEV
+#define AUTO_PHP_DEVFN NR_PCI_DEVFN
 
 int insert_to_pci_slot(char*);
 int test_pci_slot(int);

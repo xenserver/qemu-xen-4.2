@@ -33,6 +33,8 @@
 #include <xen/hvm/ioreq.h>
 #include <xen/hvm/params.h>
 
+#include <pci/header.h>
+
 /* PM1a_CNT bits, as defined in the ACPI specification. */
 #define SCI_EN            (1 <<  0)
 #define GBL_RLS           (1 <<  2)
@@ -276,7 +278,7 @@ static void acpi_php_writeb(void *opaque, uint32_t addr, uint32_t val)
             hotplug_slots->plug_slot = 0;
 
             /* power off the slot */
-            power_off_php_slot(slot);
+            power_off_php_slot(PCI_DEVFN(slot, 0));
 
             /* signal the CP ACPI hot remove done. */
             xenstore_record_dm_state("pci-removed");
@@ -459,14 +461,29 @@ static void acpi_sci_intr(GPEState *s)
     }
 }
 
-void acpi_php_del(int slot)
+void acpi_php_del(int devfn)
 {
     GPEState *s = &gpe_state;
+    int slot, func;
 
-    if ( test_pci_slot(slot) < 0 ) {
-        fprintf(logfile, "hot remove: pci slot %d "
-                "is not used by a hotplug device.\n", slot);
+    slot = PCI_SLOT(devfn);
+    func = PCI_FUNC(devfn);
 
+    if ( test_pci_slot(devfn) < 0 ) {
+        fprintf(logfile, "hot remove: pci slot 0x%02x, function 0x%x "
+                "is not used by a hotplug device.\n", slot, func);
+
+        return;
+    }
+
+    /* ACPI PHP can only work on slots
+     * So only remove zero-functions -
+     * which will remove all other fucntions of the same device in the
+     * guest.
+     */
+    if ( func ) {
+        fprintf(logfile, "hot remove: Attempt to remove non-zero function "
+                "slot=0x%02x func=0x%0x.\n", slot, func);
         return;
     }
 
@@ -478,18 +495,19 @@ void acpi_php_del(int slot)
     acpi_sci_intr(s);
 }
 
-void acpi_php_add(int slot)
+void acpi_php_add(int devfn)
 {
     GPEState *s = &gpe_state;
     char ret_str[30];
+    int slot, func;
 
-    if ( slot < 0 ) {
-        fprintf(logfile, "hot add pci slot %d exceed.\n", slot);
+    if ( devfn < 0 ) {
+        fprintf(logfile, "hot add pci devfn %d exceed.\n", devfn);
 
-        if ( slot == -1 )
-            sprintf(ret_str, "no free hotplug slots");
-        else if ( slot == -2 )
-            sprintf(ret_str, "wrong bdf or vslot");
+        if ( devfn == -1 )
+            sprintf(ret_str, "no free hotplug devfn");
+        else if ( devfn == -2 )
+            sprintf(ret_str, "wrong bdf or vdevfn");
 
         if ( strlen(ret_str) > 0 )
             xenstore_record_dm("parameter", ret_str);
@@ -497,25 +515,40 @@ void acpi_php_add(int slot)
         return;
     }
 
-    /* update the php controller status */
-    php_slots.plug_evt = PHP_EVT_ADD;
-    php_slots.plug_slot = slot;
+    /* ACPI PHP can only work on slots
+     * For function 0 we do a full hot-add.
+     * For other functions we just register the device with the hypervisor.
+     * Assuming that function 0 is added after non-zero functions,
+     * its ACPI PHP event will cause all previously registered functions
+     * to be added to the guest.
+     */
 
-    /* update the slot status as present */
-    php_slots.status[slot] = 0xf;
+    slot = PCI_SLOT(devfn);
+    func = PCI_FUNC(devfn);
 
-    /* power on the slot */
-    power_on_php_slot(slot);
+    if ( !func )
+    {
+        /* update the php controller status */
+        php_slots.plug_evt = PHP_EVT_ADD;
+        php_slots.plug_slot = slot;
+
+        /* update the slot status as present */
+        php_slots.status[slot] = 0xf;
+    }
+
+    /* power on the function */
+    power_on_php_slot(devfn);
 
     /* tell Control panel which slot for the new pass-throgh dev */
-    sprintf(ret_str, "0x%02x", slot);
+    sprintf(ret_str, "0x%02x", devfn);
     xenstore_record_dm("parameter", ret_str);
 
     /* signal the CP ACPI hot insert done */
     xenstore_record_dm_state("pci-inserted");
 
     /* generate a SCI interrupt */
-    acpi_sci_intr(s);
+    if ( !func )
+        acpi_sci_intr(s);
 }
 
 #endif /* CONFIG_PASSTHROUGH */

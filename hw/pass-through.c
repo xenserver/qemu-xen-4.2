@@ -103,7 +103,7 @@ struct php_dev {
 };
 struct dpci_infos {
 
-    struct php_dev php_devs[NR_PCI_DEV];
+    struct php_dev php_devs[NR_PCI_DEVFN];
 
     PCIBus *e_bus;
     struct pci_access *pci_access;
@@ -859,7 +859,7 @@ static int parse_bdf(char **str, int *seg, int *bus, int *dev, int *func,
     }
     else
     {
-        *vslot = AUTO_PHP_SLOT;
+        *vslot = AUTO_PHP_DEVFN;
         *opt = token;
     }
 
@@ -903,30 +903,30 @@ static int pci_slot_match(int bus, int dev, int func, int slot)
 }
 
 /* Insert a new pass-through device into a specific pci slot.
- * input  dom:bus:dev.func@slot, chose free one if slot == AUTO_PHP_SLOT
+ * input  dom:bus:dev.func@slot, chose free one if slot == AUTO_PHP_DEVFN
  * return -2: requested slot not available
  *        -1: no free slots
  *        >=0: the new hotplug slot
  */
-static int __insert_to_pci_slot(int bus, int dev, int func, int slot,
+static int __insert_to_pci_slot(int bus, int dev, int func, int devfn,
                                 char *opt)
 {
     PCIBus *e_bus = dpci_infos.e_bus;
+    int slot;
 
-    /* preferred virt pci slot */
-    if ( slot != AUTO_PHP_SLOT)
+    /* preferred virt pci devfn */
+    if ( devfn != AUTO_PHP_DEVFN )
     {
-        if ( !test_pci_slot(slot) &&
-             !pci_devfn_in_use(e_bus, PCI_DEVFN(slot, 0)) )
+        if ( !test_pci_slot(devfn) && !pci_devfn_in_use(e_bus, devfn) )
             goto found;
         return -2;
     }
 
-    /* slot == 0, pick up a free one */
+    /* pick a free slot */
     for ( slot = 0; slot < NR_PCI_DEV; slot++ )
     {
-        if ( !test_pci_slot(slot) &&
-             !pci_devfn_in_use(e_bus, PCI_DEVFN(slot, 0)) )
+        devfn = PCI_DEVFN(slot, 0);
+        if ( !test_pci_slot(devfn) && !pci_devfn_in_use(e_bus, devfn) )
             goto found;
     }
 
@@ -934,12 +934,12 @@ static int __insert_to_pci_slot(int bus, int dev, int func, int slot,
     return -1;
 
 found:
-    dpci_infos.php_devs[slot].valid  = 1;
-    dpci_infos.php_devs[slot].r_bus  = bus;
-    dpci_infos.php_devs[slot].r_dev  = dev;
-    dpci_infos.php_devs[slot].r_func = func;
-    dpci_infos.php_devs[slot].opt = opt;
-    return slot;
+    dpci_infos.php_devs[devfn].valid  = 1;
+    dpci_infos.php_devs[devfn].r_bus  = bus;
+    dpci_infos.php_devs[devfn].r_dev  = dev;
+    dpci_infos.php_devs[devfn].r_func = func;
+    dpci_infos.php_devs[devfn].opt = opt;
+    return devfn;
 }
 
 /* Insert a new pass-through device into a specific pci slot.
@@ -966,7 +966,7 @@ int insert_to_pci_slot(char *bdf_slt)
  */
 int test_pci_slot(int slot)
 {
-    if ( slot < 0 || slot >= NR_PCI_DEV )
+    if ( slot < 0 || slot >= NR_PCI_DEVFN )
         return -1;
 
     if ( dpci_infos.php_devs[slot].valid )
@@ -987,7 +987,7 @@ int bdf_to_slot(char *bdf_str)
     }
 
     /* locate the virtual pci slot for this VTd device */
-    for ( i = 0; i < NR_PCI_DEV; i++ )
+    for ( i = 0; i < NR_PCI_DEVFN; i++ )
     {
         if ( pci_slot_match(bus, dev, func, i) )
             return i;
@@ -4037,7 +4037,7 @@ static struct pt_dev * register_real_device(PCIBus *e_bus,
 
     /* Register device */
     assigned_device = (struct pt_dev *) pci_register_device(e_bus, e_dev_name,
-                                sizeof(struct pt_dev), PCI_DEVFN(e_slot, 0),
+                                sizeof(struct pt_dev), e_slot,
                                 pt_pci_read_config, pt_pci_write_config);
     if ( assigned_device == NULL )
     {
