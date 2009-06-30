@@ -46,10 +46,11 @@ $(filter %-user,$(SUBDIR_RULES)): libqemu_user.a
 
 recurse-all: $(SUBDIR_RULES)
 
-tapdisk-ioemu: CPPFLAGS += -I$(XEN_ROOT)/tools/libxc
-tapdisk-ioemu: CPPFLAGS += -I$(XEN_ROOT)/tools/blktap/lib
-tapdisk-ioemu: CPPFLAGS += -I$(XEN_ROOT)/tools/xenstore
-tapdisk-ioemu: CPPFLAGS += -I$(XEN_ROOT)/tools/include
+CPPFLAGS += -I$(XEN_ROOT)/tools/libxc
+CPPFLAGS += -I$(XEN_ROOT)/tools/blktap/lib
+CPPFLAGS += -I$(XEN_ROOT)/tools/xenstore
+CPPFLAGS += -I$(XEN_ROOT)/tools/include
+
 tapdisk-ioemu: tapdisk-ioemu.c cutils.c block.c block-raw.c block-cow.c block-qcow.c aes.c block-vmdk.c block-cloop.c block-dmg.c block-bochs.c block-vpc.c block-vvfat.c block-qcow2.c hw/xen_blktap.c osdep.c
 	$(CC) -DQEMU_TOOL $(CFLAGS) $(CPPFLAGS) $(BASE_CFLAGS) $(LDFLAGS) $(BASE_LDFLAGS) -o $@ $^ -lz $(LIBS)
 

@@ -8,4 +8,4 @@ CONFIG_SOFTMMU=yes
 
 CFLAGS += -I$(QEMU_ROOT)/hw
 
-bindir = ${prefix}/${LIBLEAFDIR}/xen/bin
+bindir = ${LIBEXEC}

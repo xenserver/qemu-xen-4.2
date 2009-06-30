@@ -32,9 +32,6 @@ extern int xc_handle;
 extern int xen_pause_requested;
 extern int vcpus;
 
-#define DEFAULT_NETWORK_SCRIPT "/etc/xen/qemu-ifup"
-#define DEFAULT_NETWORK_DOWN_SCRIPT "/etc/xen/qemu-ifdown"
-
 #ifdef CONFIG_STUBDOM
 #define bdrv_host_device bdrv_raw
 #endif

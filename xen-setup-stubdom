@@ -21,7 +21,7 @@ TARGET_CPPFLAGS += $TARGET_CPPFLAGS -DCONFIG_STUBDOM -D__XEN_TOOLS__
 TARGET_CFLAGS= $TARGET_CFLAGS
 TARGET_LDFLAGS= $TARGET_LDFLAGS
 
-bindir = \${prefix}/\${LIBLEAFDIR}/xen/bin
+bindir = \${LIBEXEC}
 END
 mv -f $target/config.mak.new $target/config.mak
 #----------
@@ -31,7 +31,9 @@ ln -sf ../i386-dm/hookslib.mak $target/
 
 #----------
 cat <<END >config-host.h.new
-#define CONFIG_QEMU_SHAREDIR "/usr/share/xen/qemu"
+#define DEFAULT_NETWORK_SCRIPT "${XEN_SCRIPT_DIR}/qemu-ifup"
+#define DEFAULT_NETWORK_DOWN_SCRIPT "${XEN_SCRIPT_DIR}/qemu-ifdown"
+#define CONFIG_QEMU_SHAREDIR "${SHAREDIR}/xen/qemu"
 #define HOST_I386 1
 #define HOST_LONG_BITS 32
 #define HAVE_BYTESWAP_H 1
@@ -46,11 +48,11 @@ mv -f config-host.h.new config-host.h
 #----------
 cat <<END >config-host.mak.new
 CONFIG_STUBDOM=yes
-prefix=/usr
+prefix=$(PREFIX)
 bindir=\${prefix}/bin
-mandir=\${prefix}/share/man
-datadir=\${prefix}/share/qemu
-docdir=\${prefix}/share/doc/qemu
+mandir=\$(MANDIR)
+datadir=\$(SHAREDIR)/qemu
+docdir=\$(SHAREDIR)/doc/qemu
 MAKE=make
 INSTALL=install
 CC=gcc

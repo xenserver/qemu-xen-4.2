@@ -78,4 +78,4 @@ datadir := $(subst qemu,xen/qemu,$(datadir))
 docdir :=  $(subst qemu,xen/qemu,$(docdir))
 mandir :=  $(subst share/man,share/xen/man,$(mandir))
 
-configdir := /etc/xen
+configdir := $(XEN_SCRIPT_DIR)
