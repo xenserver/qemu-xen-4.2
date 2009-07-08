@@ -2629,6 +2629,8 @@ int drive_init(struct drive_opt *arg, int snapshot, void *opaque)
            approximation.  */
     case IF_FLOPPY:
         bdrv_set_type_hint(bdrv, BDRV_TYPE_FLOPPY);
+        if (!drv)
+            drv = &bdrv_raw;
         break;
     case IF_PFLASH:
     case IF_MTD:
