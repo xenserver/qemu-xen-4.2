@@ -2156,9 +2156,8 @@ static void pt_reset_interrupt_and_io_mapping(struct pt_dev *ptdev)
     uint8_t e_intx = 0;
 
     /* unbind INTx */
-    e_device = (ptdev->dev.devfn >> 3) & 0x1f;
-    /* fix virtual interrupt pin to INTA# */
-    e_intx = 0;
+    e_device = PCI_SLOT(ptdev->dev.devfn);
+    e_intx = pci_intx(ptdev);
 
     if (ptdev->msi_trans_en == 0 && ptdev->machine_irq)
     {
@@ -4131,7 +4130,6 @@ static struct pt_dev * register_real_device(PCIBus *e_bus,
     if (rc < 0 && machine_irq != 0)
     {
         e_device = PCI_SLOT(assigned_device->dev.devfn);
-        /* fix virtual interrupt pin to INTA# */
         e_intx = pci_intx(assigned_device);
 
         rc = xc_domain_bind_pt_pci_irq(xc_handle, domid, machine_irq, 0,
