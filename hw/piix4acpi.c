@@ -40,7 +40,9 @@
 #define PIIX4ACPI_LOGLEVEL PIIX4ACPI_LOG_INFO
 #define PIIX4ACPI_LOG(level, fmt, ...) do { if (level <= PIIX4ACPI_LOGLEVEL) qemu_log(fmt, ## __VA_ARGS__); } while (0)
 
+#ifdef CONFIG_PASSTHROUGH
 #include <pci/header.h>
+#endif
 
 /* PM1a_CNT bits, as defined in the ACPI specification. */
 #define SCI_EN            (1 <<  0)
