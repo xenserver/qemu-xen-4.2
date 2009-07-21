@@ -101,6 +101,9 @@ int xenstore_dom_write(int domid, const char *key, const char *value);
 void xenstore_dom_watch(int domid, const char *key, xenstore_callback ftp, void *opaque);
 void xenstore_dom_chmod(int domid, const char *key, const char *perms);
 
+char *xenstore_read(const char *path);
+int xenstore_write(const char *path, const char *val);
+
  /* `danger' means that this parameter, variable or function refers to
   * an area of xenstore which is writeable by the guest and thus must
   * not be trusted by qemu code.  For variables containing xenstore

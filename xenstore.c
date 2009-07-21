@@ -1562,3 +1562,20 @@ int xenstore_dom_write(int domid, const char *key, const char *value)
     free(buf);
     return rc;
 }
+
+char *xenstore_read(const char *path)
+{
+    char *value = NULL;
+    unsigned int len;
+
+    if (xsh == NULL)
+        return NULL;
+    return xs_read(xsh, XBT_NULL, path, &len);
+}
+
+int xenstore_write(const char *path, const char *val)
+{
+    if (xsh == NULL)
+        return 1;
+    return xs_write(xsh, XBT_NULL, path, val, strlen(val));
+}
