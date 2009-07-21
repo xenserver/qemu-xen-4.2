@@ -37,6 +37,52 @@ static QEMUTimer *insert_timer = NULL;
 #define UWAIT_MAX (30*1000000) /* thirty seconds */
 #define UWAIT     (100000)     /* 1/10th second  */
 
+struct xenstore_watch_cb_t
+{
+    char                *path;
+    xenstore_callback   cb;
+    void                *opaque;
+};
+
+static struct xenstore_watch_cb_t *xenstore_watch_callbacks = NULL;
+
+int xenstore_watch_new_callback(const char          *path,
+                                xenstore_callback   fptr,
+                                void                *opaque)
+{
+    int         i = 0, ret = 0;
+
+    ret = xs_watch(xsh, path, path);
+    if (ret == 0)
+        return 0;
+
+    if (!xenstore_watch_callbacks)
+    {
+        xenstore_watch_callbacks = malloc(sizeof (struct xenstore_watch_cb_t));
+        xenstore_watch_callbacks[0].path = NULL;
+    }
+
+    while (xenstore_watch_callbacks[i].path)
+    {
+	if (!strcmp(xenstore_watch_callbacks[i].path, path))
+	{
+	    xenstore_watch_callbacks[i].cb = fptr;
+	    xenstore_watch_callbacks[i].opaque = opaque;
+	    return ret;
+	}
+        i++;
+    }
+
+    xenstore_watch_callbacks = realloc(xenstore_watch_callbacks,
+                                       (i + 2) * sizeof (struct xenstore_watch_cb_t));
+    xenstore_watch_callbacks[i].path = strdup(path);
+    xenstore_watch_callbacks[i].cb = fptr;
+    xenstore_watch_callbacks[i].opaque = opaque;
+    xenstore_watch_callbacks[i + 1].path = NULL;
+    return ret;
+}
+
+
 static int pasprintf(char **buf, const char *fmt, ...)
 {
     va_list ap;
@@ -869,11 +915,17 @@ void xenstore_record_dm_state(const char *state)
 void xenstore_process_event(void *opaque)
 {
     char **vec, *offset, *bpath = NULL, *buf = NULL, *drv = NULL, *image = NULL;
-    unsigned int len, num, hd_index;
+    unsigned int len, num, hd_index, i;
 
     vec = xs_read_watch(xsh, &num);
     if (!vec)
         return;
+
+    for (i = 0; xenstore_watch_callbacks &&  xenstore_watch_callbacks[i].path; i++)
+	if (xenstore_watch_callbacks[i].cb &&
+	    !strcmp(vec[XS_WATCH_TOKEN], xenstore_watch_callbacks[i].path))
+            xenstore_watch_callbacks[i].cb(vec[XS_WATCH_TOKEN],
+                                           xenstore_watch_callbacks[i].opaque);
 
     if (!strcmp(vec[XS_WATCH_TOKEN], "logdirty")) {
         xenstore_process_logdirty_event();
