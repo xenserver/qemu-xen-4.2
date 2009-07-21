@@ -1462,3 +1462,103 @@ void xenstore_store_serial_port_info(int i, CharDriverState *chr,
     if (i == 0) /* serial 0 is also called the console */
         store_dev_info(devname, domid, chr, "/console");
 }
+
+char *xenstore_dom_read(int domid, const char *key, unsigned int *len)
+{
+    char *buf = NULL, *path = NULL, *value = NULL;
+
+    if (xsh == NULL)
+        goto out;
+
+    path = xs_get_domain_path(xsh, domid);
+    if (path == NULL) {
+        fprintf(logfile, "xs_get_domain_path(%d): error\n", domid);
+        goto out;
+    }
+
+    pasprintf(&buf, "%s/%s", path, key);
+    value = xs_read(xsh, XBT_NULL, buf, len);
+    if (value == NULL) {
+        fprintf(logfile, "xs_read(%s): read error\n", buf);
+        goto out;
+    }
+
+ out:
+    free(path);
+    free(buf);
+    return value;
+}
+
+void xenstore_dom_watch(int domid, const char *key, xenstore_callback fptr, void *opaque)
+{
+    char *buf = NULL, *path = NULL;
+    int rc = -1;
+
+    if (xsh == NULL)
+        goto out;
+
+    path = xs_get_domain_path(xsh, domid);
+    if (path == NULL) {
+        fprintf(logfile, "xs_get_domain_path: error\n");
+        goto out;
+    }
+
+    pasprintf(&buf, "%s/%s", path, key);
+    xenstore_watch_new_callback(buf, fptr, opaque);
+
+ out:
+    free(path);
+    free(buf);
+}
+
+void xenstore_dom_chmod(int domid, const char *key, const char *perms)
+{
+    char *buf = NULL, *path = NULL;
+    int rc = -1;
+	struct xs_permissions p;
+
+    if (xsh == NULL)
+        goto out;
+
+    path = xs_get_domain_path(xsh, domid);
+    if (path == NULL) {
+        fprintf(logfile, "xs_get_domain_path: error\n");
+        goto out;
+    }
+
+    pasprintf(&buf, "%s/%s", path, key);
+
+	xs_strings_to_perms(&p, 1, perms);
+	xs_set_permissions(xsh, XBT_NULL, buf, &p, 1);
+
+ out:
+    free(path);
+    free(buf);
+}
+
+int xenstore_dom_write(int domid, const char *key, const char *value)
+{
+    char *buf = NULL, *path = NULL;
+    int rc = -1;
+
+    if (xsh == NULL)
+        goto out;
+
+    path = xs_get_domain_path(xsh, domid);
+    if (path == NULL) {
+        fprintf(logfile, "xs_get_domain_path: error\n");
+        goto out;
+    }
+
+    pasprintf(&buf, "%s/%s", path, key);
+    rc = xs_write(xsh, XBT_NULL, buf, value, strlen(value));
+    if (rc == 0) {
+        fprintf(logfile, "xs_write(%s, %s): write error\n", buf, key);
+        goto out;
+    }
+
+ out:
+    free(path);
+    free(buf);
+    return rc;
+}

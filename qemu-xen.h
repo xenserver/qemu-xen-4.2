@@ -96,6 +96,11 @@ int xenstore_unsubscribe_from_hotplug_status(struct xs_handle *handle,
 typedef void (*xenstore_callback) (const char *path, void *opaque);
 int xenstore_watch_new_callback(const char *path, xenstore_callback fptr, void *opaque);
 
+char *xenstore_dom_read(int domid, const char *key, unsigned int *len);
+int xenstore_dom_write(int domid, const char *key, const char *value);
+void xenstore_dom_watch(int domid, const char *key, xenstore_callback ftp, void *opaque);
+void xenstore_dom_chmod(int domid, const char *key, const char *perms);
+
  /* `danger' means that this parameter, variable or function refers to
   * an area of xenstore which is writeable by the guest and thus must
   * not be trusted by qemu code.  For variables containing xenstore
