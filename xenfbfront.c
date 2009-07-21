@@ -274,7 +274,7 @@ static void xenfb_pv_display_allocator(void)
         exit(1);
     }
 
-    xs->nonshared_vram = qemu_memalign(PAGE_SIZE, vga_ram_size);
+    xs->nonshared_vram = qemu_memalign(XC_PAGE_SIZE, vga_ram_size);
     if (!xs->nonshared_vram) {
         fprintf(stderr, "xenfb_pv_display_allocator: could not allocate nonshared_vram\n");
         exit(1);
@@ -294,7 +294,7 @@ int xenfb_pv_display_init(DisplayState *ds)
     unsigned long *mfns;
     int offset = 0;
     int i;
-    int n = vga_ram_size / PAGE_SIZE;
+    int n = vga_ram_size / XC_PAGE_SIZE;
 
     if (!fb_path || !kbd_path)
         return -1;
@@ -322,9 +322,9 @@ int xenfb_pv_display_init(DisplayState *ds)
 
     mfns = malloc(2 * n * sizeof(*mfns));
     for (i = 0; i < n; i++)
-        mfns[i] = virtual_to_mfn(vga_vram + i * PAGE_SIZE);
+        mfns[i] = virtual_to_mfn(vga_vram + i * XC_PAGE_SIZE);
     for (i = 0; i < n; i++)
-        mfns[n + i] = virtual_to_mfn(xs->nonshared_vram + i * PAGE_SIZE);
+        mfns[n + i] = virtual_to_mfn(xs->nonshared_vram + i * XC_PAGE_SIZE);
 
     fb_dev = init_fbfront(fb_path, mfns, ds_get_width(ds), ds_get_height(ds), ds_get_bits_per_pixel(ds), ds_get_linesize(ds), 2 * n);
     free(mfns);
