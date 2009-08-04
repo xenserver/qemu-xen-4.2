@@ -2408,6 +2408,25 @@ out:
     return err;
 }
 
+/* A return value of 1 means the capability should NOT be exposed to guest. */
+static int pt_hide_dev_cap(const struct pci_dev *dev, uint8_t grp_id)
+{
+    switch (grp_id)
+    {
+    case PCI_CAP_ID_EXP:
+        /* The PCI Express Capability Structure of the VF of Intel 82599 10GbE
+         * Controller looks trivial, e.g., the PCI Express Capabilities
+         * Register is 0. We should not try to expose it to guest.
+         */
+        if (dev->vendor_id == PCI_VENDOR_ID_INTEL &&
+                dev->device_id == PCI_DEVICE_ID_INTEL_82599_VF)
+            return 1;
+        break;
+    }
+
+    return 0;
+}
+
 /* initialize emulate register group */
 static int pt_config_init(struct pt_dev *ptdev)
 {
@@ -2424,6 +2443,9 @@ static int pt_config_init(struct pt_dev *ptdev)
     {
         if (pt_emu_reg_grp_tbl[i].grp_id != 0xFF)
         {
+            if (pt_hide_dev_cap(ptdev->pci_dev, pt_emu_reg_grp_tbl[i].grp_id))
+                continue;
+
             reg_grp_offset = (uint32_t)find_cap_offset(ptdev->pci_dev,
                                  pt_emu_reg_grp_tbl[i].grp_id);
             if (!reg_grp_offset)
@@ -2556,6 +2578,8 @@ static uint32_t pt_ptr_reg_init(struct pt_dev *ptdev,
             /* check whether the next capability
              * should be exported to guest or not
              */
+            if (pt_hide_dev_cap(ptdev->pci_dev, pt_emu_reg_grp_tbl[i].grp_id))
+                continue;
             if (pt_emu_reg_grp_tbl[i].grp_id == ptdev->dev.config[reg_field])
             {
                 if (pt_emu_reg_grp_tbl[i].grp_type == GRP_TYPE_EMU)

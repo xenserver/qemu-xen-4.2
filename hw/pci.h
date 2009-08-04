@@ -112,6 +112,7 @@ extern target_phys_addr_t pci_mem_base;
 #define PCI_DEVICE_ID_INTEL_82371AB      0x7111
 #define PCI_DEVICE_ID_INTEL_82371AB_2    0x7112
 #define PCI_DEVICE_ID_INTEL_82371AB_3    0x7113
+#define PCI_DEVICE_ID_INTEL_82599_VF     0x10ed
 
 #define PCI_VENDOR_ID_FSL                0x1957
 #define PCI_DEVICE_ID_FSL_E500           0x0030
