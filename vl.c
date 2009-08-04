@@ -5667,6 +5667,10 @@ int main(int argc, char **argv, char **envp)
     {
        fprintf(stderr,"-videoram option does not work with cirrus vga device model. Videoram set to 4M.\n");
        vga_ram_size = 4 * 1024 * 1024;
+    /* if vga_ram_size is not set and a videocard is required, default it to 4 MB */
+    } else if ( !vga_ram_size && (std_vga_enabled || vmsvga_enabled) ) {
+       fprintf(stderr,"Defaulting vram to 4MB\n");
+       vga_ram_size = 4 * 1024 * 1024;
     }
 
     phys_ram_size = (machine->ram_require + vga_ram_size) & ~RAMSIZE_FIXED;
