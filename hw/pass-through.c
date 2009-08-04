@@ -2617,13 +2617,7 @@ static uint32_t pt_status_reg_init(struct pt_dev *ptdev,
 static uint32_t pt_irqpin_reg_init(struct pt_dev *ptdev,
         struct pt_reg_info_tbl *reg, uint32_t real_offset)
 {
-    int reg_field = 0;
-
-    /* set Interrupt Pin register to use INTA# if it has */
-    if (ptdev->dev.config[real_offset])
-        reg_field = 0x01;
-
-    return reg_field;
+    return ptdev->dev.config[real_offset];
 }
 
 /* initialize BAR */
