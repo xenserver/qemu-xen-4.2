@@ -1275,6 +1275,7 @@ cirrus_hook_read_sr(CirrusVGAState * s, unsigned reg_index, int *reg_value)
 	break;
     case 0x05:			// ???
     case 0x07:			// Extended Sequencer Mode
+        cirrus_update_memory_access(s);
     case 0x08:			// EEPROM Control
     case 0x09:			// Scratch Register 0
     case 0x0a:			// Scratch Register 1
@@ -1540,6 +1541,7 @@ cirrus_hook_write_gr(CirrusVGAState * s, unsigned reg_index, int reg_value)
 	s->gr[reg_index] = reg_value;
 	cirrus_update_bank_ptr(s, 0);
 	cirrus_update_bank_ptr(s, 1);
+        cirrus_update_memory_access(s);
         break;
     case 0x0B:
 	s->gr[reg_index] = reg_value;
