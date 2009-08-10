@@ -1511,6 +1511,8 @@ void xenstore_dom_watch(int domid, const char *key, xenstore_callback fptr, void
     free(buf);
 }
 
+#ifndef CONFIG_STUBDOM
+
 void xenstore_dom_chmod(int domid, const char *key, const char *perms)
 {
     char *buf = NULL, *path = NULL;
@@ -1535,6 +1537,8 @@ void xenstore_dom_chmod(int domid, const char *key, const char *perms)
     free(path);
     free(buf);
 }
+
+#endif /*CONFIG_STUBDOM*/
 
 int xenstore_dom_write(int domid, const char *key, const char *value)
 {
