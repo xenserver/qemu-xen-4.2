@@ -107,7 +107,14 @@ static void insert_media(void *opaque)
     for (i = 0; i < MAX_DRIVES + 1; i++) {
         bs = drives_table[i].bdrv;
         if (media_filename[i] && bs && bs->filename[0] == '\0') {
-            bdrv_open2(bs, media_filename[i], 0, &bdrv_raw);
+            BlockDriver *format;
+            if ( strstart(media_filename[i], "/dev/cd", NULL) 
+              || strstart(media_filename[i], "/dev/scd", NULL)) 
+                format = &bdrv_host_device;
+            else 
+                format = &bdrv_raw;
+
+            bdrv_open2(bs, media_filename[i], 0, format);
             pstrcpy(bs->filename, sizeof(bs->filename), media_filename[i]);
             free(media_filename[i]);
             media_filename[i] = NULL;
@@ -533,7 +540,11 @@ void xenstore_parse_domain_config(int hvm_domid)
 		} else if (!strcmp(drv,"file")) {
 		    format = &bdrv_raw;
 		} else if (!strcmp(drv,"phy")) {
-		    format = &bdrv_raw;
+                    if (strstart(params, "/dev/cd", NULL) 
+                     || strstart(params, "/dev/scd", NULL)) 
+                        format = &bdrv_host_device;
+                    else
+                        format = &bdrv_raw;
 		} else {
 		    format = bdrv_find_format(drv);
 		    if (!format) {
