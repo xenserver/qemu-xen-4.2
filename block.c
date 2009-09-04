@@ -1378,6 +1378,7 @@ static void bdrv_aio_rw_vector_cb(void *opaque, int ret)
     qemu_vfree(s->bounce);
     s->this_aiocb->cb(s->this_aiocb->opaque, ret);
     qemu_aio_release(s->this_aiocb);
+    qemu_free(s);
 }
 
 static BlockDriverAIOCB *bdrv_aio_rw_vector(BlockDriverState *bs,
