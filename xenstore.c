@@ -13,13 +13,6 @@
 
 #include "block_int.h"
 #include <unistd.h>
-#ifndef CONFIG_STUBDOM
-#include <sys/ipc.h>
-#include <sys/shm.h>
-#endif
-#include <sys/types.h>
-#include <sys/stat.h>
-#include <fcntl.h>
 #include <assert.h>
 
 #include "exec-all.h"
@@ -597,8 +590,8 @@ void xenstore_parse_domain_config(int hvm_domid)
 #endif
 
 
-    /* Set a watch for log-dirty requests from the migration tools */
-    if (pasprintf(&buf, "/local/domain/0/device-model/%u/logdirty/next-active",
+    /* Set a watch for log-dirty commands from the migration tools */
+    if (pasprintf(&buf, "/local/domain/0/device-model/%u/logdirty/cmd",
                   domid) != -1) {
         xs_watch(xsh, buf, "logdirty");
         fprintf(logfile, "Watching %s\n", buf);
@@ -689,111 +682,44 @@ int xenstore_fd(void)
 static void xenstore_process_logdirty_event(void)
 {
     char *act;
-    static char *active_path = NULL;
-    static char *next_active_path = NULL;
-    static char *seg = NULL;
+    char *ret_path = NULL;
+    char *cmd_path = NULL;
     unsigned int len;
-    int i;
 
-    if (!seg) {
-        char *path = NULL, *key_ascii, key_terminated[17] = {0,};
-        key_t key;
-        int shmid;
-
-        /* Find and map the shared memory segment for log-dirty bitmaps */
-        if (pasprintf(&path, 
-                      "/local/domain/0/device-model/%u/logdirty/key", 
-                      domid) == -1) {
-            fprintf(logfile, "Log-dirty: out of memory\n");
-            exit(1);
-        }
-        
-        key_ascii = xs_read(xsh, XBT_NULL, path, &len);
-        free(path);
-
-        if (!key_ascii) 
-            /* No key yet: wait for the next watch */
-            return;
-
-#ifdef CONFIG_STUBDOM
-        /* We pass the writes to hypervisor */
-        seg = (void*)1;
-#else
-        strncpy(key_terminated, key_ascii, 16);
-        free(key_ascii);
-        key = (key_t) strtoull(key_terminated, NULL, 16);
-
-        /* Figure out how bit the log-dirty bitmaps are */
-        logdirty_bitmap_size = xc_memory_op(xc_handle, 
-                                            XENMEM_maximum_gpfn, &domid) + 1;
-        logdirty_bitmap_size = ((logdirty_bitmap_size + HOST_LONG_BITS - 1)
-                                / HOST_LONG_BITS); /* longs */
-        logdirty_bitmap_size *= sizeof (unsigned long); /* bytes */
-
-        /* Map the shared-memory segment */
-        fprintf(logfile, "%s: key=%16.16llx size=%lu\n", __FUNCTION__,
-                (unsigned long long)key, logdirty_bitmap_size);
-        shmid = shmget(key, 2 * logdirty_bitmap_size, S_IRUSR|S_IWUSR);
-        if (shmid == -1) {
-            fprintf(logfile, "Log-dirty: shmget failed: segment %16.16llx "
-                    "(%s)\n", (unsigned long long)key, strerror(errno));
-            exit(1);
-        }
-
-        seg = shmat(shmid, NULL, 0);
-        if (seg == (void *)-1) {
-            fprintf(logfile, "Log-dirty: shmat failed: segment %16.16llx "
-                    "(%s)\n", (unsigned long long)key, strerror(errno));
-            exit(1);
-        }
-
-        fprintf(logfile, "Log-dirty: mapped segment at %p\n", seg);
-
-        /* Double-check that the bitmaps are the size we expect */
-        if (logdirty_bitmap_size != *(uint32_t *)seg) {
-            fprintf(logfile, "Log-dirty: got %u, calc %lu\n", 
-                    *(uint32_t *)seg, logdirty_bitmap_size);
-            /* Stale key: wait for next watch */
-            shmdt(seg);
-            seg = NULL;
-            return;
-        }
-#endif
-
-        /* Remember the paths for the next-active and active entries */
-        if (pasprintf(&active_path, 
-                      "/local/domain/0/device-model/%u/logdirty/active",
-                      domid) == -1) {
-            fprintf(logfile, "Log-dirty: out of memory\n");
-            exit(1);
-        }
-        if (pasprintf(&next_active_path, 
-                      "/local/domain/0/device-model/%u/logdirty/next-active",
-                      domid) == -1) {
-            fprintf(logfile, "Log-dirty: out of memory\n");
-            exit(1);
-        }
+    /* Remember the paths for the command and response entries */
+    if (pasprintf(&ret_path,
+                "/local/domain/0/device-model/%u/logdirty/ret",
+                domid) == -1) {
+        fprintf(logfile, "Log-dirty: out of memory\n");
+        exit(1);
+    }
+    if (pasprintf(&cmd_path,
+                "/local/domain/0/device-model/%u/logdirty/cmd",
+                domid) == -1) {
+        fprintf(logfile, "Log-dirty: out of memory\n");
+        exit(1);
     }
 
-    fprintf(logfile, "Triggered log-dirty buffer switch\n");
     
     /* Read the required active buffer from the store */
-    act = xs_read(xsh, XBT_NULL, next_active_path, &len);
+    act = xs_read(xsh, XBT_NULL, cmd_path, &len);
     if (!act) {
-        fprintf(logfile, "Log-dirty: can't read next-active\n");
+        fprintf(logfile, "Log-dirty: no command yet.\n");
+        return;
+    }
+    fprintf(logfile, "Log-dirty command %s\n", act);
+
+    if (!strcmp(act, "enable")) {
+        xen_logdirty_enable = 1;
+    } else if (!strcmp(act, "disable")) {
+        xen_logdirty_enable = 0;
+    } else {
+        fprintf(logfile, "Log-dirty: bad log-dirty command: %s\n", act);
         exit(1);
     }
 
-    /* Switch buffers */
-    i = act[0] - '0';
-    if (i != 0 && i != 1) {
-        fprintf(logfile, "Log-dirty: bad next-active entry: %s\n", act);
-        exit(1);
-    }
-    logdirty_bitmap = (unsigned long *)(seg + i * logdirty_bitmap_size);
-
-    /* Ack that we've switched */
-    xs_write(xsh, XBT_NULL, active_path, act, len);
+    /* Ack that we've service the command */
+    xs_write(xsh, XBT_NULL, ret_path, act, len);
     free(act);
 }
 

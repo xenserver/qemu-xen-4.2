@@ -39,8 +39,7 @@ struct CharDriverState;
 void xenstore_store_serial_port_info(int i, struct CharDriverState *chr,
 				     const char *devname);
 
-extern unsigned long *logdirty_bitmap;
-extern unsigned long logdirty_bitmap_size;
+extern unsigned int xen_logdirty_enable;
 
 #ifdef CONFIG_STUBDOM
 #undef HAVE_IOVEC
