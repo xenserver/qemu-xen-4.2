@@ -921,6 +921,16 @@ void xenstore_process_event(void *opaque)
     if (!vec)
         return;
 
+    /* process dm-command events before everything else */
+    if (!strcmp(vec[XS_WATCH_TOKEN], "dm-command")) {
+        xenstore_process_dm_command_event();
+        goto out;
+    }
+
+    /* if we are paused don't process anything else */
+    if (xen_pause_requested)
+        goto out;
+
     for (i = 0; xenstore_watch_callbacks &&  xenstore_watch_callbacks[i].path; i++)
 	if (xenstore_watch_callbacks[i].cb &&
 	    !strcmp(vec[XS_WATCH_TOKEN], xenstore_watch_callbacks[i].path))
@@ -929,11 +939,6 @@ void xenstore_process_event(void *opaque)
 
     if (!strcmp(vec[XS_WATCH_TOKEN], "logdirty")) {
         xenstore_process_logdirty_event();
-        goto out;
-    }
-
-    if (!strcmp(vec[XS_WATCH_TOKEN], "dm-command")) {
-        xenstore_process_dm_command_event();
         goto out;
     }
 
