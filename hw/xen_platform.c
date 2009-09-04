@@ -50,6 +50,17 @@ typedef struct PCIXenPlatformState
   PCIDevice  pci_dev;
 } PCIXenPlatformState;
 
+static void log_throttling(const char *path, void *opaque)
+{
+    int len;
+    char *throttling = xenstore_dom_read(domid, "log-throttling", &len);
+    if (throttling != NULL) {
+        throttling_disabled = !(throttling[0] - '0');
+        free(throttling);
+        fprintf(logfile, "log_throttling %s\n", throttling_disabled ? "disabled" : "enabled");
+    }
+}
+
 /* We throttle access to dom0 syslog, to avoid DOS attacks.  This is
    modelled as a token bucket, with one token for every byte of log.
    The bucket size is 128KB (->1024 lines of 128 bytes each) and
@@ -276,7 +287,6 @@ static int platform_fixed_ioport_load(QEMUFile *f, void *opaque, int version_id)
 void platform_fixed_ioport_init(void)
 {
     struct stat stbuf;
-    char *throttling;
     int len = 1;
 
     register_savevm("platform_fixed_ioport", 0, 1, platform_fixed_ioport_save,
@@ -287,12 +297,6 @@ void platform_fixed_ioport_init(void)
     register_ioport_write(0x10, 16, 1, platform_fixed_ioport_write1, NULL);
     register_ioport_read(0x10, 16, 2, platform_fixed_ioport_read2, NULL);
     register_ioport_read(0x10, 16, 1, platform_fixed_ioport_read1, NULL);
-
-    throttling = xenstore_vm_read(domid, "log-throttling", &len);
-    if (throttling != NULL) {
-        throttling_disabled = (throttling[0] - '0');
-        free(throttling);
-    }
 
     platform_fixed_ioport_write1(NULL, 0x10, 0);
 }
@@ -477,6 +481,6 @@ void pci_xen_platform_init(PCIBus *bus)
 
     register_savevm("platform", 0, 3, xen_pci_save, xen_pci_load, d);
     printf("Done register platform.\n");
-
+    xenstore_dom_watch(domid, "log-throttling", log_throttling, NULL);
 }
 
