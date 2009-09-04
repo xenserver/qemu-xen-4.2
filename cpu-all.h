@@ -975,6 +975,16 @@ static inline int cpu_physical_memory_get_dirty(ram_addr_t addr,
 static inline void cpu_physical_memory_set_dirty(ram_addr_t addr)
 {
     phys_ram_dirty[addr >> TARGET_PAGE_BITS] = 0xff;
+
+#ifndef CONFIG_STUBDOM
+    if (logdirty_bitmap != NULL) {
+        addr >>= TARGET_PAGE_BITS;
+        if (addr / 8 < logdirty_bitmap_size) {
+            logdirty_bitmap[addr / HOST_LONG_BITS]
+                |= 1UL << addr % HOST_LONG_BITS;
+        }
+    }
+#endif
 }
 
 void cpu_physical_memory_reset_dirty(ram_addr_t start, ram_addr_t end,

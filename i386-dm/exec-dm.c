@@ -806,6 +806,24 @@ void *cpu_physical_memory_map(target_phys_addr_t addr,
     if ((*plen) > l)
         *plen = l;
 #endif
+#ifndef CONFIG_STUBDOM
+    if (logdirty_bitmap != NULL) {
+        /* Record that we have dirtied this frame */
+        unsigned long pfn = addr >> TARGET_PAGE_BITS;
+        do {
+            if (pfn / 8 >= logdirty_bitmap_size) {
+                fprintf(logfile, "dirtying pfn %lx >= bitmap "
+                        "size %lx\n", pfn, logdirty_bitmap_size * 8);
+            } else {
+                logdirty_bitmap[pfn / HOST_LONG_BITS]
+                    |= 1UL << pfn % HOST_LONG_BITS;
+            }
+
+            pfn++;
+        } while ( (pfn << TARGET_PAGE_BITS) < addr + *plen );
+
+    }
+#endif
     return qemu_map_cache(addr, 1);
 }
 
