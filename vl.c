@@ -5104,7 +5104,7 @@ int main(int argc, char **argv, char **envp)
                     fprintf(stderr, "qemu: invalid ram size: %s\n", optarg);
                     exit(1);
                 }
-
+#ifndef CONFIG_DM
                 /* On 32-bit hosts, QEMU is limited by virtual address space */
                 if (value > (2047 << 20)
 #ifndef USE_KQEMU
@@ -5118,6 +5118,7 @@ int main(int argc, char **argv, char **envp)
                     fprintf(stderr, "qemu: ram size too large\n");
                     exit(1);
                 }
+#endif
                 ram_size = value;
                 break;
             }
@@ -5682,6 +5683,7 @@ int main(int argc, char **argv, char **envp)
         ram_size += 1 * MEM_G; /* skip 3G-4G MMIO, LEGACY_IO_SPACE etc. */
 #endif
 
+#ifndef CONFIG_DM
     if (machine->ram_require & RAMSIZE_FIXED) {
         if (ram_size > 0) {
             if (ram_size < phys_ram_size) {
@@ -5700,7 +5702,6 @@ int main(int argc, char **argv, char **envp)
         phys_ram_size += ram_size;
     }
 
-#ifndef CONFIG_DM
     phys_ram_base = qemu_vmalloc(phys_ram_size);
     if (!phys_ram_base) {
         fprintf(stderr, "Could not allocate physical memory\n");
