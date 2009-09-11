@@ -92,8 +92,8 @@ static int vbd_open(BlockDriverState *bs, const char *filename, int flags)
 	printf("sector size is %d, we only support sector sizes that are multiple of %d\n", s->info.sector_size, SECTOR_SIZE);
 	return -EIO;
     }
-    if (PAGE_SIZE % s->info.sector_size) {
-	printf("sector size is %d, we only support sector sizes that divide %llu\n", s->info.sector_size, PAGE_SIZE);
+    if (TARGET_PAGE_SIZE % s->info.sector_size) {
+	printf("sector size is %d, we only support sector sizes that divide %u\n", s->info.sector_size, TARGET_PAGE_SIZE);
 	return -EIO;
     }
 
