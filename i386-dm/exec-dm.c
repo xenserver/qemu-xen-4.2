@@ -359,6 +359,14 @@ void cpu_unregister_io_memory(int io_table_address)
     io_mem_opaque[io_index] = NULL;
 }
 
+void cpu_physical_memory_set_dirty(ram_addr_t addr)
+{
+    phys_ram_dirty[addr >> TARGET_PAGE_BITS] = 0xff;
+
+    if (xen_logdirty_enable)
+        xc_hvm_modified_memory(xc_handle, domid, addr >> TARGET_PAGE_BITS, 1);
+}
+
 CPUWriteMemoryFunc **cpu_get_io_memory_write(int io_index)
 {
     return io_mem_write[io_index >> IO_MEM_SHIFT];
@@ -453,8 +461,7 @@ void unregister_iomem(target_phys_addr_t start)
 }
 
 
-unsigned long *logdirty_bitmap;
-unsigned long logdirty_bitmap_size;
+unsigned int xen_logdirty_enable = 0;
 
 /*
  * Replace the standard byte memcpy with a word memcpy for appropriately sized
@@ -557,19 +564,13 @@ void cpu_physical_memory_rw(target_phys_addr_t _addr, uint8_t *buf,
             } else if ((ptr = phys_ram_addr(addr)) != NULL) {
                 /* Writing to RAM */
                 memcpy_words(ptr, buf, l);
-#ifndef CONFIG_STUBDOM
-                if (logdirty_bitmap != NULL) {
-                    /* Record that we have dirtied this frame */
-                    unsigned long pfn = addr >> TARGET_PAGE_BITS;
-                    if (pfn / 8 >= logdirty_bitmap_size) {
-                        fprintf(logfile, "dirtying pfn %lx >= bitmap "
-                                "size %lx\n", pfn, logdirty_bitmap_size * 8);
-                    } else {
-                        logdirty_bitmap[pfn / HOST_LONG_BITS]
-                            |= 1UL << pfn % HOST_LONG_BITS;
-                    }
-                }
-#endif
+
+                if (xen_logdirty_enable)
+                    xc_hvm_modified_memory(xc_handle,
+                        domid,
+                        addr >> TARGET_PAGE_BITS,
+                        ((addr + l + TARGET_PAGE_SIZE - 1) >> TARGET_PAGE_BITS)
+                        - (addr >> TARGET_PAGE_BITS));
 #ifdef __ia64__
                 sync_icache(ptr, l);
 #endif 
@@ -604,13 +605,6 @@ void cpu_physical_memory_rw(target_phys_addr_t _addr, uint8_t *buf,
         buf += l;
         addr += l;
     }
-
-#ifdef CONFIG_STUBDOM
-    if (logdirty_bitmap != NULL)
-        xc_hvm_modified_memory(xc_handle, domid, _addr >> TARGET_PAGE_BITS,
-                ((_addr + _len + TARGET_PAGE_SIZE - 1) >> TARGET_PAGE_BITS)
-                    - (_addr >> TARGET_PAGE_BITS));
-#endif
 
     mapcache_unlock();
 }
@@ -806,24 +800,11 @@ void *cpu_physical_memory_map(target_phys_addr_t addr,
     if ((*plen) > l)
         *plen = l;
 #endif
-#ifndef CONFIG_STUBDOM
-    if (logdirty_bitmap != NULL) {
-        /* Record that we have dirtied this frame */
-        unsigned long pfn = addr >> TARGET_PAGE_BITS;
-        do {
-            if (pfn / 8 >= logdirty_bitmap_size) {
-                fprintf(logfile, "dirtying pfn %lx >= bitmap "
-                        "size %lx\n", pfn, logdirty_bitmap_size * 8);
-            } else {
-                logdirty_bitmap[pfn / HOST_LONG_BITS]
-                    |= 1UL << pfn % HOST_LONG_BITS;
-            }
+    if (xen_logdirty_enable)
+        xc_hvm_modified_memory(xc_handle, domid, addr >> TARGET_PAGE_BITS,
+                ((addr + l + TARGET_PAGE_SIZE - 1) >> TARGET_PAGE_BITS)
+                    - (addr >> TARGET_PAGE_BITS));
 
-            pfn++;
-        } while ( (pfn << TARGET_PAGE_BITS) < addr + *plen );
-
-    }
-#endif
     return qemu_map_cache(addr, 1);
 }
 
