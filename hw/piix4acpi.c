@@ -233,8 +233,6 @@ static void acpi_map(PCIDevice *pci_dev, int region_num,
     battery_mgmt_init(pci_dev);
 }
 
-#ifdef CONFIG_PASSTHROUGH
-
 static inline int test_bit(uint8_t *map, int bit)
 {
     return ( map[bit / 8] & (1 << (bit % 8)) );
@@ -255,6 +253,8 @@ static void acpi_dbg_writel(void *opaque, uint32_t addr, uint32_t val)
     PIIX4ACPI_LOG(PIIX4ACPI_LOG_DEBUG, "ACPI: DBG: 0x%08x\n", val);
     PIIX4ACPI_LOG(PIIX4ACPI_LOG_INFO, "ACPI:debug: write addr=0x%x, val=0x%x.\n", addr, val);
 }
+
+#ifdef CONFIG_PASSTHROUGH
 
 /*
  * simple PCI hotplug controller IO
@@ -390,6 +390,7 @@ static void php_devfn_init(void)
     register_savevm("pci_devfn", 0, 1, pci_devfn_save, pci_devfn_load,
                     &php_devfn);
 }
+#endif /* CONFIG_PASSTHROUGH */
 
 /* GPEx_STS occupy 1st half of the block, while GPEx_EN 2nd half */
 static uint32_t gpe_sts_read(void *opaque, uint32_t addr)
@@ -508,6 +509,8 @@ static void gpe_acpi_init(void)
 
     register_savevm("gpe", 0, 1, gpe_save, gpe_load, s);
 }
+
+#ifdef CONFIG_PASSTHROUGH
 
 static void acpi_sci_intr(GPEState *s)
 {
@@ -658,11 +661,11 @@ i2c_bus *piix4_pm_init(PCIBus *bus, int devfn, uint32_t smb_io_base,
 
     acpi_map((PCIDevice *)d, 0, 0x1f40, 0x10, PCI_ADDRESS_SPACE_IO);
 
-#ifdef CONFIG_PASSTHROUGH
     gpe_acpi_init();
+#ifdef CONFIG_PASSTHROUGH
     php_devfn_init();
-    register_ioport_write(ACPI_DBG_IO_ADDR, 4, 4, acpi_dbg_writel, d);
 #endif
+    register_ioport_write(ACPI_DBG_IO_ADDR, 4, 4, acpi_dbg_writel, d);
 
     register_savevm("piix4acpi", 0, 1, piix4acpi_save, piix4acpi_load, d);
 
