@@ -795,8 +795,9 @@ void *cpu_physical_memory_map(target_phys_addr_t addr,
                               target_phys_addr_t *plen,
                               int is_write)
 {
+    unsigned long l = 0;
 #ifdef MAPCACHE
-    unsigned long l = MCACHE_BUCKET_SIZE - (addr & (MCACHE_BUCKET_SIZE-1));
+    l = MCACHE_BUCKET_SIZE - (addr & (MCACHE_BUCKET_SIZE-1));
     if ((*plen) > l)
         *plen = l;
 #endif
