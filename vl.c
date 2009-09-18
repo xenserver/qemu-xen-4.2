@@ -213,6 +213,7 @@ static int rtc_date_offset = -1; /* -1 means no change */
 int cirrus_vga_enabled = 1;
 int std_vga_enabled = 0;
 int vmsvga_enabled = 0;
+int gfx_passthru = 0;
 #ifdef TARGET_SPARC
 int graphic_width = 1024;
 int graphic_height = 768;
@@ -4042,7 +4043,7 @@ static void help(int exitcode)
 #endif
 #endif
            "-portrait       rotate graphical output 90 deg left (only PXA LCD)\n"
-           "-vga [std|cirrus|vmware|none]\n"
+           "-vga [std|cirrus|vmware|passthrough|none]\n"
            "                select video card type\n"
            "-full-screen    start in full screen\n"
 #if defined(TARGET_PPC) || defined(TARGET_SPARC)
@@ -4269,6 +4270,7 @@ enum {
     /* Xen tree: */
     QEMU_OPTION_disable_opengl,
     QEMU_OPTION_direct_pci,
+    QEMU_OPTION_gfx_passthru,
     QEMU_OPTION_pci_emulation,
     QEMU_OPTION_vncunused,
     QEMU_OPTION_videoram,
@@ -4447,6 +4449,7 @@ static const QEMUOption qemu_options[] = {
 #endif
     { "acpi", 0, QEMU_OPTION_acpi }, /* deprecated, for xend compatibility */
     { "direct_pci", HAS_ARG, QEMU_OPTION_direct_pci },
+    { "gfx_passthru", 0, QEMU_OPTION_gfx_passthru},
     { "pciemulation", HAS_ARG, QEMU_OPTION_pci_emulation },
     { "vncunused", 0, QEMU_OPTION_vncunused },
     { "vcpus", HAS_ARG, QEMU_OPTION_vcpus },
@@ -4623,6 +4626,11 @@ static void select_vgahw (const char *p)
         cirrus_vga_enabled = 0;
         std_vga_enabled = 0;
         vmsvga_enabled = 1;
+    } else if (strstart(p, "passthrough", &opts)) {
+        cirrus_vga_enabled = 0;
+        std_vga_enabled = 0;
+        vmsvga_enabled = 0;
+        gfx_passthru = 1;
     } else if (strstart(p, "none", &opts)) {
         cirrus_vga_enabled = 0;
         std_vga_enabled = 0;
@@ -5484,6 +5492,9 @@ int main(int argc, char **argv, char **envp)
                 break;
             case QEMU_OPTION_runas:
                 run_as = optarg;
+                break;
+            case QEMU_OPTION_gfx_passthru:
+                select_vgahw("passthrough");
                 break;
             }
         }
