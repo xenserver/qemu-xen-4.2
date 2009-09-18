@@ -5627,6 +5627,7 @@ int main(int argc, char **argv, char **envp)
     }
     net_client_check();
 
+#ifndef CONFIG_DM
 #ifdef TARGET_I386
     /* XXX: this should be moved in the PC machine instantiation code */
     if (net_boot != 0) {
@@ -5654,6 +5655,7 @@ int main(int argc, char **argv, char **envp)
 	    exit(1);
 	}
     }
+#endif
 #endif
 
     /* init the bluetooth world */
