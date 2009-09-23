@@ -864,6 +864,11 @@ void xenstore_process_event(void *opaque)
         goto out;
     }
 
+    if (!strcmp(vec[XS_WATCH_TOKEN], "logdirty")) {
+        xenstore_process_logdirty_event();
+        goto out;
+    }
+
     /* if we are paused don't process anything else */
     if (xen_pause_requested)
         goto out;
@@ -873,11 +878,6 @@ void xenstore_process_event(void *opaque)
 	    !strcmp(vec[XS_WATCH_TOKEN], xenstore_watch_callbacks[i].path))
             xenstore_watch_callbacks[i].cb(vec[XS_WATCH_TOKEN],
                                            xenstore_watch_callbacks[i].opaque);
-
-    if (!strcmp(vec[XS_WATCH_TOKEN], "logdirty")) {
-        xenstore_process_logdirty_event();
-        goto out;
-    }
 
     if (strncmp(vec[XS_WATCH_TOKEN], "hd", 2) ||
         strlen(vec[XS_WATCH_TOKEN]) != 3)
