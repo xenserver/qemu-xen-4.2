@@ -1522,6 +1522,7 @@ static void bdrv_aio_bh_cb(void *opaque)
 {
     BlockDriverAIOCBSync *acb = opaque;
     acb->common.cb(acb->common.opaque, acb->ret);
+    qemu_bh_delete(acb->bh);
     qemu_aio_release(acb);
 }
 
@@ -1560,7 +1561,7 @@ static BlockDriverAIOCB *bdrv_aio_write_em(BlockDriverState *bs,
 static void bdrv_aio_cancel_em(BlockDriverAIOCB *blockacb)
 {
     BlockDriverAIOCBSync *acb = (BlockDriverAIOCBSync *)blockacb;
-    qemu_bh_cancel(acb->bh);
+    qemu_bh_delete(acb->bh);
     qemu_aio_release(acb);
 }
 
