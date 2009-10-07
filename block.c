@@ -1071,6 +1071,8 @@ const char *bdrv_get_device_name(BlockDriverState *bs)
 int bdrv_flush(BlockDriverState *bs)
 {
     int ret = 0;
+    if (!bs->drv)
+        return -EINVAL;
     if (bs->drv->bdrv_flush)
         ret = bs->drv->bdrv_flush(bs);
     if (!ret && bs->backing_hd)
