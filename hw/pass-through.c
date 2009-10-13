@@ -4188,7 +4188,7 @@ static struct pt_dev * register_real_device(PCIBus *e_bus,
         PT_LOG("Error: couldn't locate device in libpci structures\n");
         return NULL;
     }
-    pci_fill_info(pci_dev, PCI_FILL_IRQ | PCI_FILL_BASES | PCI_FILL_ROM_BASE | PCI_FILL_SIZES);
+    pci_fill_info(pci_dev, PCI_FILL_IRQ | PCI_FILL_BASES | PCI_FILL_ROM_BASE | PCI_FILL_SIZES | PCI_FILL_IDENT | PCI_FILL_CLASS);
     pt_libpci_fixup(pci_dev);
 
     msi_translate = direct_pci_msitranslate;
@@ -4431,6 +4431,20 @@ int power_on_php_devfn(int devfn)
 {
     struct php_dev *php_dev = &dpci_infos.php_devs[devfn];
     struct pt_dev *pt_dev;
+    struct pci_access *pci_access;
+
+    if (!dpci_infos.pci_access) {
+        /* Initialize libpci */
+        pci_access = pci_alloc();
+        if ( pci_access == NULL ) {
+            PT_LOG("Error: pci_access is NULL\n");
+            return -1;
+        }
+        pci_init(pci_access);
+        pci_scan_bus(pci_access);
+        dpci_infos.pci_access = pci_access;
+    }
+
     pt_dev =
         register_real_device(dpci_infos.e_bus,
             "DIRECT PCI",
@@ -4455,20 +4469,7 @@ int power_off_php_devfn(int php_devfn)
 
 int pt_init(PCIBus *e_bus)
 {
-    struct pci_access *pci_access;
-
-    /* Initialize libpci */
-    pci_access = pci_alloc();
-    if ( pci_access == NULL )
-    {
-        PT_LOG("Error: pci_access is NULL\n");
-        return -1;
-    }
-    pci_init(pci_access);
-    pci_scan_bus(pci_access);
-
     memset(&dpci_infos, 0, sizeof(struct dpci_infos));
-    dpci_infos.pci_access = pci_access;
     dpci_infos.e_bus      = e_bus;
 
     return 0;

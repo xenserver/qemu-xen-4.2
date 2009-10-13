@@ -604,6 +604,10 @@ void xenstore_parse_domain_config(int hvm_domid)
         fprintf(logfile, "Watching %s\n", buf);
     }
 
+    /* no need for ifdef CONFIG_STUBDOM, since in the qemu case
+     * hvm_domid is always equal to domid */
+    hvm_domid = domid;
+
     /* get the pci pass-through parameter */
     if (pasprintf(&buf, "/local/domain/0/backend/pci/%u/%u/num_devs",
                   hvm_domid, pci_devid) == -1)
