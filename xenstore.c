@@ -752,6 +752,34 @@ static void xenstore_process_dm_command_event(void)
     } else if (!strncmp(command, "continue", len)) {
         fprintf(logfile, "dm-command: continue after state save\n");
         xen_pause_requested = 0;
+    } else if (!strncmp(command, "usb-add", len)) {
+        fprintf(logfile, "dm-command: usb-add a usb device\n");
+        if (pasprintf(&path,
+                "/local/domain/0/device-model/%u/parameter", domid) == -1) {
+            fprintf(logfile, "out of memory reading dm command parameter\n");
+            goto out;
+        }
+        par = xs_read(xsh, XBT_NULL, path, &len);
+        fprintf(logfile, "dm-command: usb-add a usb device: %s \n", par);
+        if (!par)
+            goto out;
+        do_usb_add(par);
+        xenstore_record_dm_state("usb-added");
+        fprintf(logfile, "dm-command: finish usb-add a usb device:%s\n",par);
+    } else if (!strncmp(command, "usb-del", len)) {
+        fprintf(logfile, "dm-command: usb-del a usb device\n");
+        if (pasprintf(&path,
+                "/local/domain/0/device-model/%u/parameter", domid) == -1) {
+            fprintf(logfile, "out of memory reading dm command parameter\n");
+            goto out;
+        }
+        par = xs_read(xsh, XBT_NULL, path, &len);
+        fprintf(logfile, "dm-command: usb-del a usb device: %s \n", par);
+        if (!par)
+            goto out;
+        do_usb_del(par);
+        xenstore_record_dm_state("usb-deleted");
+        fprintf(logfile, "dm-command: finish usb-del a usb device:%s\n",par);
 #ifdef CONFIG_PASSTHROUGH
     } else if (!strncmp(command, "pci-rem", len)) {
         fprintf(logfile, "dm-command: hot remove pass-through pci dev \n");
