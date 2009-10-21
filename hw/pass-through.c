@@ -4168,7 +4168,6 @@ static struct pt_dev * register_real_device(PCIBus *e_bus,
     struct pt_dev *assigned_device = NULL;
     struct pci_dev *pci_dev;
     uint8_t e_device, e_intx;
-    struct pci_config_cf8 machine_bdf;
     char *key, *val;
     int msi_translate, power_mgmt;
 
@@ -4252,15 +4251,6 @@ static struct pt_dev * register_real_device(PCIBus *e_bus,
     assigned_device->power_mgmt = power_mgmt;
     assigned_device->is_virtfn = pt_dev_is_virtfn(pci_dev);
     pt_iomul_init(assigned_device, r_bus, r_dev, r_func);
-
-    /* Assign device */
-    machine_bdf.reg = 0;
-    machine_bdf.bus = r_bus;
-    machine_bdf.dev = r_dev;
-    machine_bdf.func = r_func;
-    rc = xc_assign_device(xc_handle, domid, machine_bdf.value);
-    if ( rc < 0 )
-        PT_LOG("Error: xc_assign_device error %d\n", rc);
 
     /* Initialize virtualized PCI configuration (Extended 256 Bytes) */
     for ( i = 0; i < PCI_CONFIG_SIZE; i++ )
