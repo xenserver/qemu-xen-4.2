@@ -709,7 +709,7 @@ static void xenstore_process_logdirty_event(void)
     act = xs_read(xsh, XBT_NULL, cmd_path, &len);
     if (!act) {
         fprintf(logfile, "Log-dirty: no command yet.\n");
-        return;
+        goto out;
     }
     fprintf(logfile, "Log-dirty command %s\n", act);
 
@@ -724,7 +724,11 @@ static void xenstore_process_logdirty_event(void)
 
     /* Ack that we've service the command */
     xs_write(xsh, XBT_NULL, ret_path, act, len);
+
     free(act);
+out:
+    free(ret_path);
+    free(cmd_path);
 }
 
 

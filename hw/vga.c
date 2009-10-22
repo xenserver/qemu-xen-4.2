@@ -2538,6 +2538,7 @@ void xen_vga_vram_map(uint64_t vram_addr, uint32_t vga_ram_size)
 #ifdef CONFIG_STUBDOM
     xenfb_pv_display_vram(vram);
 #endif
+    free(pfn_list);
 }
 
 /* when used on xen environment, the vga_ram_base is not used */
