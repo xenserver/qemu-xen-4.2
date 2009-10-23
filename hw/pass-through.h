@@ -193,6 +193,7 @@ struct pt_msix_info {
     int mmio_index;
     void *phys_iomem_base;
     struct msix_entry_info msix_entry[0];
+    uint32_t table_offset_adjust;	/* page align mmap */
 };
 
 struct pt_pm_info {
