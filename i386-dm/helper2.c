@@ -106,8 +106,7 @@ int xce_handle = -1;
 int send_vcpu = 0;
 
 //the evtchn port for polling the notification,
-#define NR_CPUS 32
-evtchn_port_t ioreq_local_port[NR_CPUS];
+evtchn_port_t *ioreq_local_port;
 
 CPUX86State *cpu_x86_init(const char *cpu_model)
 {
@@ -124,6 +123,11 @@ CPUX86State *cpu_x86_init(const char *cpu_model)
     if (shared_page == NULL)
         return env;
 
+    ioreq_local_port = 
+        (evtchn_port_t *)qemu_mallocz(vcpus * sizeof(evtchn_port_t));
+    if (!ioreq_local_port)
+        return NULL;
+
     /* init various static tables */
     if (!inited) {
         inited = 1;
@@ -139,7 +143,7 @@ CPUX86State *cpu_x86_init(const char *cpu_model)
         /* FIXME: how about if we overflow the page here? */
         for (i = 0; i < vcpus; i++) {
             rc = xc_evtchn_bind_interdomain(
-                xce_handle, domid, shared_page->vcpu_iodata[i].vp_eport);
+                xce_handle, domid, shared_page->vcpu_ioreq[i].vp_eport);
             if (rc == -1) {
                 fprintf(logfile, "bind interdomain ioctl error %d\n", errno);
                 return NULL;
@@ -180,6 +184,7 @@ void cpu_reset(CPUX86State *env)
 void cpu_x86_close(CPUX86State *env)
 {
     free(env);
+    free(ioreq_local_port);
 }
 
 
@@ -216,28 +221,24 @@ static void sp_info(void)
     int i;
 
     for (i = 0; i < vcpus; i++) {
-        req = &(shared_page->vcpu_iodata[i].vp_ioreq);
+        req = &shared_page->vcpu_ioreq[i];
         term_printf("vcpu %d: event port %d\n", i, ioreq_local_port[i]);
         term_printf("  req state: %x, ptr: %x, addr: %"PRIx64", "
-                    "data: %"PRIx64", count: %"PRIx64", size: %"PRIx64"\n",
+                    "data: %"PRIx64", count: %u, size: %u\n",
                     req->state, req->data_is_ptr, req->addr,
                     req->data, req->count, req->size);
-        term_printf("  IO totally occurred on this vcpu: %"PRIx64"\n",
-                    req->io_count);
     }
 }
 
 //get the ioreq packets from share mem
 static ioreq_t *__cpu_get_ioreq(int vcpu)
 {
-    ioreq_t *req;
-
-    req = &(shared_page->vcpu_iodata[vcpu].vp_ioreq);
+    ioreq_t *req = &shared_page->vcpu_ioreq[vcpu];
 
     if (req->state != STATE_IOREQ_READY) {
         fprintf(logfile, "I/O request not ready: "
                 "%x, ptr: %x, port: %"PRIx64", "
-                "data: %"PRIx64", count: %"PRIx64", size: %"PRIx64"\n",
+                "data: %"PRIx64", count: %u, size: %u\n",
                 req->state, req->data_is_ptr, req->addr,
                 req->data, req->count, req->size);
         return NULL;
@@ -512,7 +513,7 @@ static void cpu_handle_ioreq(void *opaque)
         if (req->state != STATE_IOREQ_INPROCESS) {
             fprintf(logfile, "Badness in I/O request ... not in service?!: "
                     "%x, ptr: %x, port: %"PRIx64", "
-                    "data: %"PRIx64", count: %"PRIx64", size: %"PRIx64"\n",
+                    "data: %"PRIx64", count: %u, size: %u\n",
                     req->state, req->data_is_ptr, req->addr,
                     req->data, req->count, req->size);
             destroy_hvm_domain();
