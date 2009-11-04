@@ -357,7 +357,7 @@ void xenstore_parse_domain_config(int hvm_domid)
     char *buf = NULL;
     char *fpath = NULL, *bpath = NULL,
         *dev = NULL, *params = NULL, *drv = NULL;
-    int i, any_hdN = 0, ret;
+    int i, ret;
     unsigned int len, num, hd_index, pci_devid = 0;
     BlockDriverState *bs;
     BlockDriver *format;
