@@ -628,6 +628,7 @@ static struct pt_reg_info_tbl pt_emu_reg_msi_tbl[] = {
         .init_val   = 0x00000000,
         .ro_mask    = 0x00000003,
         .emu_mask   = 0xFFFFFFFF,
+        .no_wb      = 1,
         .init       = pt_common_reg_init,
         .u.dw.read  = pt_long_reg_read,
         .u.dw.write = pt_msgaddr32_reg_write,
@@ -640,6 +641,7 @@ static struct pt_reg_info_tbl pt_emu_reg_msi_tbl[] = {
         .init_val   = 0x00000000,
         .ro_mask    = 0x00000000,
         .emu_mask   = 0xFFFFFFFF,
+        .no_wb      = 1,
         .init       = pt_msgaddr64_reg_init,
         .u.dw.read  = pt_long_reg_read,
         .u.dw.write = pt_msgaddr64_reg_write,
@@ -652,6 +654,7 @@ static struct pt_reg_info_tbl pt_emu_reg_msi_tbl[] = {
         .init_val   = 0x0000,
         .ro_mask    = 0x0000,
         .emu_mask   = 0xFFFF,
+        .no_wb      = 1,
         .init       = pt_msgdata_reg_init,
         .u.w.read   = pt_word_reg_read,
         .u.w.write  = pt_msgdata_reg_write,
@@ -664,6 +667,7 @@ static struct pt_reg_info_tbl pt_emu_reg_msi_tbl[] = {
         .init_val   = 0x0000,
         .ro_mask    = 0x0000,
         .emu_mask   = 0xFFFF,
+        .no_wb      = 1,
         .init       = pt_msgdata_reg_init,
         .u.w.read   = pt_word_reg_read,
         .u.w.write  = pt_msgdata_reg_write,
@@ -1552,10 +1556,12 @@ static void pt_pci_write_config(PCIDevice *d, uint32_t address, uint32_t val,
     val >>= ((address & 3) << 3);
 
 out:
-    ret = pci_write_block(pci_dev, address, (uint8_t *)&val, len);
+    if (!reg->no_wb) {
+        ret = pci_write_block(pci_dev, address, (uint8_t *)&val, len);
 
-    if (!ret)
-        PT_LOG("Error: pci_write_block failed. return value[%d].\n", ret);
+        if (!ret)
+            PT_LOG("Error: pci_write_block failed. return value[%d].\n", ret);
+    }
 
     if (pm_state != NULL && pm_state->flags & PT_FLAG_TRANSITING)
         /* set QEMUTimer */

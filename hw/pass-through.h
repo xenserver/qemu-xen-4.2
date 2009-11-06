@@ -365,6 +365,8 @@ struct pt_reg_info_tbl {
     uint32_t ro_mask;
     /* reg emulate field mask (ON:emu, OFF:passthrough) */
     uint32_t emu_mask;
+    /* no write back allowed */
+    uint32_t no_wb;
     /* emul reg initialize method */
     conf_reg_init init;
     union {
