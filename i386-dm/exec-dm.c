@@ -275,13 +275,13 @@ void cpu_abort(CPUState *env, const char *fmt, ...)
 
 
 /* XXX: Simple implementation. Fix later */
-#define MAX_MMIO 32
+#define MAX_MMIO 1024
 static struct mmio_space {
         target_phys_addr_t start;
         unsigned long size;
         unsigned long io_index;
 } mmio[MAX_MMIO];
-unsigned long mmio_cnt;
+static unsigned long mmio_cnt;
 
 /* register physical memory. 'size' must be a multiple of the target
    page size. If (phys_offset & ~TARGET_PAGE_MASK) != 0, then it is an
