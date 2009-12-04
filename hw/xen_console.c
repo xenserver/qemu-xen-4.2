@@ -194,8 +194,11 @@ static int con_init(struct XenDevice *xendev)
     type = xenstore_read_str(con->console, "type");
     if (!type || 0 != strcmp(type, "ioemu")) {
 	xen_be_printf(xendev, 1, "not for me (type=%s)\n", type);
+	if (type)
+	    qemu_free(type);
 	return -1;
     }
+    qemu_free(type);
 
     if (!serial_hds[con->xendev.dev])
 	xen_be_printf(xendev, 1, "WARNING: serial line %d not configured\n",
