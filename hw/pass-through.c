@@ -1556,7 +1556,7 @@ static void pt_pci_write_config(PCIDevice *d, uint32_t address, uint32_t val,
     val >>= ((address & 3) << 3);
 
 out:
-    if (!reg->no_wb) {
+    if (!(reg && reg->no_wb)) {  /* unknown regs are passed through */
         ret = pci_write_block(pci_dev, address, (uint8_t *)&val, len);
 
         if (!ret)
