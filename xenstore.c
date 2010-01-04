@@ -26,6 +26,31 @@
 struct xs_handle *xsh = NULL;
 static char *media_filename[MAX_DRIVES+1];
 static QEMUTimer *insert_timer = NULL;
+static char *xenbus_param_paths[MAX_DRIVES+1];
+
+int xenstore_find_device(BlockDriverState *bs)
+{
+    int i;
+
+    for (i = 0; i < MAX_DRIVES + 1; i++) {
+        if (drives_table[i].bdrv == bs)
+            return i;
+    }
+    return -1;
+}
+
+void xenstore_do_eject(BlockDriverState *bs)
+{
+    int i;
+
+    i = xenstore_find_device(bs);
+    if (i == -1) {
+        fprintf(stderr, "couldn't find disk to eject.\n");
+        return;
+    }
+    if (xenbus_param_paths[i])
+        xs_write(xsh, XBT_NULL, xenbus_param_paths[i], "eject", strlen("eject"));
+}
 
 #define UWAIT_MAX (30*1000000) /* thirty seconds */
 #define UWAIT     (100000)     /* 1/10th second  */
@@ -526,8 +551,15 @@ void xenstore_parse_domain_config(int hvm_domid)
         /* check if it is a cdrom */
         if (danger_type && !strcmp(danger_type, "cdrom")) {
             bdrv_set_type_hint(bs, BDRV_TYPE_CDROM);
-            if (pasprintf(&buf, "%s/params", bpath) != -1)
+            if (pasprintf(&buf, "%s/params", bpath) != -1) {
+                char *buf2, *frontend;
                 xs_watch(xsh, buf, dev);
+                asprintf(&buf2, "%s/frontend", bpath);
+                frontend = xs_read(xsh, XBT_NULL, buf2, &len);
+                asprintf(&xenbus_param_paths[nb_drives], "%s/eject", frontend);
+                free(frontend);
+                free(buf2);
+            }
         }
 
         /* open device now if media present */

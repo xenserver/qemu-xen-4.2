@@ -35,6 +35,7 @@
 #include "mac_dbdma.h"
 #include "sh.h"
 #include "dma.h"
+#include "qemu-xen.h"
 
 /* debug IDE devices */
 //#define DEBUG_IDE
@@ -2100,6 +2101,7 @@ static void ide_atapi_cmd(IDEState *s)
 
             if (eject && !start) {
                 /* eject the disk */
+                xenstore_do_eject(s->bs);
                 bdrv_eject(s->bs, 1);
             } else if (eject && start) {
                 /* close the tray */

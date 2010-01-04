@@ -123,6 +123,8 @@ char *xenstore_read_battery_data(int battery_status);
 int xenstore_refresh_battery_status(void);
 int xenstore_pv_driver_build_blacklisted(uint16_t product_number,
                                          uint32_t build_nr);
+void xenstore_do_eject(BlockDriverState *bs);
+int xenstore_find_device(BlockDriverState *bs);
 
 /* xenfbfront.c */
 int xenfb_pv_display_init(DisplayState *ds);
