@@ -4279,6 +4279,7 @@ enum {
     QEMU_OPTION_domainname,
     QEMU_OPTION_acpi,
     QEMU_OPTION_vcpus,
+    QEMU_OPTION_vcpu_avail,
 
     /* Debug/Expert options: */
     QEMU_OPTION_serial,
@@ -4453,6 +4454,7 @@ static const QEMUOption qemu_options[] = {
     { "pciemulation", HAS_ARG, QEMU_OPTION_pci_emulation },
     { "vncunused", 0, QEMU_OPTION_vncunused },
     { "vcpus", HAS_ARG, QEMU_OPTION_vcpus },
+    { "vcpu_avail", HAS_ARG, QEMU_OPTION_vcpu_avail },
 #if defined(CONFIG_XEN) && !defined(CONFIG_DM)
     { "xen-domid", HAS_ARG, QEMU_OPTION_xen_domid },
     { "xen-create", 0, QEMU_OPTION_xen_create },
@@ -5297,6 +5299,11 @@ int main(int argc, char **argv, char **envp)
             case QEMU_OPTION_vcpus:
                 vcpus = atoi(optarg);
                 fprintf(logfile, "qemu: the number of cpus is %d\n", vcpus);
+                break;
+            case QEMU_OPTION_vcpu_avail:
+                vcpu_avail = atol(optarg);
+                fprintf(logfile, "qemu: the avail cpu bitmap is %lx\n",  
+                                  vcpu_avail);
                 break;
             case QEMU_OPTION_acpi:
                 acpi_enabled = 1;

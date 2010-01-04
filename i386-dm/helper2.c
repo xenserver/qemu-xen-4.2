@@ -78,6 +78,7 @@ _syscall3(int, modify_ldt, int, func, void *, ptr, unsigned long, bytecount)
 
 int domid = -1;
 int vcpus = 1;
+uint64_t vcpu_avail = 1;
 
 int xc_handle = -1;
 

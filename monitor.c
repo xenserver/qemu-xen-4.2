@@ -1473,6 +1473,22 @@ static void do_info_balloon(void)
         term_printf("balloon: actual=%d\n", (int)(actual >> 20));
 }
 
+static void do_cpu_set_nr(int value, const char *status)
+{
+    int state;
+
+    if (!strcmp(status, "online"))
+        state = 1;
+    else if (!strcmp(status, "offline"))
+        state = 0;
+    else {
+        term_printf("invalid status: %s\n", status);
+        return;
+    }
+
+    qemu_cpu_add_remove(value, state);
+}
+
 /* Please update qemu-doc.texi when adding or changing commands */
 static const term_cmd_t term_cmds[] = {
     { "help|?", "s?", do_help,
@@ -1583,6 +1599,8 @@ static const term_cmd_t term_cmds[] = {
       "target", "request VM to change it's memory allocation (in MB)" },
     { "set_link", "ss", do_set_link,
       "name [up|down]", "change the link status of a network adapter" },
+    { "cpu_set", "is", do_cpu_set_nr,
+      "cpu [online|offline]", "change cpu state" },
     { NULL, NULL, },
 };
 

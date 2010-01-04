@@ -69,6 +69,9 @@
 #define DEVFN_TO_PHP_SLOT_REG(devfn) (devfn >> 1)
 #define PHP_SLOT_REG_TO_DEVFN(reg, hilo) ((reg << 1) | hilo)
 
+/* ioport to monitor cpu add/remove status */
+#define PROC_BASE 0xaf00
+
 typedef struct PCIAcpiState {
     PCIDevice dev;
     uint16_t pm1_control; /* pm1a_ECNT_BLK */
@@ -78,6 +81,9 @@ typedef struct GPEState {
     /* GPE0 block */
     uint8_t gpe0_sts[ACPI_GPE0_BLK_LEN / 2];
     uint8_t gpe0_en[ACPI_GPE0_BLK_LEN / 2];
+
+    /* CPU bitmap */
+    uint8_t cpus_sts[32];
 
     /* SCI IRQ level */
     uint8_t sci_asserted;
@@ -480,10 +486,48 @@ static int gpe_load(QEMUFile* f, void* opaque, int version_id)
     return 0;
 }
 
+static uint32_t gpe_cpus_readb(void *opaque, uint32_t addr)
+{
+    uint32_t val = 0;
+    GPEState *g = opaque;
+
+    switch (addr) {
+        case PROC_BASE ... PROC_BASE+31:
+            val = g->cpus_sts[addr - PROC_BASE];
+        default:
+            break;
+    }
+
+    return val;
+}
+
+static void gpe_cpus_writeb(void *opaque, uint32_t addr, uint32_t val)
+{
+    GPEState *g = opaque;
+    switch (addr) {
+        case PROC_BASE ... PROC_BASE + 31:
+            /* don't allow to change cpus_sts from inside a guest */
+            break;
+        default:
+            break;
+    }
+}
+
 static void gpe_acpi_init(void)
 {
     GPEState *s = &gpe_state;
     memset(s, 0, sizeof(GPEState));
+    int i = 0, cpus = vcpus;
+    char *vcpumap = (char *)&vcpu_avail;
+
+    while (cpus > 0) {
+        s->cpus_sts[i] = vcpumap[i];
+        i++;
+        cpus -= 8;
+    }
+
+    register_ioport_read(PROC_BASE, 32, 1,  gpe_cpus_readb, s);
+    register_ioport_write(PROC_BASE, 32, 1, gpe_cpus_writeb, s);
 
     register_ioport_read(ACPI_GPE0_BLK_ADDRESS,
                          ACPI_GPE0_BLK_LEN / 2,
@@ -681,4 +725,34 @@ void qemu_system_device_hot_add(int bus, int devfn, int state) {
 
 void i440fx_init_memory_mappings(PCIDevice *d) {
     /* our implementation doesn't need this */
+}
+
+static void enable_processor(GPEState *g, int cpu)
+{
+    g->gpe0_sts[0] |= 4;
+    g->cpus_sts[cpu/8] |= (1 << (cpu%8));
+}
+
+static void disable_processor(GPEState *g, int cpu)
+{
+    g->gpe0_sts[0] |= 4;
+    g->cpus_sts[cpu/8] &= ~(1 << (cpu%8));
+}
+
+void qemu_cpu_add_remove(int cpu, int state)
+{
+    if ((cpu <=0) || (cpu >= vcpus)) {
+        fprintf(stderr, "vcpu out of range, should be [1~%d]\n", vcpus - 1);
+        return;
+    }
+
+    if (state)
+        enable_processor(&gpe_state, cpu);
+    else
+        disable_processor(&gpe_state, cpu);
+
+    if (gpe_state.gpe0_en[0] & 4) {
+        qemu_set_irq(sci_irq, 1);
+        qemu_set_irq(sci_irq, 0);
+    }
 }
