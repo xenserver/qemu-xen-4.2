@@ -189,11 +189,11 @@ struct pt_msix_info {
     int bar_index;
     uint64_t table_base;
     uint32_t table_off;
+    uint32_t table_offset_adjust;	/* page align mmap */
     uint64_t mmio_base_addr;
     int mmio_index;
     void *phys_iomem_base;
     struct msix_entry_info msix_entry[0];
-    uint32_t table_offset_adjust;	/* page align mmap */
 };
 
 struct pt_pm_info {
