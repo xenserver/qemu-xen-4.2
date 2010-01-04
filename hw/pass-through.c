@@ -1021,6 +1021,11 @@ int bdf_to_devfn(char *bdf_str)
     return -1;
 }
 
+static uint8_t pci_read_intx(struct pt_dev *ptdev)
+{
+    return pci_read_byte(ptdev->pci_dev, PCI_INTERRUPT_PIN);
+}
+
 /* The PCI Local Bus Specification, Rev. 3.0,
  * Section 6.2.4 Miscellaneous Registers, pp 223
  * outlines 5 valid values for the intertupt pin (intx).
@@ -1049,9 +1054,9 @@ int bdf_to_devfn(char *bdf_str)
  * 4               | 3   | INTD#
  * any other value | 0   | This should never happen, log error message
  */
-static uint8_t pci_read_intx(struct pt_dev *ptdev)
+uint8_t pci_intx(struct pt_dev *ptdev)
 {
-    uint8_t r_val = pci_read_byte(ptdev->pci_dev, PCI_INTERRUPT_PIN);
+    uint8_t r_val = pci_read_intx(ptdev);
 
     PT_LOG("intx=%i\n", r_val);
     if (r_val < 1 || r_val > 4)
@@ -1066,17 +1071,6 @@ static uint8_t pci_read_intx(struct pt_dev *ptdev)
     }
 
     return r_val;
-}
-
-/*
- * For virtual function 0, always use INTA#,
- * otherwise use the hardware value
- */
-uint8_t pci_intx(struct pt_dev *ptdev)
-{
-    if (!PCI_FUNC(ptdev->dev.devfn))
-        return 0;
-    return pci_read_intx(ptdev);
 }
 
 /* Being called each time a mmio region has been updated */
@@ -2768,7 +2762,7 @@ static uint32_t pt_status_reg_init(struct pt_dev *ptdev,
 static uint32_t pt_irqpin_reg_init(struct pt_dev *ptdev,
         struct pt_reg_info_tbl *reg, uint32_t real_offset)
 {
-    return ptdev->dev.config[real_offset];
+    return pci_read_intx(ptdev);
 }
 
 /* initialize BAR */
