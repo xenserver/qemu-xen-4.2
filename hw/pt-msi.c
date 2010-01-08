@@ -585,7 +585,7 @@ int pt_msix_init(struct pt_dev *dev, int pos)
         PT_LOG("Error: Can't open /dev/mem: %s\n", strerror(errno));
         goto error_out;
     }
-    PT_LOG("table_off = %llx, total_entries = %d\n",table_off,total_entries);
+    PT_LOG("table_off = %x, total_entries = %d\n", table_off, total_entries);
     dev->msix->table_offset_adjust = table_off & 0x0fff;
     dev->msix->phys_iomem_base = mmap(0, total_entries * 16 + dev->msix->table_offset_adjust,
                           PROT_WRITE | PROT_READ, MAP_SHARED | MAP_LOCKED,
