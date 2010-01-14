@@ -95,7 +95,8 @@ static void qemu_remap_bucket(struct map_cache *entry,
                               unsigned long address_index)
 {
     uint8_t *vaddr_base;
-    unsigned long pfns[MCACHE_BUCKET_SIZE >> XC_PAGE_SHIFT];
+    xen_pfn_t pfns[MCACHE_BUCKET_SIZE >> XC_PAGE_SHIFT];
+    int err[MCACHE_BUCKET_SIZE >> XC_PAGE_SHIFT];
     unsigned int i, j;
 
     if (entry->vaddr_base != NULL) {
@@ -109,10 +110,11 @@ static void qemu_remap_bucket(struct map_cache *entry,
     for (i = 0; i < MCACHE_BUCKET_SIZE >> XC_PAGE_SHIFT; i++)
         pfns[i] = (address_index << (MCACHE_BUCKET_SHIFT-XC_PAGE_SHIFT)) + i;
 
-    vaddr_base = xc_map_foreign_batch(xc_handle, domid, PROT_READ|PROT_WRITE,
-                                      pfns, MCACHE_BUCKET_SIZE >> XC_PAGE_SHIFT);
+    vaddr_base = xc_map_foreign_bulk(xc_handle, domid, PROT_READ|PROT_WRITE,
+                                     pfns, err,
+                                     MCACHE_BUCKET_SIZE >> XC_PAGE_SHIFT);
     if (vaddr_base == NULL) {
-        fprintf(logfile, "xc_map_foreign_batch error %d\n", errno);
+        fprintf(logfile, "xc_map_foreign_bulk error %d\n", errno);
         exit(-1);
     }
 
@@ -124,7 +126,7 @@ static void qemu_remap_bucket(struct map_cache *entry,
         j = ((i + BITS_PER_LONG) > (MCACHE_BUCKET_SIZE >> XC_PAGE_SHIFT)) ?
             (MCACHE_BUCKET_SIZE >> XC_PAGE_SHIFT) % BITS_PER_LONG : BITS_PER_LONG;
         while (j > 0)
-            word = (word << 1) | (((pfns[i + --j] >> 28) & 0xf) != 0xf);
+            word = (word << 1) | !err[i + --j];
         entry->valid_mapping[i / BITS_PER_LONG] = word;
     }
 }
@@ -347,11 +349,11 @@ static void xen_init_fv(ram_addr_t ram_size, int vga_ram_size,
                 (STORE_PAGE_START >> XC_PAGE_SHIFT); 
     }
 
-    phys_ram_base = xc_map_foreign_batch(xc_handle, domid,
+    phys_ram_base = xc_map_foreign_pages(xc_handle, domid,
                                          PROT_READ|PROT_WRITE,
                                          page_array, nr_pages);
     if (phys_ram_base == 0) {
-        fprintf(logfile, "xc_map_foreign_batch returned error %d\n", errno);
+        fprintf(logfile, "xc_map_foreign_pages returned error %d\n", errno);
         exit(-1);
     }
     free(page_array);
