@@ -159,11 +159,19 @@ static int fifo_put(SerialState *s, int fifo, uint8_t chr)
 {
     SerialFIFO *f = (fifo) ? &s->recv_fifo : &s->xmit_fifo;
 
-    f->data[f->head++] = chr;
+    /* Receive overruns do not overwrite FIFO contents. */
+    if (fifo == XMIT_FIFO || f->count < UART_FIFO_LENGTH) {
 
-    if (f->head == UART_FIFO_LENGTH)
-        f->head = 0;
-    f->count++;
+        f->data[f->head++] = chr;
+
+        if (f->head == UART_FIFO_LENGTH)
+            f->head = 0;
+    }
+
+    if (f->count < UART_FIFO_LENGTH)
+        f->count++;
+    else if (fifo == RECV_FIFO)
+        s->lsr |= UART_LSR_OE;
 
     return 1;
 }
@@ -195,12 +203,10 @@ static void serial_update_irq(SerialState *s)
          * this is not in the specification but is observed on existing
          * hardware.  */
         tmp_iir = UART_IIR_CTI;
-    } else if ((s->ier & UART_IER_RDI) && (s->lsr & UART_LSR_DR)) {
-        if (!(s->fcr & UART_FCR_FE)) {
-           tmp_iir = UART_IIR_RDI;
-        } else if (s->recv_fifo.count >= s->recv_fifo.itl) {
-           tmp_iir = UART_IIR_RDI;
-        }
+    } else if ((s->ier & UART_IER_RDI) && (s->lsr & UART_LSR_DR) &&
+               (!(s->fcr & UART_FCR_FE) ||
+                s->recv_fifo.count >= s->recv_fifo.itl)) {
+        tmp_iir = UART_IIR_RDI;
     } else if ((s->ier & UART_IER_THRI) && s->thr_ipending) {
         tmp_iir = UART_IIR_THRI;
     } else if ((s->ier & UART_IER_MSI) && (s->msr & UART_MSR_ANY_DELTA)) {
@@ -523,8 +529,10 @@ static uint32_t serial_ioport_read(void *opaque, uint32_t addr)
         break;
     case 2:
         ret = s->iir;
-        s->thr_ipending = 0;
-        serial_update_irq(s);
+        if (ret & UART_IIR_THRI) {
+            s->thr_ipending = 0;
+            serial_update_irq(s);
+        }
         break;
     case 3:
         ret = s->lcr;
@@ -534,9 +542,9 @@ static uint32_t serial_ioport_read(void *opaque, uint32_t addr)
         break;
     case 5:
         ret = s->lsr;
-        /* Clear break interrupt */
-        if (s->lsr & UART_LSR_BI) {
-            s->lsr &= ~UART_LSR_BI;
+        /* Clear break and overrun interrupts */
+        if (s->lsr & (UART_LSR_BI|UART_LSR_OE)) {
+            s->lsr &= ~(UART_LSR_BI|UART_LSR_OE);
             serial_update_irq(s);
         }
         break;
