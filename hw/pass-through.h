@@ -407,5 +407,9 @@ static inline pciaddr_t pt_pci_base_addr(pciaddr_t base)
 
 uint8_t pci_intx(struct pt_dev *ptdev);
 
+u8 pt_pci_host_read_byte(int bus, int dev, int fn, u32 addr);
+u16 pt_pci_host_read_word(int bus, int dev, int fn, u32 addr);
+u32 pt_pci_host_read_long(int bus, int dev, int fn, u32 addr);
+
 #endif /* __PASSTHROUGH_H__ */
 

@@ -31,6 +31,8 @@
 #include "exec-all.h"
 #include "qemu-xen.h"
 
+extern int igd_passthru;
+
 //#define DEBUG_PCI
 
 struct PCIBus {
@@ -230,6 +232,12 @@ PCIDevice *pci_register_device(PCIBus *bus, const char *name,
 
     if (devfn < 0) {
         for(devfn = bus->devfn_min ; devfn < 256; devfn += 8) {
+#ifdef CONFIG_PASSTHROUGH
+            /* reserve 00:02.0, because some BIOSs and drivers assume
+             * 00:02.0 for Intel IGD */
+            if ( gfx_passthru && devfn == 0x10 )
+                continue;
+#endif
             if ( !pci_devfn_in_use(bus, devfn) )
                 goto found;
         }
@@ -611,7 +619,31 @@ uint32_t pci_data_read(void *opaque, uint32_t addr, int len)
         goto the_end;
     }
     config_addr = addr & 0xff;
+
+#ifdef CONFIG_PASSTHROUGH
+    /* host bridge reads for IGD passthrough */
+    if ( igd_passthru && pci_dev->devfn == 0x00 ) {
+        val = pci_dev->config_read(pci_dev, config_addr, len);
+
+        if ( config_addr == 0x00 && len == 4 )
+            val = pt_pci_host_read_long(0, 0, 0, 0x00);
+        else if ( config_addr == 0x02 ) // Device ID
+            val = pt_pci_host_read_word(0, 0, 0, 0x02);
+        else if ( config_addr == 0x52 ) // GMCH Graphics Control Register
+            val = pt_pci_host_read_word(0, 0, 0, 0x52);
+        else if ( config_addr == 0xa0 ) // GMCH Top of Memory Register
+            val = pt_pci_host_read_word(0, 0, 0, 0xa0);
+        goto done_config_read;
+    } else if ( igd_passthru && pci_dev->devfn == 0x10 &&
+              config_addr == 0xfc ) { // read on IGD device
+        val = 0;  // use SMI to communicate with the system BIOS
+        goto done_config_read;
+    }
+#endif
+
     val = pci_dev->config_read(pci_dev, config_addr, len);
+
+ done_config_read:
 #if defined(DEBUG_PCI)
     printf("pci_config_read: %s: addr=%02x val=%08x len=%d\n",
            pci_dev->name, config_addr, val, len);

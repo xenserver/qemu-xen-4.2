@@ -94,6 +94,7 @@
 #include <sys/ioctl.h>
 
 extern int gfx_passthru;
+int igd_passthru = 0;
 
 struct php_dev {
     struct pt_dev *pt_dev;
@@ -915,6 +916,8 @@ static int find_free_vslot(void)
 
     for ( slot = 0; slot < NR_PCI_DEV; slot++ )
     {
+        if ( gfx_passthru && slot == 0x2 )
+            continue;
         for ( func = 0; func < NR_PCI_FUNC; func++ )
         {
             devfn = PCI_DEVFN(slot, func);
@@ -944,7 +947,16 @@ static int __insert_to_pci_devfn(int bus, int dev, int func, int devfn,
     PCIBus *e_bus = dpci_infos.e_bus;
     int vslot;
 
-    if ( devfn & AUTO_PHP_SLOT )
+    if ( gfx_passthru && bus == 0x0 && dev == 0x2 )
+    {
+        igd_passthru = 1;
+
+        /* make virtual BDF of Intel IGD in guest is same with host */
+        devfn = PCI_DEVFN(dev, func);
+        if ( test_pci_devfn(devfn) || pci_devfn_in_use(e_bus, devfn) )
+            return -2;
+    }
+    else if ( devfn & AUTO_PHP_SLOT )
     {
         vslot = find_free_vslot();
         if (vslot < 0)
@@ -2071,6 +2083,48 @@ static uint32_t find_ext_cap_offset(struct pci_dev *pci_dev, uint32_t cap)
     }while (max_cap > 0);
 
     return 0;
+}
+
+u8 pt_pci_host_read_byte(int bus, int dev, int fn, u32 addr)
+{
+    struct pci_dev *pci_dev;
+    u8 val;
+
+    pci_dev = pci_get_dev(dpci_infos.pci_access, 0, bus, dev, fn);
+    if ( !pci_dev )
+        return 0;
+
+    val = pci_read_byte(pci_dev, addr);
+    pci_free_dev(pci_dev);
+    return val;
+}
+
+u16 pt_pci_host_read_word(int bus, int dev, int fn, u32 addr)
+{
+    struct pci_dev *pci_dev;
+    u16 val;
+
+    pci_dev = pci_get_dev(dpci_infos.pci_access, 0, bus, dev, fn);
+    if ( !pci_dev )
+        return 0;
+
+    val = pci_read_word(pci_dev, addr);
+    pci_free_dev(pci_dev);
+    return val;
+}
+
+u32 pt_pci_host_read_long(int bus, int dev, int fn, u32 addr)
+{
+    struct pci_dev *pci_dev;
+    u32 val;
+
+    pci_dev = pci_get_dev(dpci_infos.pci_access, 0, bus, dev, fn);
+    if ( !pci_dev )
+        return 0;
+
+    val = pci_read_long(pci_dev, addr);
+    pci_free_dev(pci_dev);
+    return val;
 }
 
 /* parse BAR */
