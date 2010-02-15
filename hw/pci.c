@@ -858,7 +858,8 @@ void pci_unplug_netifs(void)
            dev = bus->devices[x];
            if (dev &&
                dev->config[0xa] == 0 &&
-               dev->config[0xb] == 2) {
+               dev->config[0xb] == 2 &&
+               test_pci_slot(x >> 3) != 1) {
                /* Found a netif.  Remove it from the bus.  Note that
                   we don't free it here, since there could still be
                   references to it floating around.  There are only
