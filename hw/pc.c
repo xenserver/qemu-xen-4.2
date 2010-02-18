@@ -1047,9 +1047,10 @@ vga_bios_error:
 #endif /* !CONFIG_DM */
     if (pci_enabled) {
         disable_pf = xenstore_parse_disable_pf_config();
-        if (disable_pf != 1)
+        if (disable_pf != 1) {
             pci_xen_platform_init(pci_bus);
-        platform_fixed_ioport_init();
+            platform_fixed_ioport_init();
+        }
     }
 
     for(i = 0; i < MAX_SERIAL_PORTS; i++) {
