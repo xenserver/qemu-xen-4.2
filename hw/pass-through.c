@@ -4262,7 +4262,10 @@ static int setup_vga_pt(void)
     for ( c = (char*)bios; c < ((char*)bios + bios_size); c++ )
         checksum += *c;
     if ( checksum )
+    {
         bios[bios_size - 1] -= checksum;
+        PT_LOG("vga bios checksum is adjusted!\n");
+    }
 
     cpu_physical_memory_rw(0xc0000, bios, bios_size, 1);
 
