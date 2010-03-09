@@ -1382,6 +1382,9 @@ if test "$vde" = "yes" ; then
   echo "#define CONFIG_VDE 1" >> $config_h
   echo "VDE_LIBS=-lvdeplug" >> $config_mak
 fi
+if ! test -z "$audio_card_list"; then
+	echo "CONFIG_AUDIO=yes" >> $config_mak
+fi
 for card in $audio_card_list; do
     def=CONFIG_`echo $card | tr '[:lower:]' '[:upper:]'`
     echo "$def=yes" >> $config_mak
