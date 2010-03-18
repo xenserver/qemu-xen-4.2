@@ -4716,7 +4716,7 @@ static int hex_legal(char a)
              (a >= 'A' && a <= 'F'));
 }
 
-static void vcpu_hex_str_to_bitmap(char *optarg)
+static void vcpu_hex_str_to_bitmap(const char *optarg)
 {
     char str[MAX_VCPU_STR_LEN + 1] = {'\0'};
     char *pstr;
