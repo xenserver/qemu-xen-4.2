@@ -968,10 +968,6 @@ void xenstore_process_event(void *opaque)
             xenstore_watch_callbacks[i].cb(vec[XS_WATCH_TOKEN],
                                            xenstore_watch_callbacks[i].opaque);
 
-    if (strncmp(vec[XS_WATCH_TOKEN], "hd", 2) ||
-        strlen(vec[XS_WATCH_TOKEN]) != 3)
-        goto out;
-
     hd_index = drive_name_to_index(vec[XS_WATCH_TOKEN]);
     if (hd_index == -1) {
 	fprintf(stderr,"medium change watch on `%s' -"
