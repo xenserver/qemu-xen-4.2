@@ -49,6 +49,8 @@
 
 #include "qemu-xen.h"
 
+#include <xen/hvm/hvm_info_table.h>
+
 #include <unistd.h>
 #include <fcntl.h>
 #include <signal.h>
@@ -4704,6 +4706,53 @@ static void termsig_setup(void)
 
 #endif
 
+#define STEP   8   /* 8 characters fill uint32_t bitmap */
+#define SPACE  8   /* space for non-hex characters in vcpu str */
+#define MAX_VCPU_STR_LEN    ((HVM_MAX_VCPUS + 3)/4 + SPACE)
+static int hex_legal(char a)
+{
+    return  ((a >= '0' && a <= '9') ||
+             (a >= 'a' && a <= 'f') ||
+             (a >= 'A' && a <= 'F'));
+}
+
+static void vcpu_hex_str_to_bitmap(char *optarg)
+{
+    char str[MAX_VCPU_STR_LEN + 1] = {'\0'};
+    char *pstr;
+    int length;
+    int step = STEP;
+    int i,j = 0;
+
+    length = strlen(optarg);
+    if(length > MAX_VCPU_STR_LEN)
+        exit(EXIT_FAILURE);
+    strncpy(str, optarg, MAX_VCPU_STR_LEN);
+
+    pstr = ((str[1] == 'x') || (str[1] == 'X')) ?
+             str + 2 : str;
+    length = strlen(pstr);
+
+    for(i = 0; i < length; i++)
+        if(hex_legal(pstr[i]))
+            str[j++] = pstr[i];
+    str[j] = '\0';
+    length = strlen(str);
+
+    i = 0;
+    while(length > 0) {
+        char vcpustr[STEP + SPACE] = {'\0'};
+        int start = ((length - step) > 0) ? length - step : 0;
+        int size  = ((length - step) > 0) ? step : length;
+        memcpy(vcpustr, str + start, size);
+        errno = 0;
+        vcpu_avail[i++] = strtol(vcpustr, NULL, 16);
+        if(errno)
+            exit(EXIT_FAILURE);
+        length -= step;
+    }
+}
+
 int main(int argc, char **argv, char **envp)
 {
 #ifdef CONFIG_GDBSTUB
@@ -5298,12 +5347,9 @@ int main(int argc, char **argv, char **envp)
                 break;
             case QEMU_OPTION_vcpus:
                 vcpus = atoi(optarg);
-                fprintf(logfile, "qemu: the number of cpus is %d\n", vcpus);
                 break;
             case QEMU_OPTION_vcpu_avail:
-                vcpu_avail = atol(optarg);
-                fprintf(logfile, "qemu: the avail cpu bitmap is %lx\n",  
-                                  vcpu_avail);
+                vcpu_hex_str_to_bitmap(optarg);
                 break;
             case QEMU_OPTION_acpi:
                 acpi_enabled = 1;

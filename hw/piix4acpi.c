@@ -518,7 +518,7 @@ static void gpe_acpi_init(void)
     GPEState *s = &gpe_state;
     memset(s, 0, sizeof(GPEState));
     int i = 0, cpus = vcpus;
-    char *vcpumap = (char *)&vcpu_avail;
+    char *vcpumap = (char *)vcpu_avail;
 
     while (cpus > 0) {
         s->cpus_sts[i] = vcpumap[i];

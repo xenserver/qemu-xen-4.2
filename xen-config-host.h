@@ -31,7 +31,7 @@ void main_loop_prepare(void);
 extern int xc_handle;
 extern int xen_pause_requested;
 extern int vcpus;
-extern uint64_t vcpu_avail;
+extern uint32_t vcpu_avail[];
 
 #ifdef CONFIG_STUBDOM
 #define bdrv_host_device bdrv_raw

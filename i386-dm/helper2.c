@@ -50,6 +50,7 @@
 
 #include <xenctrl.h>
 #include <xen/hvm/ioreq.h>
+#include <xen/hvm/hvm_info_table.h>
 
 #include "cpu.h"
 #include "exec-all.h"
@@ -78,7 +79,9 @@ _syscall3(int, modify_ldt, int, func, void *, ptr, unsigned long, bytecount)
 
 int domid = -1;
 int vcpus = 1;
-uint64_t vcpu_avail = 1;
+/* use 32b array to record whatever vcpu number bitmap */
+/* do not use 64b array to avoid underflow/overflow when strtol */
+uint32_t vcpu_avail[(HVM_MAX_VCPUS + 31)/32] = {0};
 
 int xc_handle = -1;
 
