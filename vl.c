@@ -4706,6 +4706,34 @@ static void termsig_setup(void)
 
 #endif
 
+/* 32bit Hamming weight */
+unsigned int hweight32(unsigned int w)
+{
+	unsigned int res = w - ((w >> 1) & 0x55555555);
+	res = (res & 0x33333333) + ((res >> 2) & 0x33333333);
+	res = (res + (res >> 4)) & 0x0F0F0F0F;
+	res = res + (res >> 8);
+	return (res + (res >> 16)) & 0x000000FF;
+}
+
+static void vcpu_sanity_check(void)
+{
+    int i, vcpu_avail_weight = 0;
+
+    for (i=0; i<((HVM_MAX_VCPUS + 31)/32); i++)
+        vcpu_avail_weight += hweight32(vcpu_avail[i]);
+
+    if (vcpus > HVM_MAX_VCPUS) {
+        fprintf(stderr, "maxvcpus and vcpus should not more than %d\n",
+                         HVM_MAX_VCPUS);
+        exit(EXIT_FAILURE);
+    }
+    if (vcpu_avail_weight > vcpus) {
+        fprintf(stderr, "vcpus should not more than maxvcpus\n");
+        exit(EXIT_FAILURE);
+    }
+}
+
 #define STEP   8   /* 8 characters fill uint32_t bitmap */
 #define SPACE  8   /* space for non-hex characters in vcpu str */
 #define MAX_VCPU_STR_LEN    ((HVM_MAX_VCPUS + 3)/4 + SPACE)
@@ -5568,6 +5596,8 @@ int main(int argc, char **argv, char **envp)
                 machine->max_cpus);
         exit(1);
     }
+
+    vcpu_sanity_check();
 
     if (nographic) {
        if (serial_device_index == 0)
