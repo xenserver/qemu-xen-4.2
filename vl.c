@@ -4707,7 +4707,7 @@ static void termsig_setup(void)
 #endif
 
 /* 32bit Hamming weight */
-unsigned int hweight32(unsigned int w)
+static unsigned int hweight32(unsigned int w)
 {
 	unsigned int res = w - ((w >> 1) & 0x55555555);
 	res = (res & 0x33333333) + ((res >> 2) & 0x33333333);
