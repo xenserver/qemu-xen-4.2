@@ -623,5 +623,11 @@ void pt_msix_delete(struct pt_dev *dev)
            dev->msix->table_offset_adjust);
     }
 
+    if (dev->msix->mmio_index > 0)
+    {
+        cpu_unregister_io_memory(dev->msix->mmio_index);
+    }
+
+
     free(dev->msix);
 }

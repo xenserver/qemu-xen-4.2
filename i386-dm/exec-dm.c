@@ -125,7 +125,7 @@ unsigned long qemu_host_page_mask;
 CPUWriteMemoryFunc *io_mem_write[IO_MEM_NB_ENTRIES][4];
 CPUReadMemoryFunc *io_mem_read[IO_MEM_NB_ENTRIES][4];
 void *io_mem_opaque[IO_MEM_NB_ENTRIES];
-static int io_mem_nb = 1;
+char io_mem_used[IO_MEM_NB_ENTRIES];
 
 /* log support */
 FILE *logfile;
@@ -310,6 +310,20 @@ void cpu_register_physical_memory(target_phys_addr_t start_addr,
     mmio[mmio_cnt++].size = size;
 }
 
+static int get_free_io_mem_idx(void)
+{
+    int i;
+
+    /* Leave 1st element empty */
+    for (i = 1; i<IO_MEM_NB_ENTRIES; i++)
+        if (!io_mem_used[i]) {
+            io_mem_used[i] = 1;
+            return i;
+        }
+
+    return -1;
+}
+
 /* mem_read and mem_write are arrays of functions containing the
    function to access byte (index 0), word (index 1) and dword (index
    2). All functions must be supplied. If io_index is non zero, the
@@ -324,9 +338,9 @@ int cpu_register_io_memory(int io_index,
     int i;
 
     if (io_index <= 0) {
-        if (io_index >= IO_MEM_NB_ENTRIES)
-            return -1;
-        io_index = io_mem_nb++;
+        io_index = get_free_io_mem_idx();
+        if (io_index == -1)
+            return io_index;
     } else {
         if (io_index >= IO_MEM_NB_ENTRIES)
             return -1;
@@ -357,6 +371,7 @@ void cpu_unregister_io_memory(int io_table_address)
         io_mem_write[io_index][i] = NULL;
     }
     io_mem_opaque[io_index] = NULL;
+    io_mem_used[io_index] = 0;
 }
 
 void cpu_physical_memory_set_dirty(ram_addr_t addr)
