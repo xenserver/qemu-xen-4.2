@@ -5811,7 +5811,7 @@ int main(int argc, char **argv, char **envp)
     bdrv_init();
     dma_helper_init();
 
-    xc_handle = xc_interface_open();
+    xc_handle = xc_interface_open(0,0,0); /* fixme check errors */
 #ifdef CONFIG_STUBDOM
     {
         char *domid_s, *msg;

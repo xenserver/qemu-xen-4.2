@@ -44,7 +44,7 @@
 /* ------------------------------------------------------------- */
 
 /* public */
-int xen_xc;
+xc_interface *xen_xc;
 struct xs_handle *xenstore = NULL;
 const char *xen_protocol;
 
@@ -217,7 +217,7 @@ static struct XenDevice *xen_be_get_xendev(const char *type, int dom, int dev,
     fcntl(xc_evtchn_fd(xendev->evtchndev), F_SETFD, FD_CLOEXEC);
 
     if (ops->flags & DEVOPS_FLAG_NEED_GNTDEV) {
-	xendev->gnttabdev = xc_gnttab_open();
+	xendev->gnttabdev = xc_gnttab_open(xc_handle);
 	if (xendev->gnttabdev < 0) {
 	    xen_be_printf(NULL, 0, "can't open gnttab device\n");
 	    xc_evtchn_close(xendev->evtchndev);
@@ -270,7 +270,7 @@ static struct XenDevice *xen_be_del_xendev(int dom, int dev)
 	if (xendev->evtchndev >= 0)
 	    xc_evtchn_close(xendev->evtchndev);
 	if (xendev->gnttabdev >= 0)
-	    xc_gnttab_close(xendev->gnttabdev);
+	    xc_gnttab_close(xc_handle, xendev->gnttabdev);
 
 	TAILQ_REMOVE(&xendevs, xendev, next);
 	qemu_free(xendev);
@@ -627,8 +627,8 @@ int xen_be_init(void)
     if (qemu_set_fd_handler(xs_fileno(xenstore), xenstore_update, NULL, NULL) < 0)
 	goto err;
 
-    xen_xc = xc_interface_open();
-    if (xen_xc == -1) {
+    xen_xc = xc_interface_open(0,0,0);
+    if (!xen_xc) {
 	xen_be_printf(NULL, 0, "can't open xen interface\n");
 	goto err;
     }

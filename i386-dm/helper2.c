@@ -83,7 +83,7 @@ int vcpus = 1;
 /* do not use 64b array to avoid underflow/overflow when strtol */
 uint32_t vcpu_avail[(HVM_MAX_VCPUS + 31)/32] = {0};
 
-int xc_handle = -1;
+xc_interface *xc_handle;
 
 char domain_name[64] = "Xen-no-name";
 
@@ -163,14 +163,14 @@ CPUX86State *cpu_x86_init(const char *cpu_model)
 void cpu_reset(CPUX86State *env)
 {
     extern int s3_shutdown_flag;
-    int xcHandle;
+    xc_interface *xcHandle;
     int sts;
  
     if (s3_shutdown_flag)
         return;
 
-    xcHandle = xc_interface_open();
-    if (xcHandle < 0)
+    xcHandle = xc_interface_open(0,0,0);
+    if (!xcHandle)
         fprintf(logfile, "Cannot acquire xenctrl handle\n");
     else {
         xc_domain_shutdown_hook(xcHandle, domid);
@@ -605,11 +605,11 @@ int main_loop(void)
 
 void destroy_hvm_domain(void)
 {
-    int xcHandle;
+    xc_interface *xcHandle;
     int sts;
  
-    xcHandle = xc_interface_open();
-    if (xcHandle < 0)
+    xcHandle = xc_interface_open(0,0,0);
+    if (!xcHandle)
         fprintf(logfile, "Cannot acquire xenctrl handle\n");
     else {
         sts = xc_domain_shutdown(xcHandle, domid, SHUTDOWN_poweroff);

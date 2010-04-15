@@ -1475,7 +1475,7 @@ static int store_dev_info(const char *devName, int domid,
     fprintf(logfile, "can't store dev %s name for domid %d in %s from a stub domain\n", devName, domid, storeString);
     return ENOSYS;
 #else
-    int xc_handle;
+    xc_interface *xc_handle;
     struct xs_handle *xs;
     char *path;
     char *newpath;
@@ -1503,8 +1503,8 @@ static int store_dev_info(const char *devName, int domid,
         return -1;
     }
 
-    xc_handle = xc_interface_open();
-    if (xc_handle == -1) {
+    xc_handle = xc_interface_open(0,0,0);
+    if (xc_handle == NULL) {
         fprintf(logfile, "xc_interface_open() error\n");
         return -1;
     }
@@ -1532,7 +1532,7 @@ static int store_dev_info(const char *devName, int domid,
 
     free(path);
     xs_daemon_close(xs);
-    close(xc_handle);
+    xc_interface_close(xc_handle);
 
     return 0;
 #endif

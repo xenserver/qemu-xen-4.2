@@ -84,10 +84,10 @@ static int is_battery_pt_feasible(void)
 
 static void battery_mgmt_pt_mode_init(void)
 {
-    int xc;
+    xc_interface *xc;
 
-    xc = xc_interface_open();
-    if ( xc == -1 ) 
+    xc = xc_interface_open(0,0,0);
+    if ( !xc )
     {
         fprintf(logfile, "%s: xc_interface_open failed\n", __FUNCTION__);
         return;
@@ -99,7 +99,7 @@ static void battery_mgmt_pt_mode_init(void)
     if ( xc_domain_ioport_mapping(xc, domid, BATTERY_PORT_2, BATTERY_PORT_2, 0x1, 1) != 0 ) 
         fprintf(logfile, "Failed to map port %x to guest\n", BATTERY_PORT_2);
 
-    close(xc);
+    xc_interface_close(xc);
 }
 
 #ifdef BATTERY_MGMT_DEBUG_EXT
