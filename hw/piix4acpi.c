@@ -727,16 +727,24 @@ void i440fx_init_memory_mappings(PCIDevice *d) {
     /* our implementation doesn't need this */
 }
 
-static void enable_processor(GPEState *g, int cpu)
+static int enable_processor(GPEState *g, int cpu)
 {
+    if (g->cpus_sts[cpu/8] & (1 << (cpu%8)))
+        return 0;
+
     g->gpe0_sts[0] |= 4;
     g->cpus_sts[cpu/8] |= (1 << (cpu%8));
+    return 1;
 }
 
-static void disable_processor(GPEState *g, int cpu)
+static int disable_processor(GPEState *g, int cpu)
 {
+    if (!(g->cpus_sts[cpu/8] & (1 << (cpu%8))))
+        return 0;
+
     g->gpe0_sts[0] |= 4;
     g->cpus_sts[cpu/8] &= ~(1 << (cpu%8));
+    return 1;
 }
 
 void qemu_cpu_add_remove(int cpu, int state)
@@ -746,10 +754,13 @@ void qemu_cpu_add_remove(int cpu, int state)
         return;
     }
 
-    if (state)
-        enable_processor(&gpe_state, cpu);
-    else
-        disable_processor(&gpe_state, cpu);
+    if (state) {
+        if (!enable_processor(&gpe_state, cpu))
+            return;
+    } else {
+        if (!disable_processor(&gpe_state, cpu))
+            return;
+    }
 
     if (gpe_state.gpe0_en[0] & 4) {
         qemu_set_irq(sci_irq, 1);
