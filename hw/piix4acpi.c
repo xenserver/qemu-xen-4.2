@@ -749,8 +749,8 @@ static int disable_processor(GPEState *g, int cpu)
 
 void qemu_cpu_add_remove(int cpu, int state)
 {
-    if ((cpu <=0) || (cpu >= vcpus)) {
-        fprintf(stderr, "vcpu out of range, should be [1~%d]\n", vcpus - 1);
+    if ((cpu <0) || (cpu >= vcpus)) {
+        fprintf(stderr, "vcpu out of range, should be [0~%d]\n", vcpus - 1);
         return;
     }
 
@@ -761,6 +761,7 @@ void qemu_cpu_add_remove(int cpu, int state)
         if (!disable_processor(&gpe_state, cpu))
             return;
     }
+    fprintf(logfile, "%s vcpu %d\n", state ? "Add" : "Remove", cpu);
 
     if (gpe_state.gpe0_en[0] & 4) {
         qemu_set_irq(sci_irq, 1);

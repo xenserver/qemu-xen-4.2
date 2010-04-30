@@ -657,6 +657,12 @@ void xenstore_parse_domain_config(int hvm_domid)
         fprintf(logfile, "Watching %s\n", buf);
     }
 
+    /* Set a watch for vcpu-set */
+    if (pasprintf(&buf, "/local/domain/%u/cpu", domid) != -1) {
+        xs_watch(xsh, buf, "vcpu-set");
+        fprintf(logfile, "Watching %s\n", buf);
+    }
+
     /* no need for ifdef CONFIG_STUBDOM, since in the qemu case
      * hvm_domid is always equal to domid */
     hvm_domid = domid;
@@ -938,6 +944,36 @@ void xenstore_record_dm_state(const char *state)
     xenstore_record_dm("state", state);
 }
 
+static void xenstore_process_vcpu_set_event(char **vec)
+{
+    char *act = NULL;
+    char *vcpustr, *node = vec[XS_WATCH_PATH];
+    unsigned int vcpu, len;
+
+    vcpustr = strstr(node, "cpu/");
+    if (!vcpustr) {
+        fprintf(stderr, "vcpu-set: watch node error.\n");
+        return;
+    }
+    sscanf(vcpustr, "cpu/%u", &vcpu);
+
+    act = xs_read(xsh, XBT_NULL, node, &len);
+    if (!act) {
+        fprintf(stderr, "vcpu-set: no command yet.\n");
+        return;
+    }
+
+    if (!strncmp(act, "online", len))
+        qemu_cpu_add_remove(vcpu, 1);
+    else if (!strncmp(act, "offline", len))
+        qemu_cpu_add_remove(vcpu, 0);
+    else
+        fprintf(stderr, "vcpu-set: command error.\n");
+
+    free(act);
+    return;
+}
+
 void xenstore_process_event(void *opaque)
 {
     char **vec, *offset, *bpath = NULL, *buf = NULL, *drv = NULL, *image = NULL;
@@ -955,6 +991,11 @@ void xenstore_process_event(void *opaque)
 
     if (!strcmp(vec[XS_WATCH_TOKEN], "logdirty")) {
         xenstore_process_logdirty_event();
+        goto out;
+    }
+
+    if (!strcmp(vec[XS_WATCH_TOKEN], "vcpu-set")) {
+        xenstore_process_vcpu_set_event(vec);
         goto out;
     }
 
