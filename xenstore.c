@@ -403,6 +403,11 @@ void xenstore_parse_domain_config(int hvm_domid)
     BlockDriverState *bs;
     BlockDriver *format;
 
+    /* Read-only handling for image files */
+    char *mode = NULL;
+    int flags;
+    int is_readonly;
+
     /* paths controlled by untrustworthy guest, and values read from them */
     char *danger_path;
     char *danger_buf = NULL;
@@ -595,7 +600,24 @@ void xenstore_parse_domain_config(int hvm_domid)
 		}
 	    }
             pstrcpy(bs->filename, sizeof(bs->filename), params);
-            if (bdrv_open2(bs, params, BDRV_O_CACHE_WB /* snapshot and write-back */, format) < 0)
+
+            flags = BDRV_O_CACHE_WB; /* snapshot and write-back */
+            is_readonly = 0;
+            if (pasprintf(&buf, "%s/mode", bpath) == -1)
+                continue;
+            free(mode);
+            mode = xs_read(xsh, XBT_NULL, buf, &len);
+            if (mode == NULL)
+                continue;
+            if (strchr(mode, 'r') && !strchr(mode, 'w'))
+                is_readonly = 1;
+
+            if (!is_readonly)
+                flags |= BDRV_O_ACCESS & O_RDWR;
+
+            fprintf(stderr, "Using file %s in read-%s mode\n", bs->filename, is_readonly ? "only" : "write");
+
+            if (bdrv_open2(bs, params, flags, format) < 0)
                 fprintf(stderr, "qemu: could not open vbd '%s' or hard disk image '%s' (drv '%s' format '%s')\n", buf, params, drv ? drv : "?", format ? format->format_name : "0");
         }
 
@@ -703,6 +725,7 @@ void xenstore_parse_domain_config(int hvm_domid)
 
  out:
     free(danger_type);
+    free(mode);
     free(params);
     free(dev);
     free(bpath);

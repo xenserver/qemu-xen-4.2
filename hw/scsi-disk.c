@@ -35,6 +35,7 @@ do { fprintf(stderr, "scsi-disk: " fmt , ##args); } while (0)
 #define SENSE_NOT_READY       2
 #define SENSE_HARDWARE_ERROR  4
 #define SENSE_ILLEGAL_REQUEST 5
+#define SENSE_DATA_PROTECT    7
 
 #define STATUS_GOOD            0
 #define STATUS_CHECK_CONDITION 2
@@ -234,6 +235,9 @@ static int scsi_handle_write_error(SCSIRequest *r, int error)
             || action == BLOCK_ERR_STOP_ANY) {
         r->status |= SCSI_REQ_STATUS_RETRY;
         vm_stop(0);
+    } else if (error == SENSE_DATA_PROTECT) {
+        scsi_command_complete(r, STATUS_CHECK_CONDITION,
+                SENSE_DATA_PROTECT);
     } else {
         scsi_command_complete(r, STATUS_CHECK_CONDITION,
                 SENSE_HARDWARE_ERROR);
@@ -302,6 +306,11 @@ static int scsi_write_data(SCSIDevice *d, uint32_t tag)
     if (!r) {
         BADF("Bad write tag 0x%x\n", tag);
         scsi_command_complete(r, STATUS_CHECK_CONDITION, SENSE_HARDWARE_ERROR);
+        return 1;
+    }
+
+    if (bdrv_is_read_only(r->dev->bdrv)) {
+        scsi_write_complete(r, SENSE_DATA_PROTECT);
         return 1;
     }
 

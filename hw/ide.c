@@ -2551,6 +2551,15 @@ static void ide_ioport_write(void *opaque, uint32_t addr, uint32_t val)
         case WIN_WRITE_ONCE:
         case CFA_WRITE_SECT_WO_ERASE:
         case WIN_WRITE_VERIFY:
+            if (bdrv_is_read_only(s->bs)) {
+#if defined(DEBUG_IDE)
+                printf("Attempt to write on read-only device %s\n", s->bs->filename);
+#endif
+                s->status = WRERR_STAT;
+                s->error = ABRT_ERR;
+                ide_set_irq(s);
+                break;
+            }
 	    ide_cmd_lba48_transform(s, lba48);
             s->error = 0;
             s->status = SEEK_STAT | READY_STAT;
@@ -2573,6 +2582,15 @@ static void ide_ioport_write(void *opaque, uint32_t addr, uint32_t val)
         case CFA_WRITE_MULTI_WO_ERASE:
             if (!s->mult_sectors)
                 goto abort_cmd;
+	    if (bdrv_is_read_only(s->bs)) {
+#if defined(DEBUG_IDE)
+                printf("Attempt to multiwrite on read-only device %s\n", s->bs->filename);
+#endif
+                s->status = WRERR_STAT;
+                s->error = ABRT_ERR;
+                ide_set_irq(s);
+                break;
+	    }
 	    ide_cmd_lba48_transform(s, lba48);
             s->error = 0;
             s->status = SEEK_STAT | READY_STAT;
@@ -2598,6 +2616,15 @@ static void ide_ioport_write(void *opaque, uint32_t addr, uint32_t val)
         case WIN_WRITEDMA_ONCE:
             if (!s->bs)
                 goto abort_cmd;
+            if (bdrv_is_read_only(s->bs)) {
+#if defined(DEBUG_IDE)
+                printf("Attempt to DMA write to read-only device %s\n", s->bs->filename);
+#endif
+                s->status = WRERR_STAT;
+                s->error = ABRT_ERR;
+                ide_set_irq(s);
+                break;
+            }
 	    ide_cmd_lba48_transform(s, lba48);
             ide_sector_write_dma(s);
             s->media_changed = 1;
