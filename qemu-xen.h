@@ -51,7 +51,7 @@ void destroy_hvm_domain(void);
 void unregister_iomem(target_phys_addr_t start);
 
 #ifdef __ia64__
-static inline void xc_domain_shutdown_hook(int xc_handle, uint32_t domid)
+static inline void xc_domain_shutdown_hook(xc_interface *xc_handle, uint32_t domid)
 {
         xc_ia64_save_to_nvram(xc_handle, domid);
 }
