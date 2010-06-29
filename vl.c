@@ -5967,16 +5967,16 @@ int main(int argc, char **argv, char **envp)
     /* just use the first displaystate for the moment */
     ds = display_state;
     /* terminal init */
-#ifdef CONFIG_STUBDOM
-    if (xenfb_pv_display_init(ds) == 0) {
-    } else
-#endif
     if (nographic) {
         if (curses) {
             fprintf(stderr, "fatal: -nographic can't be used with -curses\n");
             exit(1);
         }
     } else { 
+#ifdef CONFIG_STUBDOM
+        if (xenfb_pv_display_init(ds) == 0) {
+        } else
+#endif
 #if defined(CONFIG_CURSES)
             if (curses) {
                 /* At the moment curses cannot be used with other displays */
