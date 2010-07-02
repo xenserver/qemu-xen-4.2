@@ -411,7 +411,8 @@ static int xen_be_try_connect(struct XenDevice *xendev)
 {
     int rc = 0;
 
-    if (xendev->fe_state != XenbusStateConnected) {
+    if (xendev->fe_state != XenbusStateInitialised  &&
+	xendev->fe_state != XenbusStateConnected) {
 	if (xendev->ops->flags & DEVOPS_FLAG_IGNORE_STATE) {
 	    xen_be_printf(xendev, 2, "frontend not ready, ignoring\n");
 	} else {
