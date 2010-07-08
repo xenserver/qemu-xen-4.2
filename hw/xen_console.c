@@ -209,7 +209,7 @@ static int con_init(struct XenDevice *xendev)
     return 0;
 }
 
-static int con_connect(struct XenDevice *xendev)
+static int con_initialise(struct XenDevice *xendev)
 {
     struct XenConsole *con = container_of(xendev, struct XenConsole, xendev);
     int limit;
@@ -278,7 +278,7 @@ struct XenDevOps xen_console_ops = {
     .size       = sizeof(struct XenConsole),
     .flags      = DEVOPS_FLAG_IGNORE_STATE|DEVOPS_FLAG_NEED_GNTDEV,
     .init       = con_init,
-    .connect    = con_connect,
+    .initialise = con_initialise,
     .event      = con_event,
     .disconnect = con_disconnect,
 };
