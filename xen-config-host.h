@@ -39,6 +39,8 @@ extern uint32_t vcpu_avail[];
 struct CharDriverState;
 void xenstore_store_serial_port_info(int i, struct CharDriverState *chr,
 				     const char *devname);
+void xenstore_store_pv_console_info(int i, struct CharDriverState *chr,
+		             const char *devname);
 
 extern unsigned int xen_logdirty_enable;
 

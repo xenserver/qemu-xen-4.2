@@ -29,6 +29,7 @@
 #include "exec-all.h"
 #include "qemu-xen.h"
 #include "qemu-aio.h"
+#include "xen_backend.h"
 
 #include <xen/hvm/params.h>
 #include <sys/mman.h>
@@ -361,6 +362,12 @@ static void xen_init_fv(ram_addr_t ram_size, int vga_ram_size,
 
     timeoffset_get();
 
+	/* Initialize backend core & drivers */
+    if (xen_be_init() != 0) {
+        fprintf(stderr, "%s: xen backend core setup failed\n", __FUNCTION__);
+        exit(1);
+    }
+    xen_be_register("console", &xen_console_ops);
 
     pc_machine.init(ram_size, vga_ram_size, boot_device,
 		    kernel_filename, kernel_cmdline, initrd_filename,

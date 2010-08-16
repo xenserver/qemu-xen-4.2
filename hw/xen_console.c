@@ -181,7 +181,7 @@ static void xencons_send(struct XenConsole *con)
 static int con_init(struct XenDevice *xendev)
 {
     struct XenConsole *con = container_of(xendev, struct XenConsole, xendev);
-    char *type, *dom;
+    char *type, *dom, *output, label[32];
 
     /* setup */
     dom = xs_get_domain_path(xenstore, con->xendev.dom);
@@ -200,11 +200,13 @@ static int con_init(struct XenDevice *xendev)
     }
     qemu_free(type);
 
-    if (!serial_hds[con->xendev.dev])
-	xen_be_printf(xendev, 1, "WARNING: serial line %d not configured\n",
-                      con->xendev.dev);
-    else
-        con->chr = serial_hds[con->xendev.dev];
+	output = xenstore_read_str(con->console, "output");
+	/* output is a pty by default */
+	if (output == NULL)
+		output = "pty";
+	snprintf(label, sizeof(label), "xencons%d", con->xendev.dev);
+	con->chr = qemu_chr_open(label, output, NULL);
+	xenstore_store_pv_console_info(con->xendev.dev, con->chr, output);
 
     return 0;
 }

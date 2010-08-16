@@ -1567,8 +1567,19 @@ void xenstore_store_serial_port_info(int i, CharDriverState *chr,
 
     snprintf(buf, sizeof(buf), "/serial/%d", i);
     store_dev_info(devname, domid, chr, buf);
-    if (i == 0) /* serial 0 is also called the console */
-        store_dev_info(devname, domid, chr, "/console");
+}
+
+void xenstore_store_pv_console_info(int i, CharDriverState *chr,
+				     const char *devname) {
+    char buf[32];
+
+    if (i == 0) {
+        snprintf(buf, sizeof(buf), "/console", i);
+        store_dev_info(devname, domid, chr, buf);
+    } else {
+        snprintf(buf, sizeof(buf), "/device/console/%d", i);
+        store_dev_info(devname, domid, chr, buf);
+    }
 }
 
 char *xenstore_dom_read(int domid, const char *key, unsigned int *len)
