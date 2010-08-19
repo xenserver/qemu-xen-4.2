@@ -42,6 +42,10 @@
 #include "virtio-console.h"
 #include "hpet_emul.h"
 
+#ifdef CONFIG_PASSTHROUGH
+#include "pass-through.h"
+#endif
+
 /* output Bochs bios info messages */
 //#define DEBUG_BIOS
 

@@ -96,7 +96,7 @@ PCIBus *pci_register_bus(pci_set_irq_fn set_irq, pci_map_irq_fn map_irq,
     return bus;
 }
 
-static PCIBus *pci_register_secondary_bus(PCIDevice *dev, pci_map_irq_fn map_irq)
+PCIBus *pci_register_secondary_bus(PCIDevice *dev, pci_map_irq_fn map_irq)
 {
     PCIBus *bus;
     bus = qemu_mallocz(sizeof(PCIBus));
@@ -598,7 +598,7 @@ uint32_t pci_data_read(void *opaque, uint32_t addr, int len)
     PCIBus *s = opaque;
     PCIDevice *pci_dev;
     int config_addr, bus_num;
-    uint32_t val;
+    uint32_t val = 0;
 
     bus_num = (addr >> 16) & 0xff;
     while (s && s->bus_num != bus_num)
@@ -623,27 +623,6 @@ uint32_t pci_data_read(void *opaque, uint32_t addr, int len)
         goto the_end;
     }
     config_addr = addr & 0xff;
-
-#ifdef CONFIG_PASSTHROUGH
-    /* host bridge reads for IGD passthrough */
-    if ( igd_passthru && pci_dev->devfn == 0x00 ) {
-        val = pci_dev->config_read(pci_dev, config_addr, len);
-
-        if ( config_addr == 0x00 && len == 4 )
-            val = pt_pci_host_read_long(0, 0, 0, 0x00);
-        else if ( config_addr == 0x02 ) // Device ID
-            val = pt_pci_host_read_word(0, 0, 0, 0x02);
-        else if ( config_addr == 0x52 ) // GMCH Graphics Control Register
-            val = pt_pci_host_read_word(0, 0, 0, 0x52);
-        else if ( config_addr == 0xa0 ) // GMCH Top of Memory Register
-            val = pt_pci_host_read_word(0, 0, 0, 0xa0);
-        goto done_config_read;
-    } else if ( igd_passthru && pci_dev->devfn == 0x10 &&
-              config_addr == 0xfc ) { // read on IGD device
-        val = 0;  // use SMI to communicate with the system BIOS
-        goto done_config_read;
-    }
-#endif
 
     val = pci_dev->config_read(pci_dev, config_addr, len);
 
@@ -897,7 +876,7 @@ typedef struct {
     PCIBus *bus;
 } PCIBridge;
 
-static void pci_bridge_write_config(PCIDevice *d,
+void pci_bridge_write_config(PCIDevice *d,
                              uint32_t address, uint32_t val, int len)
 {
     PCIBridge *s = (PCIBridge *)d;
@@ -935,7 +914,7 @@ PCIDevice *pci_find_device(int bus_num, int slot, int function)
 }
 
 PCIBus *pci_bridge_init(PCIBus *bus, int devfn, uint16_t vid, uint16_t did,
-                        pci_map_irq_fn map_irq, const char *name)
+                        uint8_t rid, pci_map_irq_fn map_irq, const char *name)
 {
     PCIBridge *s;
     s = (PCIBridge *)pci_register_device(bus, name, sizeof(PCIBridge),
@@ -948,7 +927,7 @@ PCIBus *pci_bridge_init(PCIBus *bus, int devfn, uint16_t vid, uint16_t did,
     s->dev.config[0x05] = 0x00;
     s->dev.config[0x06] = 0xa0; // status = fast back-to-back, 66MHz, no error
     s->dev.config[0x07] = 0x00; // status = fast devsel
-    s->dev.config[0x08] = 0x00; // revision
+    s->dev.config[0x08] = rid;  // revision
     s->dev.config[0x09] = 0x00; // programming i/f
     pci_config_set_class(s->dev.config, PCI_CLASS_BRIDGE_PCI);
     s->dev.config[0x0D] = 0x10; // latency_timer

@@ -406,10 +406,16 @@ static inline pciaddr_t pt_pci_base_addr(pciaddr_t base)
 }
 
 uint8_t pci_intx(struct pt_dev *ptdev);
-
-u8 pt_pci_host_read_byte(int bus, int dev, int fn, u32 addr);
-u16 pt_pci_host_read_word(int bus, int dev, int fn, u32 addr);
-u32 pt_pci_host_read_long(int bus, int dev, int fn, u32 addr);
+u32 pt_pci_host_read(int bus, int dev, int fn, u32 addr, int len);
+int pt_pci_host_write(int bus, int dev, int fn, u32 addr, u32 val, int len);
+void intel_pch_init(PCIBus *bus);
+int register_vga_regions(struct pt_dev *real_device);
+int unregister_vga_regions(struct pt_dev *real_device);
+int setup_vga_pt(struct pt_dev *real_device);
+PCIBus *intel_pci_bridge_init(PCIBus *bus, int devfn, uint16_t vid,
+           uint16_t did, const char *name, uint16_t revision);
+void igd_pci_write(PCIDevice *pci_dev, int config_addr, uint32_t val, int len);
+uint32_t igd_pci_read(PCIDevice *pci_dev, int config_addr, int len);
 
 #endif /* __PASSTHROUGH_H__ */
 

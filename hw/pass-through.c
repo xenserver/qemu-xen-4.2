@@ -1865,50 +1865,6 @@ static int pt_dev_is_virtfn(struct pci_dev *dev)
     return rc;
 }
 
-/*
- * register VGA resources for the domain with assigned gfx
- */
-static int register_vga_regions(struct pt_dev *real_device)
-{
-    int ret = 0;
-
-    ret |= xc_domain_ioport_mapping(xc_handle, domid, 0x3B0,
-            0x3B0, 0xC, DPCI_ADD_MAPPING);
-
-    ret |= xc_domain_ioport_mapping(xc_handle, domid, 0x3C0,
-            0x3C0, 0x20, DPCI_ADD_MAPPING);
-
-    ret |= xc_domain_memory_mapping(xc_handle, domid,
-            0xa0000 >> XC_PAGE_SHIFT,
-            0xa0000 >> XC_PAGE_SHIFT,
-            0x20,
-            DPCI_ADD_MAPPING);
-
-    return ret;
-}
-
-/*
- * unregister VGA resources for the domain with assigned gfx
- */
-static int unregister_vga_regions(struct pt_dev *real_device)
-{
-    int ret = 0;
-
-    ret |= xc_domain_ioport_mapping(xc_handle, domid, 0x3B0,
-            0x3B0, 0xC, DPCI_REMOVE_MAPPING);
-
-    ret |= xc_domain_ioport_mapping(xc_handle, domid, 0x3C0,
-            0x3C0, 0x20, DPCI_REMOVE_MAPPING);
-
-    ret |= xc_domain_memory_mapping(xc_handle, domid,
-            0xa0000 >> XC_PAGE_SHIFT,
-            0xa0000 >> XC_PAGE_SHIFT,
-            0x20,
-            DPCI_REMOVE_MAPPING);
-
-    return ret;
-}
-
 static int pt_register_regions(struct pt_dev *assigned_device)
 {
     int i = 0;
@@ -1970,17 +1926,7 @@ static int pt_register_regions(struct pt_dev *assigned_device)
         PT_LOG("Expansion ROM registered (size=0x%08x base_addr=0x%08x)\n",
             (uint32_t)(pci_dev->rom_size), (uint32_t)(pci_dev->rom_base_addr));
     }
-
-    if ( gfx_passthru && (pci_dev->device_class == 0x0300) )
-    {
-        ret = register_vga_regions(assigned_device);
-        if ( ret != 0 )
-        {
-            PT_LOG("VGA region mapping failed\n");
-            return ret;
-        }
-    }
-
+    register_vga_regions(assigned_device);
     return 0;
 }
 
@@ -2029,13 +1975,7 @@ static void pt_unregister_regions(struct pt_dev *assigned_device)
         }
 
     }
-
-    if ( gfx_passthru && (assigned_device->pci_dev->device_class == 0x0300) )
-    {
-        ret = unregister_vga_regions(assigned_device);
-        if ( ret != 0 )
-            PT_LOG("VGA region unmapping failed\n");
-    }
+    unregister_vga_regions(assigned_device);
 }
 
 static uint8_t find_cap_offset(struct pci_dev *pci_dev, uint8_t cap)
@@ -2097,46 +2037,51 @@ static uint32_t find_ext_cap_offset(struct pci_dev *pci_dev, uint32_t cap)
     return 0;
 }
 
-u8 pt_pci_host_read_byte(int bus, int dev, int fn, u32 addr)
+static void pci_access_init(void)
 {
-    struct pci_dev *pci_dev;
-    u8 val;
+    struct pci_access *pci_access;
 
+    if (dpci_infos.pci_access)
+        return;
+
+    /* Initialize libpci */
+    pci_access = pci_alloc();
+    if ( pci_access == NULL ) {
+        PT_LOG("Error: pci_access is NULL\n");
+        return;
+    }
+    pci_init(pci_access);
+    pci_scan_bus(pci_access);
+    dpci_infos.pci_access = pci_access;
+}
+
+u32 pt_pci_host_read(int bus, int dev, int fn, u32 addr, int len)
+{
+
+    struct pci_dev *pci_dev;
+    u32 val = -1;
+
+    pci_access_init();
     pci_dev = pci_get_dev(dpci_infos.pci_access, 0, bus, dev, fn);
     if ( !pci_dev )
         return 0;
 
-    val = pci_read_byte(pci_dev, addr);
-    pci_free_dev(pci_dev);
+    pci_read_block(pci_dev, addr, (u8 *) &val, len);
     return val;
 }
 
-u16 pt_pci_host_read_word(int bus, int dev, int fn, u32 addr)
+int pt_pci_host_write(int bus, int dev, int fn, u32 addr, u32 val, int len)
 {
     struct pci_dev *pci_dev;
-    u16 val;
+    int ret = 0;
 
+    pci_access_init();
     pci_dev = pci_get_dev(dpci_infos.pci_access, 0, bus, dev, fn);
     if ( !pci_dev )
         return 0;
 
-    val = pci_read_word(pci_dev, addr);
-    pci_free_dev(pci_dev);
-    return val;
-}
-
-u32 pt_pci_host_read_long(int bus, int dev, int fn, u32 addr)
-{
-    struct pci_dev *pci_dev;
-    u32 val;
-
-    pci_dev = pci_get_dev(dpci_infos.pci_access, 0, bus, dev, fn);
-    if ( !pci_dev )
-        return 0;
-
-    val = pci_read_long(pci_dev, addr);
-    pci_free_dev(pci_dev);
-    return val;
+    ret = pci_write_block(pci_dev, addr, (u8 *) &val, len);
+    return ret;
 }
 
 /* parse BAR */
@@ -4200,92 +4145,6 @@ static int pt_pmcsr_reg_restore(struct pt_dev *ptdev,
     return 0;
 }
 
-static int get_vgabios(unsigned char *buf)
-{
-    int fd;
-    uint32_t bios_size = 0;
-    uint32_t start = 0xC0000;
-    uint16_t magic = 0;
-
-    if ( (fd = open("/dev/mem", O_RDONLY)) < 0 )
-    {
-        PT_LOG("Error: Can't open /dev/mem: %s\n", strerror(errno));
-        return 0;
-    }
-
-    /*
-     * Check if it a real bios extension.
-     * The magic number is 0xAA55.
-     */
-    if ( start != lseek(fd, start, SEEK_SET) )
-        goto out;
-    if ( read(fd, &magic, 2) != 2 )
-        goto out;
-    if ( magic != 0xAA55 )
-        goto out;
-
-    /* Find the size of the rom extension */
-    if ( start != lseek(fd, start, SEEK_SET) )
-        goto out;
-    if ( lseek(fd, 2, SEEK_CUR) != (start + 2) )
-        goto out;
-    if ( read(fd, &bios_size, 1) != 1 )
-        goto out;
-
-    /* This size is in 512 bytes */
-    bios_size *= 512;
-
-    /*
-     * Set the file to the begining of the rombios,
-     * to start the copy.
-     */
-    if ( start != lseek(fd, start, SEEK_SET) )
-        goto out;
-
-    if ( bios_size != read(fd, buf, bios_size))
-        bios_size = 0;
-
-out:
-    close(fd);
-    return bios_size;
-}
-
-static int setup_vga_pt(void)
-{
-    unsigned char *bios = NULL;
-    int bios_size = 0;
-    char *c = NULL;
-    char checksum = 0;
-    int rc = 0;
-
-    /* Allocated 64K for the vga bios */
-    if ( !(bios = malloc(64 * 1024)) )
-        return -1;
-
-    bios_size = get_vgabios(bios);
-    if ( bios_size == 0 || bios_size > 64 * 1024)
-    {
-        PT_LOG("vga bios size (0x%x) is invalid!\n", bios_size);
-        rc = -1;
-        goto out;
-    }
-
-    /* Adjust the bios checksum */
-    for ( c = (char*)bios; c < ((char*)bios + bios_size); c++ )
-        checksum += *c;
-    if ( checksum )
-    {
-        bios[bios_size - 1] -= checksum;
-        PT_LOG("vga bios checksum is adjusted!\n");
-    }
-
-    cpu_physical_memory_rw(0xc0000, bios, bios_size, 1);
-
-out:
-    free(bios);
-    return rc;
-}
-
 static struct pt_dev * register_real_device(PCIBus *e_bus,
         const char *e_dev_name, int e_devfn, uint8_t r_bus, uint8_t r_dev,
         uint8_t r_func, uint32_t machine_irq, struct pci_access *pci_access,
@@ -4387,15 +4246,12 @@ static struct pt_dev * register_real_device(PCIBus *e_bus,
     pt_register_regions(assigned_device);
 
     /* Setup VGA bios for passthroughed gfx */
-    if ( gfx_passthru && (assigned_device->pci_dev->device_class == 0x0300) )
+    if ( setup_vga_pt(assigned_device) < 0 )
     {
-        rc = setup_vga_pt();
-        if ( rc < 0 )
-        {
-            PT_LOG("Setup VGA BIOS of passthroughed gfx failed!\n");
-            return NULL;
-        }
+        PT_LOG("Setup VGA BIOS of passthroughed gfx failed!\n");
+        return NULL;
     }
+
 
     /* reinitialize each config register to be emulated */
     rc = pt_config_init(assigned_device);
@@ -4548,19 +4404,8 @@ int power_on_php_devfn(int devfn)
 {
     struct php_dev *php_dev = &dpci_infos.php_devs[devfn];
     struct pt_dev *pt_dev;
-    struct pci_access *pci_access;
 
-    if (!dpci_infos.pci_access) {
-        /* Initialize libpci */
-        pci_access = pci_alloc();
-        if ( pci_access == NULL ) {
-            PT_LOG("Error: pci_access is NULL\n");
-            return -1;
-        }
-        pci_init(pci_access);
-        pci_scan_bus(pci_access);
-        dpci_infos.pci_access = pci_access;
-    }
+    pci_access_init();
 
     pt_dev =
         register_real_device(dpci_infos.e_bus,

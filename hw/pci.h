@@ -254,7 +254,7 @@ int pci_assign_devaddr(const char *addr, int *domp, int *busp, unsigned *slotp);
 
 void pci_info(void);
 PCIBus *pci_bridge_init(PCIBus *bus, int devfn, uint16_t vid, uint16_t did,
-                        pci_map_irq_fn map_irq, const char *name);
+                        uint8_t rid, pci_map_irq_fn map_irq, const char *name);
 
 #define NR_PCI_FUNC          8
 #define NR_PCI_DEV           32
@@ -341,5 +341,9 @@ PCIBus *sh_pci_register_bus(pci_set_irq_fn set_irq, pci_map_irq_fn map_irq,
 
 /* pass-through.c */
 int pt_init(PCIBus *e_bus);
+void pci_bridge_write_config(PCIDevice *d,
+                             uint32_t address, uint32_t val, int len);
+PCIBus *pci_register_secondary_bus(PCIDevice *dev, pci_map_irq_fn map_irq);
+
 
 #endif

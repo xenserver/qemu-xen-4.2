@@ -25,7 +25,9 @@
 #include "hw.h"
 #include "pc.h"
 #include "pci.h"
-
+#ifdef CONFIG_PASSTHROUGH
+#include "pass-through.h"
+#endif
 
 static void i440fx_set_irq(qemu_irq *pic, int irq_num, int level);
 static void piix3_write_config(PCIDevice *d, 
@@ -206,8 +208,13 @@ PCIBus *i440fx_init(PCIDevice **pi440fx_state, qemu_irq *pic)
     register_ioport_read(0xcfc, 4, 2, pci_host_data_readw, s);
     register_ioport_read(0xcfc, 4, 4, pci_host_data_readl, s);
 
+#ifdef CONFIG_PASSTHROUGH
+    d = pci_register_device(b, "i440FX", sizeof(PCIDevice), 0,
+                            igd_pci_read, igd_pci_write);
+#else
     d = pci_register_device(b, "i440FX", sizeof(PCIDevice), 0,
                             NULL, NULL);
+#endif
 
     pci_config_set_vendor_id(d->config, PCI_VENDOR_ID_INTEL);
     pci_config_set_device_id(d->config, PCI_DEVICE_ID_INTEL_82441);

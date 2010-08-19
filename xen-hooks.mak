@@ -61,7 +61,7 @@ CONFIG_PASSTHROUGH=1
 endif
 
 ifdef CONFIG_PASSTHROUGH
-OBJS+= pass-through.o pt-msi.o
+OBJS+= pass-through.o pt-msi.o pt-graphics.o
 LIBS += -lpci
 CFLAGS += -DCONFIG_PASSTHROUGH 
 $(info === PCI passthrough capability has been enabled ===)
