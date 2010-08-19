@@ -4040,9 +4040,7 @@ static void help(int exitcode)
            "-alt-grab       use Ctrl-Alt-Shift to grab mouse (instead of Ctrl-Alt)\n"
            "-no-quit        disable SDL window close capability\n"
            "-sdl            enable SDL\n"
-#ifdef CONFIG_OPENGL
            "-disable-opengl disable OpenGL rendering, using SDL"
-#endif
 #endif
            "-portrait       rotate graphical output 90 deg left (only PXA LCD)\n"
            "-vga [std|cirrus|vmware|passthrough|none]\n"
@@ -4447,9 +4445,7 @@ static const QEMUOption qemu_options[] = {
     { "d", HAS_ARG, QEMU_OPTION_domid }, /* deprecated; for xend compatibility */
     { "domid", HAS_ARG, QEMU_OPTION_domid },
     { "domain-name", 1, QEMU_OPTION_domainname },
-#ifdef CONFIG_OPENGL
     { "disable-opengl", 0, QEMU_OPTION_disable_opengl },
-#endif
     { "acpi", 0, QEMU_OPTION_acpi }, /* deprecated, for xend compatibility */
     { "direct_pci", HAS_ARG, QEMU_OPTION_direct_pci },
     { "gfx_passthru", 0, QEMU_OPTION_gfx_passthru},
