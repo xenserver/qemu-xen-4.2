@@ -31,8 +31,9 @@ void intel_pch_init(PCIBus *bus)
     did = pt_pci_host_read(0, 0x1f, 0, 2, 2);
     rid = pt_pci_host_read(0, 0x1f, 0, 8, 1);
 
-    pci_bridge_init(bus, PCI_DEVFN(0x1f, 0), vid, did, rid,
-                    pch_map_irq, "intel_bridge_1f");
+    if ( vid == 0x8086 ) 
+        pci_bridge_init(bus, PCI_DEVFN(0x1f, 0), vid, did, rid,
+                        pch_map_irq, "intel_bridge_1f");
 }
 
 void igd_pci_write(PCIDevice *pci_dev, int config_addr, uint32_t val, int len)
@@ -92,6 +93,7 @@ uint32_t igd_pci_read(PCIDevice *pci_dev, int config_addr, int len)
  */
 int register_vga_regions(struct pt_dev *real_device)
 {
+    u32 vendor_id, igd_opregion;
     int ret = 0;
 
     if ( !gfx_passthru || real_device->pci_dev->device_class != 0x0300 )
@@ -109,6 +111,19 @@ int register_vga_regions(struct pt_dev *real_device)
             0x20,
             DPCI_ADD_MAPPING);
 
+    /* 1:1 map ASL Storage register value */
+    vendor_id = pt_pci_host_read(0, 2, 0, 0, 2);
+    igd_opregion = pt_pci_host_read(0, 2, 0, 0xfc, 4);
+    if ( (vendor_id == 0x8086) && igd_opregion )
+    {
+        ret |= xc_domain_memory_mapping(xc_handle, domid,
+                igd_opregion >> XC_PAGE_SHIFT,
+                igd_opregion >> XC_PAGE_SHIFT,
+                2,
+                DPCI_ADD_MAPPING);
+        PT_LOG("register_vga: igd_opregion = %x\n", igd_opregion);
+    }
+
     if ( ret != 0 )
         PT_LOG("VGA region mapping failed\n");
 
@@ -120,7 +135,7 @@ int register_vga_regions(struct pt_dev *real_device)
  */
 int unregister_vga_regions(struct pt_dev *real_device)
 {
-    u32 igd_opregion, igd_bsm;
+    u32 vendor_id, igd_opregion;
     int ret = 0;
 
     if ( !gfx_passthru || real_device->pci_dev->device_class != 0x0300 )
@@ -138,12 +153,16 @@ int unregister_vga_regions(struct pt_dev *real_device)
             20,
             DPCI_REMOVE_MAPPING);
 
+    vendor_id = pt_pci_host_read(0, 2, 0, 0, 2);
     igd_opregion = pt_pci_host_read(0, 2, 0, 0xfc, 4);
-    ret |= xc_domain_memory_mapping(xc_handle, domid,
-            igd_opregion >> XC_PAGE_SHIFT,
-            igd_opregion >> XC_PAGE_SHIFT,
-            2,
-            DPCI_REMOVE_MAPPING);
+    if ( (vendor_id == 0x8086) && igd_opregion )
+    {
+        ret |= xc_domain_memory_mapping(xc_handle, domid,
+                igd_opregion >> XC_PAGE_SHIFT,
+                igd_opregion >> XC_PAGE_SHIFT,
+                2,
+                DPCI_REMOVE_MAPPING);
+    }
 
     if ( ret != 0 )
         PT_LOG("VGA region unmapping failed\n");

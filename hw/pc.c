@@ -982,6 +982,10 @@ vga_bios_error:
         pci_bus = NULL;
     }
 
+#ifdef CONFIG_PASSTHROUGH
+    intel_pch_init(pci_bus);
+#endif
+
     /* init basic PC hardware */
     register_ioport_write(0x80, 1, 1, ioport80_write, NULL);
 
