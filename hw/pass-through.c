@@ -4260,7 +4260,7 @@ static struct pt_dev * register_real_device(PCIBus *e_bus,
     }
 
     /* Bind interrupt */
-    if (!assigned_device->dev.config[0x3d])
+    if (!assigned_device->dev.config[PCI_INTERRUPT_PIN])
         goto out;
 
     if ( PT_MACHINE_IRQ_AUTO == machine_irq )

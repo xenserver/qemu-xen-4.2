@@ -923,16 +923,16 @@ PCIBus *pci_bridge_init(PCIBus *bus, int devfn, uint16_t vid, uint16_t did,
     pci_config_set_vendor_id(s->dev.config, vid);
     pci_config_set_device_id(s->dev.config, did);
 
-    s->dev.config[0x04] = 0x06; // command = bus master, pci mem
-    s->dev.config[0x05] = 0x00;
-    s->dev.config[0x06] = 0xa0; // status = fast back-to-back, 66MHz, no error
-    s->dev.config[0x07] = 0x00; // status = fast devsel
-    s->dev.config[0x08] = rid;  // revision
-    s->dev.config[0x09] = 0x00; // programming i/f
+    s->dev.config[PCI_COMMAND] = 0x06; // command = bus master, pci mem
+    s->dev.config[PCI_COMMAND + 1] = 0x00;
+    s->dev.config[PCI_STATUS] = 0xa0; // status = fast back-to-back, 66MHz, no error
+    s->dev.config[PCI_STATUS + 1] = 0x00; // status = fast devsel
+    s->dev.config[PCI_REVISION] = rid;
+    s->dev.config[PCI_CLASS_PROG] = 0x00; // programming i/f
     pci_config_set_class(s->dev.config, PCI_CLASS_BRIDGE_PCI);
-    s->dev.config[0x0D] = 0x10; // latency_timer
-    s->dev.config[0x0E] = 0x81; // header_type
-    s->dev.config[0x1E] = 0xa0; // secondary status
+    s->dev.config[PCI_LATENCY_TIMER] = 0x10;
+    s->dev.config[PCI_HEADER_TYPE] = 0x81;
+    s->dev.config[PCI_SEC_STATUS] = 0xa0;
 
     s->bus = pci_register_secondary_bus(&s->dev, map_irq);
     return s->bus;

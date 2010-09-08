@@ -156,14 +156,22 @@ typedef struct PCIIORegion {
 #define PCI_COMMAND		0x04	/* 16 bits */
 #define  PCI_COMMAND_IO		0x1	/* Enable response in I/O space */
 #define  PCI_COMMAND_MEMORY	0x2	/* Enable response in Memory space */
-#define PCI_REVISION            0x08
-#define PCI_CLASS_DEVICE        0x0a    /* Device class */
+#define PCI_STATUS		0x06	/* 16 bits */
+#define PCI_REVISION		0x08	/* 8 bits */
+#define PCI_CLASS_PROG		0x09
+#define PCI_CLASS_DEVICE	0x0a    /* Device class */
+#define PCI_CACHE_LINE_SIZE	0x0c	/* 8 bits */
+#define PCI_LATENCY_TIMER	0x0d	/* 8 bits */
+#define PCI_HEADER_TYPE		0x0e	/* 8 bits */
 #define PCI_SUBVENDOR_ID	0x2c	/* 16 bits */
 #define PCI_SUBDEVICE_ID	0x2e	/* 16 bits */
 #define PCI_INTERRUPT_LINE	0x3c	/* 8 bits */
 #define PCI_INTERRUPT_PIN	0x3d	/* 8 bits */
 #define PCI_MIN_GNT		0x3e	/* 8 bits */
 #define PCI_MAX_LAT		0x3f	/* 8 bits */
+
+/* Header type 1 (PCI-to-PCI bridges) */
+#define PCI_SEC_STATUS		0x1e	/* Secondary status register */
 
 /* Bits in the PCI Status Register (PCI 2.3 spec) */
 #define PCI_STATUS_RESERVED1	0x007
