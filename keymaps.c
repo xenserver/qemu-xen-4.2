@@ -51,6 +51,7 @@ typedef struct {
     struct key_range *numlock_range;
     struct key_range *shift_range;
     struct key_range *localstate_range;
+    struct key_range *altgr_range;
 } kbd_layout_t;
 
 static void add_to_key_range(struct key_range **krp, int code) {
@@ -133,7 +134,11 @@ static kbd_layout_t *parse_keyboard_layout(const char *language,
 			add_to_key_range(&k->localstate_range, keycode);
 			//fprintf(stderr, "localstate keysym %04x keycode %d\n", keysym, keycode);
 		    }
-
+		    if (rest && strstr(rest, "altgr")) {
+			add_to_key_range(&k->altgr_range, keysym);
+			//fprintf(stderr, "altgr keysym %04x keycode %d\n", keysym, keycode);
+		    }
+	
 		    /* if(keycode&0x80)
 		       keycode=(keycode<<8)^0x80e0; */
 		    if (keysym < MAX_NORMAL_KEYCODE) {
@@ -233,3 +238,16 @@ static inline int keycode_is_shiftable(void *kbd_layout, int keycode)
 	    return 0;
     return 1;
 }
+
+static inline int keysym_is_altgr(void *kbd_layout, int keysym)
+{
+    kbd_layout_t *k = kbd_layout;
+    struct key_range *kr;
+
+    for (kr = k->altgr_range; kr; kr = kr->next)
+        if (keysym >= kr->start && keysym <= kr->end){
+            return 1;
+	}
+    return 0;
+}
+

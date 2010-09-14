@@ -1274,12 +1274,27 @@ static void press_key_shift_up(VncState *vs, int down, int keycode)
     }
 }
 
+static void press_key_altgr_down(VncState *vs, int down)
+{
+    kbd_put_keycode(0xe0);
+    if (down){
+        kbd_put_keycode(0xb8 & 0x7f);
+        vs->modifiers_state[0xb8] = 1;
+    }
+    else {
+        kbd_put_keycode(0xb8 | 0x80);
+        vs->modifiers_state[0xb8] = 0;
+    }
+}
+
 static void do_key_event(VncState *vs, int down, uint32_t sym)
 {
     int keycode;
     int shift_keys = 0;
     int shift = 0;
     int keypad = 0;
+    int altgr = 0;
+    int altgr_keys = 0;
 
     if (is_graphic_console()) {
         if (sym >= 'A' && sym <= 'Z') {
@@ -1289,8 +1304,11 @@ static void do_key_event(VncState *vs, int down, uint32_t sym)
         else {
             shift = keysym_is_shift(vs->kbd_layout, sym & 0xFFFF);
         }
+
+        altgr = keysym_is_altgr(vs->kbd_layout, sym & 0xFFFF);
     }
     shift_keys = vs->modifiers_state[0x2a] | vs->modifiers_state[0x36];
+    altgr_keys = vs->modifiers_state[0xb8];
 
     keycode = keysym2scancode(vs->kbd_layout, sym & 0xFFFF);
     if (keycode == 0) {
@@ -1357,6 +1375,11 @@ static void do_key_event(VncState *vs, int down, uint32_t sym)
     }
 
     if (is_graphic_console()) {
+
+        if (altgr && !altgr_keys) {
+            press_key_altgr_down(vs, down);
+        }
+
         /*  If the shift state needs to change then simulate an additional
             keypress before sending this one. Ignore for non shiftable keys.
         */
