@@ -2493,7 +2493,7 @@ void xen_vga_populate_vram(uint64_t vram_addr, uint32_t vga_ram_size)
     for (i = 0; i < nr_pfn; i++)
         pfn_list[i] = (vram_addr >> TARGET_PAGE_BITS) + i;
 
-    if (xc_domain_memory_populate_physmap(xc_handle, domid, nr_pfn, 0, 0, pfn_list)) {
+    if (xc_domain_populate_physmap_exact(xc_handle, domid, nr_pfn, 0, 0, pfn_list)) {
         fprintf(stderr, "Failed to populate video ram\n");
         exit(1);
     }
