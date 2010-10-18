@@ -2142,7 +2142,6 @@ static CPUWriteMemoryFunc *vga_mem_write[3] = {
 void set_vram_mapping(void *opaque, unsigned long begin, unsigned long end)
 {
     unsigned long i;
-    struct xen_add_to_physmap xatp;
     int rc;
     VGAState *s = (VGAState *) opaque;
 
@@ -2151,15 +2150,12 @@ void set_vram_mapping(void *opaque, unsigned long begin, unsigned long end)
 
     fprintf(logfile,"mapping vram to %lx - %lx\n", begin, end);
 
-    xatp.domid = domid;
-    xatp.space = XENMAPSPACE_gmfn;
-
     for (i = 0; i < (end - begin) >> TARGET_PAGE_BITS; i++) {
-        xatp.idx = (s->vram_gmfn >> TARGET_PAGE_BITS) + i;
-        xatp.gpfn = (begin >> TARGET_PAGE_BITS) + i;
-        rc = xc_memory_op(xc_handle, XENMEM_add_to_physmap, &xatp);
+        unsigned long idx = (s->vram_gmfn >> TARGET_PAGE_BITS) + i;
+        xen_pfn_t gpfn = (begin >> TARGET_PAGE_BITS) + i;
+        rc = xc_domain_add_to_physmap(xc_handle, domid, XENMAPSPACE_gmfn, idx, gpfn);
         if (rc) {
-            fprintf(stderr, "add_to_physmap MFN %"PRI_xen_pfn" to PFN %"PRI_xen_pfn" failed: %d\n", xatp.idx, xatp.gpfn, rc);
+            fprintf(stderr, "add_to_physmap MFN %"PRI_xen_pfn" to PFN %"PRI_xen_pfn" failed: %d\n", idx, gpfn, rc);
             return;
         }
     }
