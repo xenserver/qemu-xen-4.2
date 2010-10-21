@@ -52,6 +52,9 @@ static int debugflags = DBGBIT(TXERR) | DBGBIT(GENERAL);
 #define IOPORT_SIZE       0x40
 #define PNPMMIO_SIZE      0x20000
 
+#define REG_IOADDR 0x0
+#define REG_IODATA 0x4
+
 /*
  * HW models:
  *  E1000_DEV_ID_82540EM works with Windows and Linux
@@ -77,6 +80,8 @@ typedef struct E1000State_st {
     VLANClientState *vc;
     NICInfo *nd;
     int mmio_index;
+    int ioport_base;
+    uint32_t ioport_reg[2];
 
     uint32_t mac_reg[0x8000];
     uint16_t phy_reg[0x20];
@@ -143,12 +148,7 @@ static const char phy_regcap[0x20] = {
     [PHY_ID2] = PHY_R,		[M88E1000_PHY_SPEC_STATUS] = PHY_R
 };
 
-static void
-ioport_map(PCIDevice *pci_dev, int region_num, uint32_t addr,
-           uint32_t size, int type)
-{
-    DBGOUT(IO, "e1000_ioport_map addr=0x%04x size=0x%08x\n", addr, size);
-}
+static void e1000_reset(void *opaque);
 
 static void
 set_interrupt_cause(E1000State *s, int index, uint32_t val)
@@ -188,6 +188,18 @@ rxbufsize(uint32_t v)
         return 256;
     }
     return 2048;
+}
+
+static void
+set_ctrl(E1000State *s, int index, uint32_t val)
+{
+    DBGOUT(IO, "set ctrl = %08x\n", val);
+    if (val & E1000_CTRL_RST) {
+        s->mac_reg[CTRL] = val;
+        e1000_reset(s);
+    }
+    /* RST is self clearing */
+    s->mac_reg[CTRL] = val & ~E1000_CTRL_RST;
 }
 
 static void
@@ -590,7 +602,7 @@ e1000_can_receive(void *opaque)
 {
     E1000State *s = opaque;
 
-    return (s->mac_reg[RCTL] & E1000_RCTL_EN);
+    return (s->mac_reg[RCTL] & E1000_RCTL_EN && s->mac_reg[RDLEN] != 0);
 }
 
 static void
@@ -622,6 +634,11 @@ e1000_receive(void *opaque, const uint8_t *buf, int size)
         vlan_status = E1000_RXD_STAT_VP;
         vlan_offset = 4;
         size -= 4;
+    }
+
+    if (s->mac_reg[RDLEN] == 0) {
+        DBGOUT(RX, "receive descriptor buffer not set\n");
+        return;
     }
 
     rdh_start = s->mac_reg[RDH];
@@ -784,17 +801,71 @@ enum { NREADOPS = ARRAY_SIZE(macreg_readops) };
 static void (*macreg_writeops[])(E1000State *, int, uint32_t) = {
     putreg(PBA),	putreg(EERD),	putreg(SWSM),	putreg(WUFC),
     putreg(TDBAL),	putreg(TDBAH),	putreg(TXDCTL),	putreg(RDBAH),
-    putreg(RDBAL),	putreg(LEDCTL), putreg(CTRL),	putreg(VET),
+    putreg(RDBAL),	putreg(LEDCTL), putreg(VET),
     [TDLEN] = set_dlen,	[RDLEN] = set_dlen,	[TCTL] = set_tctl,
     [TDT] = set_tctl,	[MDIC] = set_mdic,	[ICS] = set_ics,
     [TDH] = set_16bit,	[RDH] = set_16bit,	[RDT] = set_rdt,
     [IMC] = set_imc,	[IMS] = set_ims,	[ICR] = set_icr,
-    [EECD] = set_eecd,	[RCTL] = set_rx_control,
+    [EECD] = set_eecd,	[RCTL] = set_rx_control, [CTRL] = set_ctrl,
     [RA ... RA+31] = &mac_writereg,
     [MTA ... MTA+127] = &mac_writereg,
     [VFTA ... VFTA+127] = &mac_writereg,
 };
 enum { NWRITEOPS = ARRAY_SIZE(macreg_writeops) };
+
+static void
+e1000_ioport_writel(void *opaque, uint32_t addr, uint32_t val)
+{
+    E1000State *s = opaque;
+
+    if (addr == s->ioport_base + REG_IOADDR) {
+        DBGOUT(IO, "e1000_ioport_writel write base: 0x%04x\n", val);
+        s->ioport_reg[REG_IOADDR] = val & 0xfffff;
+    } else if (addr == (s->ioport_base + REG_IODATA)) {
+        unsigned int index = (s->ioport_reg[REG_IOADDR] & 0x1ffff) >> 2;
+
+#ifdef TARGET_WORDS_BIGENDIAN
+        val = bswap32(val);
+#endif
+        DBGOUT(IO, "e1000_ioport_writel %x: 0x%04x\n", index, val);
+
+        if (index < NWRITEOPS && macreg_writeops[index]) {
+            macreg_writeops[index](s, index, val);
+        } else if (index < NREADOPS && macreg_readops[index]) {
+            DBGOUT(IO, "e1000_ioport_writel RO %x: 0x%04x\n", index << 2, val);
+        } else {
+            DBGOUT(UNKNOWN, "IO unknown write index=0x%08x,val=0x%08x\n",
+                   index, val);
+        }
+    } else {
+        DBGOUT(UNKNOWN, "IO unknown write addr=0x%08x,val=0x%08x\n",
+               addr, val);
+    }
+}
+
+static uint32_t
+e1000_ioport_readl(void *opaque, uint32_t addr)
+{
+    E1000State *s = opaque;
+
+    if (addr == s->ioport_base + REG_IOADDR) {
+        return s->ioport_reg[REG_IOADDR] & 0xfffff;
+    } else if (addr == (s->ioport_base + REG_IODATA)) {
+        unsigned int index = (s->ioport_reg[REG_IOADDR] & 0x1ffff) >> 2;
+
+        if (index < NREADOPS && macreg_readops[index]) {
+            uint32_t val = macreg_readops[index](s, index);
+#ifdef TARGET_WORDS_BIGENDIAN
+            val = bswap32(val);
+#endif
+            return val;
+        }
+        DBGOUT(UNKNOWN, "IO unknown read addr=0x%08x\n", index<<2);
+    } else {
+        DBGOUT(UNKNOWN, "IO unknown read addr=0x%08x\n", addr);
+    }
+    return 0;
+}
 
 static void
 e1000_mmio_writel(void *opaque, target_phys_addr_t addr, uint32_t val)
@@ -1003,6 +1074,31 @@ static const uint32_t mac_reg_init[] = {
 
 /* PCI interface */
 
+static void
+e1000_ioport_map(PCIDevice *pci_dev, int region_num, uint32_t addr,
+                 uint32_t size, int type)
+{
+    E1000State *d = (E1000State *) pci_dev;
+
+    return;
+
+    DBGOUT(IO, "e1000_ioport_map addr=0x%04x size=0x%08x\n", addr, size);
+
+    d->ioport_base = addr;
+
+    /* Writes that are less than 32 bits are ignored on IOADDR.
+     * For the Flash access, a write can be less than 32 bits for
+     * IODATA register, but is not handled.
+     */
+
+    register_ioport_read(addr, size, 1, e1000_ioport_readl, d);
+
+    register_ioport_read(addr, size, 2, e1000_ioport_readl, d);
+
+    register_ioport_write(addr, size, 4, e1000_ioport_writel, d);
+    register_ioport_read(addr, size, 4, e1000_ioport_readl, d);
+}
+
 static CPUWriteMemoryFunc *e1000_mmio_write[] = {
     e1000_mmio_writeb,	e1000_mmio_writew,	e1000_mmio_writel
 };
@@ -1044,6 +1140,19 @@ pci_e1000_uninit(PCIDevice *dev)
     return 0;
 }
 
+static void e1000_reset(void *opaque)
+{
+    E1000State *d = opaque;
+
+    memset(d->ioport_reg, 0, sizeof d->ioport_reg);
+    memset(d->phy_reg, 0, sizeof d->phy_reg);
+    memmove(d->phy_reg, phy_reg_init, sizeof phy_reg_init);
+    memset(d->mac_reg, 0, sizeof d->mac_reg);
+    memmove(d->mac_reg, mac_reg_init, sizeof mac_reg_init);
+    d->rxbuf_min_shift = 1;
+    memset(&d->tx, 0, sizeof d->tx);
+}
+
 PCIDevice *
 pci_e1000_init(PCIBus *bus, NICInfo *nd, int devfn)
 {
@@ -1076,7 +1185,7 @@ pci_e1000_init(PCIBus *bus, NICInfo *nd, int devfn)
                            PCI_ADDRESS_SPACE_MEM, e1000_mmio_map);
 
     pci_register_io_region((PCIDevice *)d, 1, IOPORT_SIZE,
-                           PCI_ADDRESS_SPACE_IO, ioport_map);
+                           PCI_ADDRESS_SPACE_IO, e1000_ioport_map);
 
     d->nd = nd;
     memmove(d->eeprom_data, e1000_eeprom_template,
@@ -1088,12 +1197,7 @@ pci_e1000_init(PCIBus *bus, NICInfo *nd, int devfn)
     checksum = (uint16_t) EEPROM_SUM - checksum;
     d->eeprom_data[EEPROM_CHECKSUM_REG] = checksum;
 
-    memset(d->phy_reg, 0, sizeof d->phy_reg);
-    memmove(d->phy_reg, phy_reg_init, sizeof phy_reg_init);
-    memset(d->mac_reg, 0, sizeof d->mac_reg);
-    memmove(d->mac_reg, mac_reg_init, sizeof mac_reg_init);
-    d->rxbuf_min_shift = 1;
-    memset(&d->tx, 0, sizeof d->tx);
+    e1000_reset(d);
 
     d->vc = qemu_new_vlan_client(nd->vlan, nd->model, nd->name,
                                  e1000_receive, e1000_can_receive, d);
