@@ -203,8 +203,8 @@ qemu-img$(EXESUF) qemu-nbd$(EXESUF): LIBS += -lz
 clean:
 # avoid old build problems by removing potentially incorrect old files
 	rm -f config.mak config.h op-i386.h opc-i386.h gen-op-i386.h op-arm.h opc-arm.h gen-op-arm.h
-	rm -f *.o *.d *.a $(TOOLS) TAGS cscope.* *.pod *~ */*~
-	rm -f slirp/*.o slirp/*.d audio/*.o audio/*.d
+	rm -f *.o .*.d *.a $(TOOLS) TAGS cscope.* *.pod *~ */*~
+	rm -f slirp/*.o slirp/.*.d audio/*.o audio/.*.d
 	$(MAKE) -C tests clean
 	for d in $(TARGET_DIRS); do \
 	$(MAKE) -C $$d $@ || exit 1 ; \
@@ -369,4 +369,4 @@ tarbin:
 	$(mandir)/man8/qemu-nbd.8
 
 # Include automatically generated dependency files
--include $(wildcard *.d audio/*.d slirp/*.d)
+-include $(wildcard .*.d audio/.*.d slirp/.*.d)

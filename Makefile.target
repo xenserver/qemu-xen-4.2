@@ -750,7 +750,7 @@ endif
 
 clean:
 	rm -f *.o *.a *~ $(PROGS) nwfpe/*.o fpu/*.o
-	rm -f *.d */*.d tcg/*.o
+	rm -f .*.d */.*.d tcg/*.o
 
 install: all install-hook
 ifneq ($(PROGS),)
@@ -758,4 +758,4 @@ ifneq ($(PROGS),)
 endif
 
 # Include automatically generated dependency files
--include $(wildcard *.d */*.d)
+-include $(wildcard .*.d */.*.d)
