@@ -1573,10 +1573,9 @@ void xenstore_store_pv_console_info(int i, CharDriverState *chr,
 				     const char *devname) {
     char buf[32];
 
-    if (i == 0) {
-        snprintf(buf, sizeof(buf), "/console", i);
-        store_dev_info(devname, domid, chr, buf);
-    } else {
+    if (i == 0)
+        store_dev_info(devname, domid, chr, "/console");
+    else {
         snprintf(buf, sizeof(buf), "/device/console/%d", i);
         store_dev_info(devname, domid, chr, buf);
     }

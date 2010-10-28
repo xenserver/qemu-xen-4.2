@@ -181,7 +181,8 @@ static void xencons_send(struct XenConsole *con)
 static int con_init(struct XenDevice *xendev)
 {
     struct XenConsole *con = container_of(xendev, struct XenConsole, xendev);
-    char *type, *dom, *output, label[32];
+    char *type, *dom, label[32];
+    const char *output;
 
     /* setup */
     dom = xs_get_domain_path(xenstore, con->xendev.dom);

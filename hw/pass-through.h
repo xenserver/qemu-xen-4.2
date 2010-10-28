@@ -414,8 +414,8 @@ int unregister_vga_regions(struct pt_dev *real_device);
 int setup_vga_pt(struct pt_dev *real_device);
 PCIBus *intel_pci_bridge_init(PCIBus *bus, int devfn, uint16_t vid,
            uint16_t did, const char *name, uint16_t revision);
-void igd_pci_write(PCIDevice *pci_dev, int config_addr, uint32_t val, int len);
-uint32_t igd_pci_read(PCIDevice *pci_dev, int config_addr, int len);
+void igd_pci_write(PCIDevice *pci_dev, uint32_t config_addr, uint32_t val, int len);
+uint32_t igd_pci_read(PCIDevice *pci_dev, uint32_t config_addr, int len);
 
 #endif /* __PASSTHROUGH_H__ */
 

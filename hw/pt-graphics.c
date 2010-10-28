@@ -36,7 +36,7 @@ void intel_pch_init(PCIBus *bus)
                         pch_map_irq, "intel_bridge_1f");
 }
 
-void igd_pci_write(PCIDevice *pci_dev, int config_addr, uint32_t val, int len)
+void igd_pci_write(PCIDevice *pci_dev, uint32_t config_addr, uint32_t val, int len)
 {
     assert(pci_dev->devfn == 0x00);
     if ( !igd_passthru ) {
@@ -57,7 +57,7 @@ void igd_pci_write(PCIDevice *pci_dev, int config_addr, uint32_t val, int len)
     }
 }
 
-uint32_t igd_pci_read(PCIDevice *pci_dev, int config_addr, int len)
+uint32_t igd_pci_read(PCIDevice *pci_dev, uint32_t config_addr, int len)
 {
     uint32_t val;
 

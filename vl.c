@@ -41,6 +41,7 @@
 #include "audio/audio.h"
 #include "migration.h"
 #include "kvm.h"
+#include "dma.h"
 #include "balloon.h"
 
 #include "hw/pci.h"
