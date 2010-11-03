@@ -714,7 +714,7 @@ static void load_linux(uint8_t *option_rom,
 
     /* generate bootsector to set up the initial register state */
     real_seg = real_addr >> 4;
-    seg[0] = seg[2] = seg[3] = seg[4] = seg[4] = real_seg;
+    seg[0] = seg[2] = seg[3] = seg[4] = real_seg;
     seg[1] = real_seg+0x20;	/* CS */
     memset(gpr, 0, sizeof gpr);
     gpr[4] = cmdline_addr-real_addr-16;	/* SP (-16 is paranoia) */
