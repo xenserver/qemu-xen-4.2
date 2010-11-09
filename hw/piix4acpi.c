@@ -52,9 +52,12 @@
 
 /* Sleep state type codes as defined by the \_Sx objects in the DSDT. */
 /* These must be kept in sync with the DSDT (hvmloader/acpi/dsdt.asl) */
-#define SLP_TYP_S4        (6 << 10)
-#define SLP_TYP_S3        (5 << 10)
-#define SLP_TYP_S5        (7 << 10)
+#define SLP_TYP_S4_V0     (6 << 10)
+#define SLP_TYP_S3_V0     (5 << 10)
+#define SLP_TYP_S5_V0     (7 << 10)
+#define SLP_TYP_S4_V1     (0 << 10)
+#define SLP_TYP_S3_V1     (1 << 10)
+#define SLP_TYP_S5_V1     (0 << 10)
 
 #define ACPI_DBG_IO_ADDR  0xb044
 #define ACPI_PHP_IO_ADDR  0x10c0
@@ -75,12 +78,14 @@
 typedef struct PCIAcpiState {
     PCIDevice dev;
     uint16_t pm1_control; /* pm1a_ECNT_BLK */
+
+    uint32_t pm1a_evt_blk_address;
 } PCIAcpiState;
 
 typedef struct GPEState {
     /* GPE0 block */
-    uint8_t gpe0_sts[ACPI_GPE0_BLK_LEN / 2];
-    uint8_t gpe0_en[ACPI_GPE0_BLK_LEN / 2];
+    uint8_t gpe0_sts[ACPI_GPE0_BLK_LEN_V0 / 2];
+    uint8_t gpe0_en[ACPI_GPE0_BLK_LEN_V0 / 2];
 
     /* CPU bitmap */
     uint8_t cpus_sts[32];
@@ -88,6 +93,8 @@ typedef struct GPEState {
     /* SCI IRQ level */
     uint8_t sci_asserted;
 
+    uint32_t gpe0_blk_address;
+    uint32_t gpe0_blk_half_len;
 } GPEState;
 
 static GPEState gpe_state;
@@ -99,6 +106,9 @@ typedef struct PHPDevFn {
     uint8_t plug_devfn;              /* DevFn number
                                       * PSTB in ASL */
 } PHPDevFn;
+
+static void acpi_map(PCIDevice *pci_dev, int region_num,
+                     uint32_t addr, uint32_t size, int type);
 
 static PHPDevFn php_devfn;
 int s3_shutdown_flag;
@@ -138,18 +148,36 @@ static void piix4acpi_save(QEMUFile *f, void *opaque)
     PCIAcpiState *s = opaque;
     pci_device_save(&s->dev, f);
     qemu_put_be16s(f, &s->pm1_control);
+    qemu_put_be32s(f, &s->pm1a_evt_blk_address);
 }
 
 static int piix4acpi_load(QEMUFile *f, void *opaque, int version_id)
 {
     PCIAcpiState *s = opaque;
     int ret;
-    if (version_id > 1) 
+    uint32_t pm1a_evt_address_assigned;
+
+    if (version_id > 2)
         return -EINVAL;
     ret = pci_device_load(&s->dev, f);
     if (ret < 0)
         return ret;
     qemu_get_be16s(f, &s->pm1_control);
+
+    pm1a_evt_address_assigned = s->pm1a_evt_blk_address;
+    if (version_id <= 1) {
+        /* map to old ioport instead of the new one */
+        s->pm1a_evt_blk_address = ACPI_PM1A_EVT_BLK_ADDRESS_V0;
+    } else {
+        qemu_get_be32s(f, &s->pm1a_evt_blk_address);
+    }
+
+    if (s->pm1a_evt_blk_address != pm1a_evt_address_assigned) {
+        PIIX4ACPI_LOG(PIIX4ACPI_LOG_DEBUG, "ACPI: Change firmware IOPorts mapping.\n");
+        /* unmap new ioport to use old ioport */
+        isa_unassign_ioport(pm1a_evt_address_assigned + 4, 2);
+        acpi_map((PCIDevice *)s, 0, s->pm1a_evt_blk_address, 0x10, PCI_ADDRESS_SPACE_IO);
+    }
     return 0;
 }
 
@@ -172,15 +200,17 @@ static void acpi_shutdown(uint32_t val)
         return;
 
     switch (val & SLP_TYP_Sx) {
-    case SLP_TYP_S3:
+    case SLP_TYP_S3_V0:
+    case SLP_TYP_S3_V1:
         s3_shutdown_flag = 1;
         qemu_system_reset();
         s3_shutdown_flag = 0;
         cmos_set_s3_resume();
         xc_set_hvm_param(xc_handle, domid, HVM_PARAM_ACPI_S_STATE, 3);
         break;
-    case SLP_TYP_S4:
-    case SLP_TYP_S5:
+    case SLP_TYP_S4_V0:
+    case SLP_TYP_S5_V0:
+    case SLP_TYP_S5_V1:
         qemu_system_shutdown_request();
         break;
     default:
@@ -403,7 +433,7 @@ static uint32_t gpe_sts_read(void *opaque, uint32_t addr)
 {
     GPEState *s = opaque;
 
-    return s->gpe0_sts[addr - ACPI_GPE0_BLK_ADDRESS];
+    return s->gpe0_sts[addr - s->gpe0_blk_address];
 }
 
 /* write 1 to clear specific GPE bits */
@@ -415,7 +445,7 @@ static void gpe_sts_write(void *opaque, uint32_t addr, uint32_t val)
     PIIX4ACPI_LOG(PIIX4ACPI_LOG_DEBUG, "gpe_sts_write: addr=0x%x, val=0x%x.\n", addr, val);
 
     hotplugged = test_bit(&s->gpe0_sts[0], ACPI_PHP_GPE_BIT);
-    s->gpe0_sts[addr - ACPI_GPE0_BLK_ADDRESS] &= ~val;
+    s->gpe0_sts[addr - s->gpe0_blk_address] &= ~val;
     if ( s->sci_asserted &&
          hotplugged &&
          !test_bit(&s->gpe0_sts[0], ACPI_PHP_GPE_BIT)) {
@@ -429,7 +459,7 @@ static uint32_t gpe_en_read(void *opaque, uint32_t addr)
 {
     GPEState *s = opaque;
 
-    return s->gpe0_en[addr - (ACPI_GPE0_BLK_ADDRESS + ACPI_GPE0_BLK_LEN / 2)];
+    return s->gpe0_en[addr - (s->gpe0_blk_address + s->gpe0_blk_half_len)];
 }
 
 /* write 0 to clear en bit */
@@ -439,7 +469,7 @@ static void gpe_en_write(void *opaque, uint32_t addr, uint32_t val)
     int reg_count;
 
     PIIX4ACPI_LOG(PIIX4ACPI_LOG_DEBUG, "gpe_en_write: addr=0x%x, val=0x%x.\n", addr, val);
-    reg_count = addr - (ACPI_GPE0_BLK_ADDRESS + ACPI_GPE0_BLK_LEN / 2);
+    reg_count = addr - (s->gpe0_blk_address + s->gpe0_blk_half_len);
     s->gpe0_en[reg_count] = val;
     /* If disable GPE bit right after generating SCI on it, 
      * need deassert the intr to avoid redundant intrs
@@ -459,7 +489,7 @@ static void gpe_save(QEMUFile* f, void* opaque)
     GPEState *s = (GPEState*)opaque;
     int i;
 
-    for ( i = 0; i < ACPI_GPE0_BLK_LEN / 2; i++ ) {
+    for ( i = 0; i < ACPI_GPE0_BLK_LEN_V0 / 2; i++ ) {
         qemu_put_8s(f, &s->gpe0_sts[i]);
         qemu_put_8s(f, &s->gpe0_en[i]);
     }
@@ -468,21 +498,54 @@ static void gpe_save(QEMUFile* f, void* opaque)
     if ( s->sci_asserted ) {
         PIIX4ACPI_LOG(PIIX4ACPI_LOG_INFO, "gpe_save with sci asserted!\n");
     }
+
+    qemu_put_be32s(f, &s->gpe0_blk_address);
+    qemu_put_be32s(f, &s->gpe0_blk_half_len);
 }
 
 static int gpe_load(QEMUFile* f, void* opaque, int version_id)
 {
     GPEState *s = (GPEState*)opaque;
     int i;
-    if (version_id != 1)
+    uint32_t gpe0_addr_assigned;
+    uint32_t gpe0_half_len_assigned;
+
+    if (version_id > 2)
         return -EINVAL;
 
-    for ( i = 0; i < ACPI_GPE0_BLK_LEN / 2; i++ ) {
+    for ( i = 0; i < ACPI_GPE0_BLK_LEN_V0 / 2; i++ ) {
         qemu_get_8s(f, &s->gpe0_sts[i]);
         qemu_get_8s(f, &s->gpe0_en[i]);
     }
 
     qemu_get_8s(f, &s->sci_asserted);
+
+    gpe0_addr_assigned = s->gpe0_blk_address;
+    gpe0_half_len_assigned = s->gpe0_blk_half_len;
+
+    if (version_id <= 1) {
+        s->gpe0_blk_address = ACPI_GPE0_BLK_ADDRESS_V0;
+        s->gpe0_blk_half_len = ACPI_GPE0_BLK_LEN_V0 / 2;
+    } else {
+        qemu_get_be32s(f, &s->gpe0_blk_address);
+        qemu_get_be32s(f, &s->gpe0_blk_half_len);
+    }
+
+    if (gpe0_addr_assigned != s->gpe0_blk_address ||
+        gpe0_half_len_assigned != s->gpe0_blk_half_len) {
+        isa_unassign_ioport(gpe0_addr_assigned, gpe0_half_len_assigned * 2);
+
+        register_ioport_read(s->gpe0_blk_address, s->gpe0_blk_half_len,
+                             1, gpe_sts_read, s);
+        register_ioport_read(s->gpe0_blk_address + s->gpe0_blk_half_len,
+                             s->gpe0_blk_half_len, 1, gpe_en_read, s);
+
+        register_ioport_write(s->gpe0_blk_address, s->gpe0_blk_half_len,
+                              1, gpe_sts_write, s);
+        register_ioport_write(s->gpe0_blk_address + s->gpe0_blk_half_len,
+                              s->gpe0_blk_half_len, 1, gpe_en_write, s);
+    }
+
     return 0;
 }
 
@@ -529,29 +592,32 @@ static void gpe_acpi_init(void)
     register_ioport_read(PROC_BASE, 32, 1,  gpe_cpus_readb, s);
     register_ioport_write(PROC_BASE, 32, 1, gpe_cpus_writeb, s);
 
-    register_ioport_read(ACPI_GPE0_BLK_ADDRESS,
-                         ACPI_GPE0_BLK_LEN / 2,
+    s->gpe0_blk_address = ACPI_GPE0_BLK_ADDRESS_V1;
+    s->gpe0_blk_half_len = ACPI_GPE0_BLK_LEN_V1 / 2;
+
+    register_ioport_read(s->gpe0_blk_address,
+                         s->gpe0_blk_half_len,
                          1,
                          gpe_sts_read,
                          s);
-    register_ioport_read(ACPI_GPE0_BLK_ADDRESS + ACPI_GPE0_BLK_LEN / 2,
-                         ACPI_GPE0_BLK_LEN / 2,
+    register_ioport_read(s->gpe0_blk_address + s->gpe0_blk_half_len,
+                         s->gpe0_blk_half_len,
                          1,
                          gpe_en_read,
                          s);
 
-    register_ioport_write(ACPI_GPE0_BLK_ADDRESS,
-                          ACPI_GPE0_BLK_LEN / 2,
+    register_ioport_write(s->gpe0_blk_address,
+                          s->gpe0_blk_half_len,
                           1,
                           gpe_sts_write,
                           s);
-    register_ioport_write(ACPI_GPE0_BLK_ADDRESS + ACPI_GPE0_BLK_LEN / 2,
-                          ACPI_GPE0_BLK_LEN / 2,
+    register_ioport_write(s->gpe0_blk_address + s->gpe0_blk_half_len,
+                          s->gpe0_blk_half_len,
                           1,
                           gpe_en_write,
                           s);
 
-    register_savevm("gpe", 0, 1, gpe_save, gpe_load, s);
+    register_savevm("gpe", 0, 2, gpe_save, gpe_load, s);
 }
 
 #ifdef CONFIG_PASSTHROUGH
@@ -703,7 +769,8 @@ i2c_bus *piix4_pm_init(PCIBus *bus, int devfn, uint32_t smb_io_base,
     pci_conf[0x43] = 0x00;
     d->pm1_control = SCI_EN;
 
-    acpi_map((PCIDevice *)d, 0, 0x1f40, 0x10, PCI_ADDRESS_SPACE_IO);
+    d->pm1a_evt_blk_address = ACPI_PM1A_EVT_BLK_ADDRESS_V1;
+    acpi_map((PCIDevice *)d, 0, d->pm1a_evt_blk_address, 0x10, PCI_ADDRESS_SPACE_IO);
 
     gpe_acpi_init();
 #ifdef CONFIG_PASSTHROUGH
@@ -711,7 +778,7 @@ i2c_bus *piix4_pm_init(PCIBus *bus, int devfn, uint32_t smb_io_base,
 #endif
     register_ioport_write(ACPI_DBG_IO_ADDR, 4, 4, acpi_dbg_writel, d);
 
-    register_savevm("piix4acpi", 0, 1, piix4acpi_save, piix4acpi_load, d);
+    register_savevm("piix4acpi", 0, 2, piix4acpi_save, piix4acpi_load, d);
 
     return NULL;
 }
