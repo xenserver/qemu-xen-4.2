@@ -4265,7 +4265,7 @@ static struct pt_dev * register_real_device(PCIBus *e_bus,
 
     if ( PT_MACHINE_IRQ_AUTO == machine_irq )
     {
-        int pirq = pci_dev->irq;
+        int pirq = -1;
 
         machine_irq = pci_dev->irq;
         rc = xc_physdev_map_pirq(xc_handle, domid, machine_irq, &pirq);
