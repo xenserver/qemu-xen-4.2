@@ -65,11 +65,21 @@ static void msix_set_enable(struct pt_dev *dev, int en)
 int pt_msi_setup(struct pt_dev *dev)
 {
     int pirq = -1;
+    uint8_t gvec = 0;
 
     if ( !(dev->msi->flags & MSI_FLAG_UNINIT) )
     {
         PT_LOG("Error: setup physical after initialized?? \n");
         return -1;
+    }
+
+    gvec = dev->msi->data & 0xFF;
+    if (!gvec) {
+        /* if gvec is 0, the guest is asking for a particular pirq that
+         * is passed as dest_id */
+        pirq = (dev->msi->addr_hi & 0xffffff00) |
+               ((dev->msi->addr_lo >> MSI_TARGET_CPU_SHIFT) & 0xff);
+        PT_LOG("pt_msi_setup requested pirq = %d\n", pirq);
     }
 
     if ( xc_physdev_map_pirq_msi(xc_handle, domid, AUTO_ASSIGN, &pirq,
