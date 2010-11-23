@@ -278,11 +278,14 @@ static void xenstore_get_backend_path(char **backend, const char *devtype,
     backend_dompath = xs_get_domain_path(xsh, domid_backend);
     if (!backend_dompath) goto out;
     
-    const char *expected_devtypes[3];
+    const char *expected_devtypes[4];
     const char **expected_devtype = expected_devtypes;
 
     *expected_devtype++ = devtype;
-    if (!strcmp(devtype, "vbd")) *expected_devtype++ = "tap";
+    if (!strcmp(devtype, "vbd")) {
+	*expected_devtype++ = "tap";
+	*expected_devtype++ = "qdisk";
+    }
     *expected_devtype = 0;
     assert(expected_devtype <
            expected_devtypes + ARRAY_SIZE(expected_devtypes));
@@ -392,6 +395,17 @@ static const char *xenstore_get_guest_uuid(void)
 #define PT_PCI_POWER_MANAGEMENT_DEFAULT 0
 int direct_pci_msitranslate;
 int direct_pci_power_mgmt;
+void xenstore_init(void)
+{
+    xenstore_get_guest_uuid();
+
+    xsh = xs_daemon_open();
+    if (xsh == NULL) {
+        fprintf(logfile, "Could not contact xenstore for domain config\n");
+        return;
+    }
+}
+
 void xenstore_parse_domain_config(int hvm_domid)
 {
     char **e_danger = NULL;
@@ -415,14 +429,6 @@ void xenstore_parse_domain_config(int hvm_domid)
 
     for(i = 0; i < MAX_DRIVES + 1; i++)
         media_filename[i] = NULL;
-
-    xenstore_get_guest_uuid();
-
-    xsh = xs_daemon_open();
-    if (xsh == NULL) {
-        fprintf(logfile, "Could not contact xenstore for domain config\n");
-        return;
-    }
 
     danger_path = xs_get_domain_path(xsh, hvm_domid);
     if (danger_path == NULL) {
@@ -496,7 +502,7 @@ void xenstore_parse_domain_config(int hvm_domid)
         if (drv == NULL)
             continue;
         /* Obtain blktap sub-type prefix */
-        if (!strcmp(drv, "tap") && params[0]) {
+        if ((!strcmp(drv, "tap") || !strcmp(drv, "qdisk")) && params[0]) {
             char *offset = strchr(params, ':'); 
             if (!offset)
                 continue ;
@@ -1055,7 +1061,8 @@ void xenstore_process_event(void *opaque)
         if (pasprintf(&buf, "%s/type", bpath) == -1) 
             goto out;
         drv = xs_read(xsh, XBT_NULL, buf, &len);
-        if (drv && !strcmp(drv, "tap") && ((offset = strchr(image, ':')) != NULL))
+	if (drv && (!strcmp(drv, "tap") || !strcmp(drv, "qdisk")) &&
+		((offset = strchr(image, ':')) != NULL))
             memmove(image, offset+1, strlen(offset+1)+1);
 
         if (!strcmp(image, drives_table[hd_index].bdrv->filename))

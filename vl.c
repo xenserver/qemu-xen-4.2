@@ -5813,17 +5813,18 @@ int main(int argc, char **argv, char **envp)
     dma_helper_init();
 
     xc_handle = xc_interface_open(0,0,0); /* fixme check errors */
+    xenstore_init();
+    if (!strcmp(machine->name, "xenfv")) {
 #ifdef CONFIG_STUBDOM
-    {
         char *domid_s, *msg;
         if ((msg = xenbus_read(XBT_NIL, "domid", &domid_s)))
             fprintf(stderr,"Can not read our own domid: %s\n", msg);
         else
             xenstore_parse_domain_config(atoi(domid_s));
-    }
 #else
-    xenstore_parse_domain_config(domid);
+        xenstore_parse_domain_config(domid);
 #endif /* CONFIG_STUBDOM */
+    }
 
     /* we always create the cdrom drive, even if no disk is there */
 
