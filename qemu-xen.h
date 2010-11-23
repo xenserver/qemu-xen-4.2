@@ -63,6 +63,7 @@ void handle_buffered_pio(void);
 
 /* xenstore.c */
 void xenstore_init(void);
+uint32_t xenstore_read_target(void);
 void xenstore_parse_domain_config(int domid);
 int xenstore_parse_disable_pf_config(void);
 int xenstore_fd(void);

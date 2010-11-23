@@ -526,7 +526,7 @@ void xen_be_check_state(struct XenDevice *xendev)
 
 /* ------------------------------------------------------------- */
 
-static int xenstore_scan(const char *type, int dom, struct XenDevOps *ops)
+int xenstore_scan(const char *type, int dom, struct XenDevOps *ops)
 {
     struct XenDevice *xendev;
     char path[XEN_BUFSIZE], token[XEN_BUFSIZE];

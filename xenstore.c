@@ -391,6 +391,42 @@ static const char *xenstore_get_guest_uuid(void)
     return already_computed;
 }
 
+uint32_t xenstore_read_target(void)
+{
+    char *domain_path = NULL, *target_path = NULL, *target_value = NULL, *p = NULL;
+    unsigned int len;
+    uint32_t target_domid = 0;
+
+    if (xsh == NULL)
+        return 0;
+
+    domain_path = xs_get_domain_path(xsh, domid);
+    if (domain_path == NULL) {
+        fprintf(logfile, "xs_get_domain_path() error. domid %d.\n", domid);
+        goto out;
+    }
+
+    if (pasprintf(&target_path, "%s/target", domain_path) == -1) {
+        fprintf(logfile, "xenstore_get_guest_uuid(): out of memory.\n");
+        goto out;
+    }
+    target_value = xs_read(xsh, XBT_NULL, target_path, &len);
+    if (target_value == NULL) {
+        fprintf(logfile, "xs_read(): target get error. %s.\n", target_path);
+        goto out;
+    }
+
+    fprintf(logfile, "target = %s\n", target_value);
+    target_domid = strtoul(target_value, NULL, 10);
+
+ out:
+    free(domain_path);
+    free(target_path);
+    free(target_value);
+
+    return target_domid;
+}
+
 #define PT_PCI_MSITRANSLATE_DEFAULT 1
 #define PT_PCI_POWER_MANAGEMENT_DEFAULT 0
 int direct_pci_msitranslate;

@@ -27,6 +27,7 @@
 #include "sysemu.h"
 #include "boards.h"
 #include "xen_backend.h"
+#include "qemu-xen.h"
 
 #ifndef CONFIG_STUBDOM
 #include <hw/xen_blktap.h>
@@ -44,6 +45,7 @@ static void xen_init_pv(ram_addr_t ram_size, int vga_ram_size,
 			const char *direct_pci)
 {
     CPUState *env;
+    uint32_t domid_target;
 
 #ifndef CONFIG_STUBDOM
     /* Initialize tapdisk client */
@@ -70,6 +72,9 @@ static void xen_init_pv(ram_addr_t ram_size, int vga_ram_size,
     xen_be_register("vkbd", &xen_kbdmouse_ops);
     xen_be_register("vfb", &xen_framebuffer_ops);
     xen_be_register("qdisk", &xen_blkdev_ops);
+    domid_target = xenstore_read_target();
+    if (domid_target)
+        xenstore_scan("qdisk", domid_target, &xen_blkdev_ops);
 
     /* setup framebuffer */
     xen_init_display(xen_domid);

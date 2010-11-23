@@ -78,6 +78,7 @@ void xen_be_check_state(struct XenDevice *xendev);
 /* xen backend driver bits */
 int xen_be_init(void);
 int xen_be_register(const char *type, struct XenDevOps *ops);
+int xenstore_scan(const char *type, int dom, struct XenDevOps *ops);
 int xen_be_set_state(struct XenDevice *xendev, enum xenbus_state state);
 int xen_be_bind_evtchn(struct XenDevice *xendev);
 void xen_be_unbind_evtchn(struct XenDevice *xendev);
