@@ -1,4 +1,4 @@
-include ../xen-hooks.mak
+include $(QEMU_ROOT)/xen-hooks.mak
 
 OBJS += block-vbd.o
 

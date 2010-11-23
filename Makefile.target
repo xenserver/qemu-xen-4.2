@@ -23,7 +23,7 @@ endif
 ifeq ($(TARGET_ARCH), sparc64)
 TARGET_BASE_ARCH:=sparc
 endif
-TARGET_PATH=$(SRC_PATH)/target-$(TARGET_BASE_ARCH)
+TARGET_PATH?=$(SRC_PATH)/target-$(TARGET_BASE_ARCH)
 VPATH=$(SRC_PATH):$(TARGET_PATH):$(SRC_PATH)/hw
 CPPFLAGS=-I. -I.. -I$(TARGET_PATH) -I$(SRC_PATH) -MMD -MT $@ -MP -DNEED_CPU_H
 #CFLAGS+=-Werror
@@ -210,8 +210,8 @@ endif
 
 # libqemu
 
--include hookslib.mak
--include hookstarget.mak
+include $(QEMU_ROOT)/$(TARGET_DIRS)/hookslib.mak
+include $(QEMU_ROOT)/$(TARGET_DIRS)/hookstarget.mak
 
 libqemu.a: $(LIBOBJS)
 
@@ -730,7 +730,8 @@ LDFLAGS+=-p
 main.o: CFLAGS+=-p
 endif
 
--include hooks.mak
+include $(QEMU_ROOT)/$(TARGET_DIRS)/hooks.mak
+
 all: $(PROGS)
 
 $(QEMU_PROG): LIBS += $(SDL_LIBS) $(COCOA_LIBS) $(CURSES_LIBS) $(BRLAPI_LIBS) $(VDE_LIBS)

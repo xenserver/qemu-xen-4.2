@@ -3,4 +3,4 @@ CPPFLAGS += -DHAS_AUDIO
 endif
 QEMU_PROG=qemu-dm
 
-include ../xen-hooks.mak
+include $(QEMU_ROOT)/xen-hooks.mak

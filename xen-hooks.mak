@@ -38,7 +38,7 @@ OBJS += battery_mgmt.o
 
 ifdef CONFIG_STUBDOM
 CPPFLAGS += $(TARGET_CPPFLAGS) -DNEED_CPU_H \
-	-I$(QEMU_ROOT)/i386-dm -I$(QEMU_ROOT)/hw -I$(QEMU_ROOT)/fpu
+	-I$(TARGET_DIRS) -I$(QEMU_ROOT)/i386-dm -I$(QEMU_ROOT)/hw -I$(QEMU_ROOT)/fpu
 CONFIG_SDL=
 CONFIG_AUDIO=
 OBJS += xenfbfront.o
