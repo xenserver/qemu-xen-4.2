@@ -2396,6 +2396,9 @@ int drive_init(struct drive_opt *arg, int snapshot, void *opaque)
 	} else if (!strcmp(buf, "mtd")) {
 	    type = IF_MTD;
             max_devs = 0;
+	} else if (!strcmp(buf, "xen")) {
+	    type = IF_XEN;
+            max_devs = 0;
 	} else if (!strcmp(buf, "sd")) {
 	    type = IF_SD;
             max_devs = 0;
@@ -2615,6 +2618,7 @@ int drive_init(struct drive_opt *arg, int snapshot, void *opaque)
 
     switch(type) {
     case IF_IDE:
+    case IF_XEN:
     case IF_SCSI:
         switch(media) {
 	case MEDIA_DISK:

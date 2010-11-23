@@ -127,7 +127,7 @@ extern unsigned int nb_prom_envs;
 
 typedef enum {
     IF_BLKTAP,
-    IF_IDE, IF_SCSI, IF_FLOPPY, IF_PFLASH, IF_MTD, IF_SD, IF_VIRTIO
+    IF_IDE, IF_SCSI, IF_FLOPPY, IF_PFLASH, IF_MTD, IF_SD, IF_VIRTIO, IF_XEN
 } BlockInterfaceType;
 
 typedef enum {
