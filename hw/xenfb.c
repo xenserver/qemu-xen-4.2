@@ -630,11 +630,35 @@ static void xenfb_guest_copy(struct XenFB *xenfb, int x, int y, int w, int h)
                 oops = 1;
             }
             break;
+    case 16:
+            if (bpp == 16) {
+                for (line = y; line < (y+h); line++) {
+                        memcpy (data + (line * linesize) + (x * bpp / 8), xenfb->pixels + xenfb->offset
+                              + (line * xenfb->row_stride) + (x * xenfb->depth / 8), w * xenfb->depth / 8);
+                }
+            } else if (bpp == 32) {
+                BLT(uint16_t, uint32_t,   5, 6, 5,   8, 8, 8);
+            } else {
+                oops = 1;
+            }
+            break;
         case 24:
             if (bpp == 16) {
                 BLT(uint32_t, uint16_t,  8, 8, 8,   5, 6, 5);
             } else if (bpp == 32) {
                 BLT(uint32_t, uint32_t,  8, 8, 8,   8, 8, 8);
+            } else {
+                oops = 1;
+            }
+            break;
+        case 32:
+            if (bpp == 16) {
+                BLT(uint32_t, uint16_t,  8, 8, 8,   5, 6, 5);
+            } else if (bpp == 32) {
+                for (line = y; line < (y+h); line++) {
+                        memcpy (data + (line * linesize) + (x * bpp / 8), xenfb->pixels + xenfb->offset
+                              + (line * xenfb->row_stride) + (x * xenfb->depth / 8), w * xenfb->depth / 8);
+                }
             } else {
                 oops = 1;
             }
@@ -792,6 +816,7 @@ static void xenfb_update(void *opaque)
 static void xenfb_invalidate(void *opaque)
 {
     struct XenFB *xenfb = opaque;
+    xenfb->do_resize = 1;
     xenfb->up_fullscreen = 1;
 }
 
