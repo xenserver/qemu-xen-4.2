@@ -30,7 +30,9 @@ OBJS += xen_machine_pv.o
 OBJS += xen_backend.o
 OBJS += xenfb.o
 OBJS += xen_console.o
+ifndef CONFIG_STUBDOM
 OBJS += xen_disk.o
+endif
 OBJS += xen_machine_fv.o
 OBJS += exec-dm.o
 OBJS += pci_emulation.o

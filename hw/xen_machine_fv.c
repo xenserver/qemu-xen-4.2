@@ -368,7 +368,9 @@ static void xen_init_fv(ram_addr_t ram_size, int vga_ram_size,
         exit(1);
     }
     xen_be_register("console", &xen_console_ops);
+#ifndef CONFIG_STUBDOM
     xen_be_register("qdisk", &xen_blkdev_ops);
+#endif
 
     pc_machine.init(ram_size, vga_ram_size, boot_device,
 		    kernel_filename, kernel_cmdline, initrd_filename,
