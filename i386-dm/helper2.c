@@ -104,7 +104,7 @@ buffered_iopage_t *buffered_io_page = NULL;
 QEMUTimer *buffered_io_timer;
 
 /* the evtchn fd for polling */
-int xce_handle = -1;
+xc_interface *xce_handle = NULL;
 
 /* which vcpu we are serving */
 int send_vcpu = 0;
@@ -138,8 +138,8 @@ CPUX86State *cpu_x86_init(const char *cpu_model)
 
         cpu_single_env = env;
 
-        xce_handle = xc_evtchn_open();
-        if (xce_handle == -1) {
+        xce_handle = xc_evtchn_open(NULL, 0);
+        if (xce_handle == NULL) {
             perror("open");
             return NULL;
         }
@@ -553,7 +553,7 @@ int xen_pause_requested;
 int main_loop(void)
 {
     CPUState *env = cpu_single_env;
-    int evtchn_fd = xce_handle == -1 ? -1 : xc_evtchn_fd(xce_handle);
+    int evtchn_fd = xce_handle == NULL ? -1 : xc_evtchn_fd(xce_handle);
     char *qemu_file;
     fd_set fds;
 

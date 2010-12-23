@@ -208,8 +208,8 @@ static struct XenDevice *xen_be_get_xendev(const char *type, int dom, int dev,
     xendev->debug      = debug;
     xendev->local_port = -1;
 
-    xendev->evtchndev = xc_evtchn_open();
-    if (xendev->evtchndev < 0) {
+    xendev->evtchndev = xc_evtchn_open(NULL, 0);
+    if (xendev->evtchndev == NULL) {
 	xen_be_printf(NULL, 0, "can't open evtchn device\n");
 	qemu_free(xendev);
 	return NULL;
@@ -267,7 +267,7 @@ static struct XenDevice *xen_be_del_xendev(int dom, int dev)
 	    qemu_free(xendev->fe);
 	}
 
-	if (xendev->evtchndev >= 0)
+	if (xendev->evtchndev != NULL)
 	    xc_evtchn_close(xendev->evtchndev);
 	if (xendev->gnttabdev >= 0)
 	    xc_gnttab_close(xc_handle, xendev->gnttabdev);

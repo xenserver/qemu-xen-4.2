@@ -44,7 +44,7 @@ struct XenDevice {
     int                remote_port;
     int                local_port;
 
-    int                evtchndev;
+    xc_evtchn          *evtchndev;
     int                gnttabdev;
 
     struct XenDevOps   *ops;
