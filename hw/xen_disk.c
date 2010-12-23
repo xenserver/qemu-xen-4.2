@@ -240,7 +240,7 @@ err:
 
 static void ioreq_unmap(struct ioreq *ioreq)
 {
-    int gnt = ioreq->blkdev->xendev.gnttabdev;
+    xc_gnttab *gnt = ioreq->blkdev->xendev.gnttabdev;
     int i;
 
     if (ioreq->v.niov == 0)
@@ -248,7 +248,7 @@ static void ioreq_unmap(struct ioreq *ioreq)
     if (batch_maps) {
 	if (!ioreq->pages)
 	    return;
-	if (xc_gnttab_munmap(xen_xc, gnt, ioreq->pages, ioreq->v.niov) != 0)
+	if (xc_gnttab_munmap(gnt, ioreq->pages, ioreq->v.niov) != 0)
 	    xen_be_printf(&ioreq->blkdev->xendev, 0, "xc_gnttab_munmap failed: %s\n",
 			  strerror(errno));
 	ioreq->blkdev->cnt_map -= ioreq->v.niov;
@@ -257,7 +257,7 @@ static void ioreq_unmap(struct ioreq *ioreq)
 	for (i = 0; i < ioreq->v.niov; i++) {
 	    if (!ioreq->page[i])
 		continue;
-	    if (xc_gnttab_munmap(xen_xc, gnt, ioreq->page[i], 1) != 0)
+	    if (xc_gnttab_munmap(gnt, ioreq->page[i], 1) != 0)
 		xen_be_printf(&ioreq->blkdev->xendev, 0, "xc_gnttab_munmap failed: %s\n",
 			      strerror(errno));
 	    ioreq->blkdev->cnt_map--;
@@ -268,14 +268,14 @@ static void ioreq_unmap(struct ioreq *ioreq)
 
 static int ioreq_map(struct ioreq *ioreq)
 {
-    int gnt = ioreq->blkdev->xendev.gnttabdev;
+    xc_gnttab *gnt = ioreq->blkdev->xendev.gnttabdev;
     int i;
 
     if (ioreq->v.niov == 0)
         return 0;
     if (batch_maps) {
 	ioreq->pages = xc_gnttab_map_grant_refs
-	    (xen_xc, gnt, ioreq->v.niov, ioreq->domids, ioreq->refs, ioreq->prot);
+	    (gnt, ioreq->v.niov, ioreq->domids, ioreq->refs, ioreq->prot);
 	if (ioreq->pages == NULL) {
 	    xen_be_printf(&ioreq->blkdev->xendev, 0,
 			  "can't map %d grant refs (%s, %d maps)\n",
@@ -289,7 +289,7 @@ static int ioreq_map(struct ioreq *ioreq)
     } else  {
 	for (i = 0; i < ioreq->v.niov; i++) {
 	    ioreq->page[i] = xc_gnttab_map_grant_ref
-		(xen_xc, gnt, ioreq->domids[i], ioreq->refs[i], ioreq->prot);
+		(gnt, ioreq->domids[i], ioreq->refs[i], ioreq->prot);
 	    if (ioreq->page[i] == NULL) {
 		xen_be_printf(&ioreq->blkdev->xendev, 0,
 			      "can't map grant ref %d (%s, %d maps)\n",
@@ -692,7 +692,7 @@ static int blk_connect(struct XenDevice *xendev)
             blkdev->protocol = BLKIF_PROTOCOL_X86_64;
     }
 
-    blkdev->sring = xc_gnttab_map_grant_ref(xen_xc, blkdev->xendev.gnttabdev,
+    blkdev->sring = xc_gnttab_map_grant_ref(blkdev->xendev.gnttabdev,
 					    blkdev->xendev.dom,
 					    blkdev->ring_ref,
 					    PROT_READ | PROT_WRITE);
@@ -745,7 +745,7 @@ static void blk_disconnect(struct XenDevice *xendev)
     xen_be_unbind_evtchn(&blkdev->xendev);
 
     if (blkdev->sring) {
-	xc_gnttab_munmap(xen_xc, blkdev->xendev.gnttabdev, blkdev->sring, 1);
+	xc_gnttab_munmap(blkdev->xendev.gnttabdev, blkdev->sring, 1);
 	blkdev->cnt_map--;
 	blkdev->sring = NULL;
     }

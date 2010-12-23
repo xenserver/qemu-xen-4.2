@@ -217,15 +217,15 @@ static struct XenDevice *xen_be_get_xendev(const char *type, int dom, int dev,
     fcntl(xc_evtchn_fd(xendev->evtchndev), F_SETFD, FD_CLOEXEC);
 
     if (ops->flags & DEVOPS_FLAG_NEED_GNTDEV) {
-	xendev->gnttabdev = xc_gnttab_open(xc_handle);
-	if (xendev->gnttabdev < 0) {
+	xendev->gnttabdev = xc_gnttab_open(NULL, 0);
+	if (xendev->gnttabdev == NULL) {
 	    xen_be_printf(NULL, 0, "can't open gnttab device\n");
 	    xc_evtchn_close(xendev->evtchndev);
 	    qemu_free(xendev);
 	    return NULL;
 	}
     } else {
-	xendev->gnttabdev = -1;
+	xendev->gnttabdev = NULL;
     }
 
     TAILQ_INSERT_TAIL(&xendevs, xendev, next);
@@ -269,8 +269,8 @@ static struct XenDevice *xen_be_del_xendev(int dom, int dev)
 
 	if (xendev->evtchndev != NULL)
 	    xc_evtchn_close(xendev->evtchndev);
-	if (xendev->gnttabdev >= 0)
-	    xc_gnttab_close(xc_handle, xendev->gnttabdev);
+	if (xendev->gnttabdev != NULL)
+	    xc_gnttab_close(xendev->gnttabdev);
 
 	TAILQ_REMOVE(&xendevs, xendev, next);
 	qemu_free(xendev);
