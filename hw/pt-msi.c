@@ -300,6 +300,14 @@ static int pt_msix_update_one(struct pt_dev *dev, int entry_nr)
     if ( !entry->flags )
         return 0;
 
+    if (!gvec) {
+        /* if gvec is 0, the guest is asking for a particular pirq that
+         * is passed as dest_id */
+        pirq = ((gaddr >> 32) & 0xffffff00) |
+               (((gaddr & 0xffffffff) >> MSI_TARGET_CPU_SHIFT) & 0xff);
+        PT_LOG("pt_msix_update_one requested pirq = %d\n", pirq);
+    }
+
     /* Check if this entry is already mapped */
     if ( entry->pirq == -1 )
     {
