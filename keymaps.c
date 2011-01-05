@@ -54,6 +54,20 @@ typedef struct {
     struct key_range *altgr_range;
 } kbd_layout_t;
 
+static void del_key_range(struct key_range **krp, int code) {
+    struct key_range *kr;
+    struct key_range *kr_pr;
+    for (kr = *krp; kr; kr_pr = kr, kr = kr->next) {
+        if (code >= kr->start && code <= kr->end) {
+            if (kr == *krp)
+                *krp = kr->next;
+            else
+                kr_pr->next = kr->next;
+            qemu_free(kr);
+        }
+    }
+}
+
 static void add_to_key_range(struct key_range **krp, int code) {
     struct key_range *kr;
     for (kr = *krp; kr; kr = kr->next) {
@@ -137,6 +151,8 @@ static kbd_layout_t *parse_keyboard_layout(const char *language,
 		    if (rest && strstr(rest, "altgr")) {
 			add_to_key_range(&k->altgr_range, keysym);
 			//fprintf(stderr, "altgr keysym %04x keycode %d\n", keysym, keycode);
+		    } else {
+			del_key_range(&k->altgr_range, keysym);
 		    }
 	
 		    /* if(keycode&0x80)

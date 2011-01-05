@@ -1279,11 +1279,9 @@ static void press_key_altgr_down(VncState *vs, int down)
     kbd_put_keycode(0xe0);
     if (down){
         kbd_put_keycode(0xb8 & 0x7f);
-        vs->modifiers_state[0xb8] = 1;
     }
     else {
         kbd_put_keycode(0xb8 | 0x80);
-        vs->modifiers_state[0xb8] = 0;
     }
 }
 
