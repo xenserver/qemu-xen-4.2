@@ -79,7 +79,12 @@ int pt_msi_setup(struct pt_dev *dev)
          * is passed as dest_id */
         pirq = (dev->msi->addr_hi & 0xffffff00) |
                ((dev->msi->addr_lo >> MSI_TARGET_CPU_SHIFT) & 0xff);
-        PT_LOG("pt_msi_setup requested pirq = %d\n", pirq);
+        if (!pirq)
+            /* this probably identifies an misconfiguration of the guest,
+             * try the emulated path */
+            pirq = -1;
+        else
+            PT_LOG("pt_msi_setup requested pirq = %d\n", pirq);
     }
 
     if ( xc_physdev_map_pirq_msi(xc_handle, domid, AUTO_ASSIGN, &pirq,
@@ -305,7 +310,12 @@ static int pt_msix_update_one(struct pt_dev *dev, int entry_nr)
          * is passed as dest_id */
         pirq = ((gaddr >> 32) & 0xffffff00) |
                (((gaddr & 0xffffffff) >> MSI_TARGET_CPU_SHIFT) & 0xff);
-        PT_LOG("pt_msix_update_one requested pirq = %d\n", pirq);
+        if (!pirq)
+            /* this probably identifies an misconfiguration of the guest,
+             * try the emulated path */
+            pirq = -1;
+        else
+            PT_LOG("pt_msix_update_one requested pirq = %d\n", pirq);
     }
 
     /* Check if this entry is already mapped */
