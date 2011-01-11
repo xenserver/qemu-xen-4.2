@@ -4846,6 +4846,13 @@ int main(int argc, char **argv, char **envp)
     rl.rlim_cur = rl.rlim_max;
     if (setrlimit(RLIMIT_DATA, &rl) != 0)
        perror("setrlimit(RLIMIT_DATA)");
+    if (getrlimit(RLIMIT_AS, &rl) == 0) {
+       rl.rlim_cur = rl.rlim_max;
+       if (setrlimit(RLIMIT_AS, &rl) != 0)
+          perror("setrlimit(RLIMIT_AS)");
+    } else {
+       perror("getrlimit(RLIMIT_AS)");
+    }
     rl.rlim_cur = RLIM_INFINITY;
     rl.rlim_max = RLIM_INFINITY;
     if (setrlimit(RLIMIT_RSS, &rl) != 0)
