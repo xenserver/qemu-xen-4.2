@@ -942,7 +942,7 @@ static void win32_rearm_timer(struct qemu_alarm_timer *t);
 static int unix_start_timer(struct qemu_alarm_timer *t);
 static void unix_stop_timer(struct qemu_alarm_timer *t);
 
-#if defined(__linux__) && !defined(CONFIG_DM)
+#if defined(__linux__)
 
 static int dynticks_start_timer(struct qemu_alarm_timer *t);
 static void dynticks_stop_timer(struct qemu_alarm_timer *t);
@@ -1025,7 +1025,7 @@ static void init_icount_adjust(void)
 
 static struct qemu_alarm_timer alarm_timers[] = {
 #ifndef _WIN32
-#if defined(__linux__) && !defined(CONFIG_DM)
+#if defined(__linux__)
     {"dynticks", ALARM_FLAG_DYNTICKS, dynticks_start_timer,
      dynticks_stop_timer, dynticks_rearm_timer, NULL},
     /* HPET - if available - is preferred */
@@ -1327,7 +1327,6 @@ static int timer_load(QEMUFile *f, void *opaque, int version_id)
     return 0;
 }
 
-#ifndef CONFIG_DM /* ends just before fcntl_setfl */
 #ifdef _WIN32
 void CALLBACK host_alarm_handler(UINT uTimerID, UINT uMsg,
                                  DWORD_PTR dwUser, DWORD_PTR dw1, DWORD_PTR dw2)
@@ -1436,7 +1435,6 @@ static uint64_t qemu_next_deadline_dyntick(void)
     return delta;
 }
 #endif
-#endif
 
 #ifndef _WIN32
 
@@ -1455,7 +1453,6 @@ static int fcntl_setfl(int fd, int flag)
     return 0;
 }
 
-#ifndef CONFIG_DM /* ends after end of win32_rearm_timer */
 #if defined(__linux__)
 
 #define RTC_FREQ 1024
@@ -1632,6 +1629,7 @@ static void dynticks_rearm_timer(struct qemu_alarm_timer *t)
 
 #endif /* defined(__linux__) */
 
+#ifndef CONFIG_STUBDOM
 static int unix_start_timer(struct qemu_alarm_timer *t)
 {
     struct sigaction act;
@@ -1665,8 +1663,11 @@ static void unix_stop_timer(struct qemu_alarm_timer *t)
     memset(&itv, 0, sizeof(itv));
     setitimer(ITIMER_REAL, &itv, NULL);
 }
+#else
+static int unix_start_timer(struct qemu_alarm_timer *t) { return 0; }
+static void unix_stop_timer(struct qemu_alarm_timer *t) { }
+#endif
 
-#endif /* !defined(_WIN32) */
 
 static void try_to_rearm_timer(void *opaque)
 {
@@ -6024,10 +6025,12 @@ int main(int argc, char **argv, char **envp)
         dcl = dcl->next;
     }
 
+#ifndef CONFIG_DM
     if (nographic || (vnc_display && !sdl)) {
         nographic_timer = qemu_new_timer(rt_clock, nographic_update, NULL);
         qemu_mod_timer(nographic_timer, qemu_get_clock(rt_clock));
     }
+#endif
 
     text_consoles_set_display(display_state);
     qemu_chr_initial_reset();
@@ -6162,6 +6165,3 @@ int main(int argc, char **argv, char **envp)
 
     return 0;
 }
-
-static int unix_start_timer(struct qemu_alarm_timer *t) { return 0; }
-static void unix_stop_timer(struct qemu_alarm_timer *t) { }

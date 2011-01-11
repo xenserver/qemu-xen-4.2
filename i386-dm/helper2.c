@@ -572,8 +572,13 @@ int main_loop(void)
 
     while (1) {
         while (!(vm_running && xen_pause_requested))
+#ifdef CONFIG_STUBDOM
             /* Wait up to 10 msec. */
             main_loop_wait(10);
+#else
+            /* Wait up to 10s. */
+            main_loop_wait(10000);
+#endif
 
         fprintf(logfile, "device model saving state\n");
 
