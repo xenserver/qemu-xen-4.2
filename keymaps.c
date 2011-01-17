@@ -56,15 +56,12 @@ typedef struct {
 
 static void del_key_range(struct key_range **krp, int code) {
     struct key_range *kr;
-    struct key_range *kr_pr;
-    for (kr = *krp; kr; kr_pr = kr, kr = kr->next) {
+    while ((kr = *krp) != NULL) {
         if (code >= kr->start && code <= kr->end) {
-            if (kr == *krp)
-                *krp = kr->next;
-            else
-                kr_pr->next = kr->next;
+            *krp = kr->next;
             qemu_free(kr);
-        }
+        } else
+            krp = &kr->next;
     }
 }
 
