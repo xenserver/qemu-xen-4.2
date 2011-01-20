@@ -258,7 +258,7 @@ static void con_disconnect(struct XenDevice *xendev)
     xen_be_unbind_evtchn(&con->xendev);
 
     if (con->sring) {
-        if (!xendev->gnttabdev)
+        if (!xendev->dev)
 	    munmap(con->sring, XC_PAGE_SIZE);
         else
             xc_gnttab_munmap(xendev->gnttabdev, con->sring, 1);
