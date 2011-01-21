@@ -646,6 +646,10 @@ static void xen_be_evtchn_event(void *opaque)
 
 int xen_be_init(void)
 {
+#ifdef CONFIG_STUBDOM
+    return 0;
+#endif
+
     xenstore = xs_daemon_open();
     if (!xenstore) {
 	xen_be_printf(NULL, 0, "can't connect to xenstored\n");
