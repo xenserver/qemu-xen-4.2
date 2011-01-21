@@ -133,7 +133,13 @@ void qemu_announce_self(void)
 /***********************************************************/
 /* savevm/loadvm support */
 
+#ifdef CONFIG_STUBDOM
+/* disable buffering for stubdoms because we need to issue reads for the
+ * exact number of bytes */
+#define IO_BUF_SIZE 1
+#else
 #define IO_BUF_SIZE 32768
+#endif
 
 struct QEMUFile {
     QEMUFilePutBufferFunc *put_buffer;
@@ -302,6 +308,10 @@ QEMUFile *qemu_fopen(const char *filename, const char *mode)
     s->outfile = fopen(filename, mode);
     if (!s->outfile)
         goto fail;
+
+#ifdef CONFIG_STUBDOM
+    setvbuf(s->outfile, NULL, _IONBF, 0);
+#endif
 
     if (!strcmp(mode, "wb"))
         return qemu_fopen_ops(s, file_put_buffer, NULL, file_close, NULL);
