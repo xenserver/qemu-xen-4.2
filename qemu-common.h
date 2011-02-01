@@ -209,4 +209,10 @@ void qemu_iovec_from_buffer(QEMUIOVector *qiov, const void *buf, size_t count);
 
 #endif /* dyngen-exec.h hack */
 
+#include "qemu_socket.h"
+
+void xenstore_write_vncinfo(int port,
+                            const struct sockaddr *addr,
+                            socklen_t addrlen,
+                            const char *password);
 #endif

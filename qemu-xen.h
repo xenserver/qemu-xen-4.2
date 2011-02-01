@@ -71,7 +71,6 @@ void xenstore_process_event(void *opaque);
 void xenstore_record_dm(const char *subpath, const char *state);
 void xenstore_record_dm_state(const char *state);
 void xenstore_check_new_media_present(int timeout);
-void xenstore_write_vncport(int vnc_display);
 void xenstore_read_vncpasswd(int domid, char *pwbuf, size_t pwbuflen);
 void xenstore_write_vslots(char *vslots);
 

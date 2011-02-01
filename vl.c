@@ -6003,7 +6003,6 @@ int main(int argc, char **argv, char **envp)
                     vnc_display_port = vnc_display_open(ds, vnc_display, vncunused);
 		    if (vnc_display_port < 0)
                         exit(1);
-		    xenstore_write_vncport(vnc_display_port);
                 }
 #if defined(CONFIG_SDL)
                 if (sdl || !vnc_display)

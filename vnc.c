@@ -2768,6 +2768,9 @@ int vnc_display_open(DisplayState *ds, const char *display, int find_unused)
 	return -1;
     }
 
+    xenstore_write_vncinfo(ntohs(iaddr.sin_port), addr, addrlen,
+                           vs->password);
+
     if (qemu_set_fd_handler2(vs->lsock, vnc_listen_poll, vnc_listen_read, NULL, vs) < 0)
 	return -1;
 
