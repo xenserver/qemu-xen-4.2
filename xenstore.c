@@ -731,18 +731,7 @@ void xenstore_parse_domain_config(int hvm_domid)
      * hvm_domid is always equal to domid */
     hvm_domid = domid;
 
-    /* get the pci pass-through parameter */
-    if (pasprintf(&buf, "/local/domain/0/backend/pci/%u/%u/num_devs",
-                  hvm_domid, pci_devid) == -1)
-        goto out;
-
-    free(params);
-    params = xs_read(xsh, XBT_NULL, buf, &len);
-    if (params == NULL)
-        goto out;
-    num = atoi(params);
-
-    /* get the pci pass-through parameter */
+    /* get the pci pass-through parameters */
     if (pasprintf(&buf, "/local/domain/0/backend/pci/%u/%u/msitranslate",
                   hvm_domid, pci_devid) != -1)
     {
