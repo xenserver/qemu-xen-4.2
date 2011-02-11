@@ -582,12 +582,13 @@ static int blk_init(struct XenDevice *xendev)
 {
     struct XenBlkDev *blkdev = container_of(xendev, struct XenBlkDev, xendev);
     int mode, qflags, have_barriers, info = 0;
-    char *h;
+    char *h = NULL;
 
     /* read xenstore entries */
     if (blkdev->params == NULL) {
 	blkdev->params = xenstore_read_be_str(&blkdev->xendev, "params");
-        h = strchr(blkdev->params, ':');
+        if (blkdev->params != NULL)
+            h = strchr(blkdev->params, ':');
 	if (h != NULL) {
 	    blkdev->fileproto = blkdev->params;
 	    blkdev->filename  = h+1;
