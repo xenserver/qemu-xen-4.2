@@ -70,6 +70,7 @@ uint32_t igd_pci_read(PCIDevice *pci_dev, uint32_t config_addr, int len)
     {
         case 0x00:        /* vendor id */
         case 0x02:        /* device id */
+        case 0x50:        /* SNB: processor graphics control register */
         case 0x52:        /* processor graphics control register */
         case 0xa0:        /* top of memory */
         case 0xb0:        /* ILK: BSM: should read from dev 2 offset 0x5c */
