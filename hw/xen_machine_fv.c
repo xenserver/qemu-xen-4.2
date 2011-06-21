@@ -63,7 +63,7 @@ static unsigned long nr_buckets;
 TAILQ_HEAD(map_cache_head, map_cache_rev) locked_entries = TAILQ_HEAD_INITIALIZER(locked_entries);
 
 /* For most cases (>99.9%), the page address is the same. */
-static unsigned long last_address_index = ~0UL;
+static unsigned long last_address_page = ~0UL;
 static uint8_t      *last_address_vaddr;
 
 static int qemu_map_cache_init(void)
@@ -138,7 +138,7 @@ uint8_t *qemu_map_cache(target_phys_addr_t phys_addr, uint8_t lock)
     unsigned long address_index  = phys_addr >> MCACHE_BUCKET_SHIFT;
     unsigned long address_offset = phys_addr & (MCACHE_BUCKET_SIZE-1);
 
-    if (address_index == last_address_index && !lock)
+    if ((phys_addr >> XC_PAGE_SHIFT) == last_address_page && !lock)
         return last_address_vaddr + address_offset;
 
     entry = &mapcache_entry[address_index % nr_buckets];
@@ -157,17 +157,17 @@ uint8_t *qemu_map_cache(target_phys_addr_t phys_addr, uint8_t lock)
     }
 
     if (!test_bit(address_offset>>XC_PAGE_SHIFT, entry->valid_mapping)) {
-        last_address_index = ~0UL;
+        last_address_page = ~0UL;
         return NULL;
     }
 
-    last_address_index = address_index;
+    last_address_page = phys_addr >> XC_PAGE_SHIFT;
     last_address_vaddr = entry->vaddr_base;
     if (lock) {
         struct map_cache_rev *reventry = qemu_mallocz(sizeof(struct map_cache_rev));
         entry->lock++;
         reventry->vaddr_req = last_address_vaddr + address_offset;
-        reventry->paddr_index = last_address_index;
+        reventry->paddr_index = address_index;
         TAILQ_INSERT_TAIL(&locked_entries, reventry, next);
     }
 
@@ -182,7 +182,7 @@ void qemu_invalidate_entry(uint8_t *buffer)
     int found = 0;
     
     if (last_address_vaddr == buffer)
-        last_address_index =  ~0UL;
+        last_address_page =  ~0UL;
 
     TAILQ_FOREACH(reventry, &locked_entries, next) {
         if (reventry->vaddr_req == buffer) {
@@ -252,7 +252,7 @@ void qemu_invalidate_map_cache(void)
         entry->vaddr_base  = NULL;
     }
 
-    last_address_index =  ~0UL;
+    last_address_page =  ~0UL;
     last_address_vaddr = NULL;
 
     mapcache_unlock();
