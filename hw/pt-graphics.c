@@ -94,7 +94,8 @@ uint32_t igd_pci_read(PCIDevice *pci_dev, uint32_t config_addr, int len)
  */
 int register_vga_regions(struct pt_dev *real_device)
 {
-    u32 vendor_id, igd_opregion;
+    u16 vendor_id;
+    int igd_opregion;
     int ret = 0;
 
     if ( !gfx_passthru || real_device->pci_dev->device_class != 0x0300 )
