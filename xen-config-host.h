@@ -18,7 +18,7 @@ extern int domid, domid_backend;
 
 #include "xenctrl.h"
 #include "xs.h"
-#ifndef CONFIG_STUBDOM
+#if !defined(CONFIG_STUBDOM) && !defined(__NetBSD__)
 #include "blktaplib.h"
 #endif
 

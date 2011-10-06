@@ -47,7 +47,7 @@ static void xen_init_pv(ram_addr_t ram_size, int vga_ram_size,
     CPUState *env;
     uint32_t domid_target;
 
-#ifndef CONFIG_STUBDOM
+#if !defined(CONFIG_STUBDOM) && !defined(__NetBSD__)
     /* Initialize tapdisk client */
     init_blktap();
 #endif
