@@ -368,6 +368,7 @@ static void xen_init_fv(ram_addr_t ram_size, int vga_ram_size,
         exit(1);
     }
     xen_be_register("console", &xen_console_ops);
+    xen_be_register("vkbd", &xen_kbdmouse_ops);
 #ifndef CONFIG_STUBDOM
     xen_be_register("qdisk", &xen_blkdev_ops);
 #endif
