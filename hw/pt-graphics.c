@@ -23,13 +23,14 @@ void intel_pch_init(PCIBus *bus)
 {
     uint16_t vid, did;
     uint8_t  rid;
+    struct pci_dev *pci_dev_1f = pt_pci_get_dev(0, 0x1f, 0);
 
-    if ( !gfx_passthru )
+    if ( !gfx_passthru || !pci_dev_1f )
         return;
 
-    vid = pt_pci_host_read(0, 0x1f, 0, 0, 2);
-    did = pt_pci_host_read(0, 0x1f, 0, 2, 2);
-    rid = pt_pci_host_read(0, 0x1f, 0, 8, 1);
+    vid = pt_pci_host_read(pci_dev_1f, PCI_VENDOR_ID, 2);
+    did = pt_pci_host_read(pci_dev_1f, PCI_DEVICE_ID, 2);
+    rid = pt_pci_host_read(pci_dev_1f, PCI_REVISION, 1);
 
     if ( vid == 0x8086 ) 
         pci_bridge_init(bus, PCI_DEVFN(0x1f, 0), vid, did, rid,
@@ -38,6 +39,7 @@ void intel_pch_init(PCIBus *bus)
 
 void igd_pci_write(PCIDevice *pci_dev, uint32_t config_addr, uint32_t val, int len)
 {
+    struct pci_dev *pci_dev_host_bridge = pt_pci_get_dev(0, 0, 0);
     assert(pci_dev->devfn == 0x00);
     if ( !igd_passthru ) {
         pci_default_write_config(pci_dev, config_addr, val, len);
@@ -47,7 +49,7 @@ void igd_pci_write(PCIDevice *pci_dev, uint32_t config_addr, uint32_t val, int l
     switch (config_addr)
     {
         case 0x58:        // PAVPC Offset
-            pt_pci_host_write(0, 0, 0, config_addr, val, len);
+            pt_pci_host_write(pci_dev_host_bridge, config_addr, val, len);
             PT_LOG("pci_config_write: %x:%x.%x: addr=%x len=%x val=%x\n",
                    pci_bus_num(pci_dev->bus), PCI_SLOT(pci_dev->devfn),
                    PCI_FUNC(pci_dev->devfn), config_addr, len, val);
@@ -59,6 +61,7 @@ void igd_pci_write(PCIDevice *pci_dev, uint32_t config_addr, uint32_t val, int l
 
 uint32_t igd_pci_read(PCIDevice *pci_dev, uint32_t config_addr, int len)
 {
+    struct pci_dev *pci_dev_host_bridge = pt_pci_get_dev(0, 0, 0);
     uint32_t val;
 
     assert(pci_dev->devfn == 0x00);
@@ -77,8 +80,7 @@ uint32_t igd_pci_read(PCIDevice *pci_dev, uint32_t config_addr, int len)
         case 0x58:        /* SNB: PAVPC Offset */
         case 0xa4:        /* SNB: graphics base of stolen memory */
         case 0xa8:        /* SNB: base of GTT stolen memory */
-            val = pt_pci_host_read(0, PCI_SLOT(pci_dev->devfn),
-                                   0, config_addr, len);
+            val = pt_pci_host_read(pci_dev_host_bridge, config_addr, len);
             PT_LOG("pci_config_read: %x:%x.%x: addr=%x len=%x val=%x\n",
                    pci_bus_num(pci_dev->bus), PCI_SLOT(pci_dev->devfn),
                    PCI_FUNC(pci_dev->devfn), config_addr, len, val);
@@ -114,8 +116,8 @@ int register_vga_regions(struct pt_dev *real_device)
             DPCI_ADD_MAPPING);
 
     /* 1:1 map ASL Storage register value */
-    vendor_id = pt_pci_host_read(0, 2, 0, 0, 2);
-    igd_opregion = pt_pci_host_read(0, 2, 0, 0xfc, 4);
+    vendor_id = pt_pci_host_read(real_device->pci_dev, 0, 2);
+    igd_opregion = pt_pci_host_read(real_device->pci_dev, 0xfc, 4);
     if ( (vendor_id == 0x8086) && igd_opregion )
     {
         ret |= xc_domain_memory_mapping(xc_handle, domid,
@@ -155,8 +157,8 @@ int unregister_vga_regions(struct pt_dev *real_device)
             20,
             DPCI_REMOVE_MAPPING);
 
-    vendor_id = pt_pci_host_read(0, 2, 0, 0, 2);
-    igd_opregion = pt_pci_host_read(0, 2, 0, 0xfc, 4);
+    vendor_id = pt_pci_host_read(real_device->pci_dev, 0, 2);
+    igd_opregion = pt_pci_host_read(real_device->pci_dev, 0xfc, 4);
     if ( (vendor_id == 0x8086) && igd_opregion )
     {
         ret |= xc_domain_memory_mapping(xc_handle, domid,

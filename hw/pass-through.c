@@ -2055,31 +2055,26 @@ static void pci_access_init(void)
     dpci_infos.pci_access = pci_access;
 }
 
-u32 pt_pci_host_read(int bus, int dev, int fn, u32 addr, int len)
+struct pci_dev *pt_pci_get_dev(int bus, int dev, int fn)
 {
+    pci_access_init();
+    return pci_get_dev(dpci_infos.pci_access, 0, bus, dev, fn);
+}
 
-    struct pci_dev *pci_dev;
+u32 pt_pci_host_read(struct pci_dev *pci_dev, u32 addr, int len)
+{
     u32 val = -1;
 
     pci_access_init();
-    pci_dev = pci_get_dev(dpci_infos.pci_access, 0, bus, dev, fn);
-    if ( !pci_dev )
-        return 0;
-
     pci_read_block(pci_dev, addr, (u8 *) &val, len);
     return val;
 }
 
-int pt_pci_host_write(int bus, int dev, int fn, u32 addr, u32 val, int len)
+int pt_pci_host_write(struct pci_dev *pci_dev, u32 addr, u32 val, int len)
 {
-    struct pci_dev *pci_dev;
     int ret = 0;
 
     pci_access_init();
-    pci_dev = pci_get_dev(dpci_infos.pci_access, 0, bus, dev, fn);
-    if ( !pci_dev )
-        return 0;
-
     ret = pci_write_block(pci_dev, addr, (u8 *) &val, len);
     return ret;
 }

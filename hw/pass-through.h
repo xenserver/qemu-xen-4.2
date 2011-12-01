@@ -406,8 +406,9 @@ static inline pciaddr_t pt_pci_base_addr(pciaddr_t base)
 }
 
 uint8_t pci_intx(struct pt_dev *ptdev);
-u32 pt_pci_host_read(int bus, int dev, int fn, u32 addr, int len);
-int pt_pci_host_write(int bus, int dev, int fn, u32 addr, u32 val, int len);
+struct pci_dev *pt_pci_get_dev(int bus, int dev, int func);
+u32 pt_pci_host_read(struct pci_dev *pci_dev, u32 addr, int len);
+int pt_pci_host_write(struct pci_dev *pci_dev, u32 addr, u32 val, int len);
 void intel_pch_init(PCIBus *bus);
 int register_vga_regions(struct pt_dev *real_device);
 int unregister_vga_regions(struct pt_dev *real_device);
