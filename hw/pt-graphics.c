@@ -50,9 +50,10 @@ void igd_pci_write(PCIDevice *pci_dev, uint32_t config_addr, uint32_t val, int l
     {
         case 0x58:        // PAVPC Offset
             pt_pci_host_write(pci_dev_host_bridge, config_addr, val, len);
-            PT_LOG("pci_config_write: %x:%x.%x: addr=%x len=%x val=%x\n",
-                   pci_bus_num(pci_dev->bus), PCI_SLOT(pci_dev->devfn),
-                   PCI_FUNC(pci_dev->devfn), config_addr, len, val);
+#ifdef PT_DEBUG_PCI_CONFIG_ACCESS
+            PT_LOG_DEV(pci_dev, "addr=%x len=%x val=%x\n",
+                    config_addr, len, val);
+#endif
             break;
         default:
             pci_default_write_config(pci_dev, config_addr, val, len);
@@ -81,9 +82,10 @@ uint32_t igd_pci_read(PCIDevice *pci_dev, uint32_t config_addr, int len)
         case 0xa4:        /* SNB: graphics base of stolen memory */
         case 0xa8:        /* SNB: base of GTT stolen memory */
             val = pt_pci_host_read(pci_dev_host_bridge, config_addr, len);
-            PT_LOG("pci_config_read: %x:%x.%x: addr=%x len=%x val=%x\n",
-                   pci_bus_num(pci_dev->bus), PCI_SLOT(pci_dev->devfn),
-                   PCI_FUNC(pci_dev->devfn), config_addr, len, val);
+#ifdef PT_DEBUG_PCI_CONFIG_ACCESS
+            PT_LOG_DEV(pci_dev, "addr=%x len=%x val=%x\n",
+                    config_addr, len, val);
+#endif
             break;
         default:
             val = pci_default_read_config(pci_dev, config_addr, len);

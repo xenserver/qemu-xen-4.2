@@ -1475,37 +1475,30 @@ static void pt_pci_write_config(PCIDevice *d, uint32_t address, uint32_t val,
     int ret = 0;
 
 #ifdef PT_DEBUG_PCI_CONFIG_ACCESS
-    PT_LOG("[%02x:%02x.%x]: address=%04x val=0x%08x len=%d\n",
-       pci_bus_num(d->bus), PCI_SLOT(d->devfn), PCI_FUNC(d->devfn),
-       address, val, len);
+    PT_LOG_DEV(d, "address=%04x val=0x%08x len=%d\n", address, val, len);
 #endif
 
     /* check offset range */
     if (address >= 0xFF)
     {
-        PT_LOG("Error: Failed to write register with offset exceeding FFh. "
-            "[%02x:%02x.%x][Offset:%02xh][Length:%d]\n",
-            pci_bus_num(d->bus), PCI_SLOT(d->devfn), PCI_FUNC(d->devfn),
-            address, len);
+        PT_LOG_DEV(d, "Error: Failed to write register with offset exceeding FFh. "
+            "[Offset:%02xh][Length:%d]\n", address, len);
         goto exit;
     }
 
     /* check write size */
     if ((len != 1) && (len != 2) && (len != 4))
     {
-        PT_LOG("Error: Failed to write register with invalid access length. "
-            "[%02x:%02x.%x][Offset:%02xh][Length:%d]\n",
-            pci_bus_num(d->bus), PCI_SLOT(d->devfn), PCI_FUNC(d->devfn),
-            address, len);
+        PT_LOG_DEV(d, "Error: Failed to write register with invalid access length. "
+            "[Offset:%02xh][Length:%d]\n", address, len);
         goto exit;
     }
 
     /* check offset alignment */
     if (address & (len-1))
     {
-        PT_LOG("Error: Failed to write register with invalid access size "
-            "alignment. [%02x:%02x.%x][Offset:%02xh][Length:%d]\n",
-            pci_bus_num(d->bus), PCI_SLOT(d->devfn), PCI_FUNC(d->devfn),
+        PT_LOG_DEV(d, "Error: Failed to write register with invalid access size "
+            "alignment. [Offset:%02xh][Length:%d]\n",
             address, len);
         goto exit;
     }
@@ -1515,10 +1508,8 @@ static void pt_pci_write_config(PCIDevice *d, uint32_t address, uint32_t val,
     if ((index >= 0) && (val > 0 && val < PT_BAR_ALLF) &&
         (assigned_device->bases[index].bar_flag == PT_BAR_FLAG_UNUSED))
     {
-        PT_LOG("Warning: Guest attempt to set address to unused Base Address "
-            "Register. [%02x:%02x.%x][Offset:%02xh][Length:%d]\n",
-            pci_bus_num(d->bus), PCI_SLOT(d->devfn), PCI_FUNC(d->devfn),
-            address, len);
+        PT_LOG_DEV(d, "Warning: Guest attempt to set address to unused Base Address "
+            "Register. [Offset:%02xh][Length:%d]\n", address, len);
     }
 
     /* check power state transition flags */
@@ -1537,10 +1528,8 @@ static void pt_pci_write_config(PCIDevice *d, uint32_t address, uint32_t val,
         if (reg_grp->grp_type == GRP_TYPE_HARDWIRED)
         {
             /* ignore silently */
-            PT_LOG("Warning: Access to 0 Hardwired register. "
-                "[%02x:%02x.%x][Offset:%02xh][Length:%d]\n",
-                pci_bus_num(d->bus), PCI_SLOT(d->devfn), PCI_FUNC(d->devfn),
-                address, len);
+            PT_LOG_DEV(d, "Warning: Access to 0 Hardwired register. "
+                "[Offset:%02xh][Length:%d]\n", address, len);
             goto exit;
         }
     }
@@ -1668,30 +1657,24 @@ static uint32_t pt_pci_read_config(PCIDevice *d, uint32_t address, int len)
     /* check offset range */
     if (address >= 0xFF)
     {
-        PT_LOG("Error: Failed to read register with offset exceeding FFh. "
-            "[%02x:%02x.%x][Offset:%02xh][Length:%d]\n",
-            pci_bus_num(d->bus), PCI_SLOT(d->devfn), PCI_FUNC(d->devfn),
-            address, len);
+        PT_LOG_DEV(d, "Error: Failed to read register with offset exceeding FFh. "
+            "[Offset:%02xh][Length:%d]\n", address, len);
         goto exit;
     }
 
     /* check read size */
     if ((len != 1) && (len != 2) && (len != 4))
     {
-        PT_LOG("Error: Failed to read register with invalid access length. "
-            "[%02x:%02x.%x][Offset:%02xh][Length:%d]\n",
-            pci_bus_num(d->bus), PCI_SLOT(d->devfn), PCI_FUNC(d->devfn),
-            address, len);
+        PT_LOG_DEV(d, "Error: Failed to read register with invalid access length. "
+            "[Offset:%02xh][Length:%d]\n", address, len);
         goto exit;
     }
 
     /* check offset alignment */
     if (address & (len-1))
     {
-        PT_LOG("Error: Failed to read register with invalid access size "
-            "alignment. [%02x:%02x.%x][Offset:%02xh][Length:%d]\n",
-            pci_bus_num(d->bus), PCI_SLOT(d->devfn), PCI_FUNC(d->devfn),
-            address, len);
+        PT_LOG_DEV(d, "Error: Failed to read register with invalid access size "
+            "alignment. [Offset:%02xh][Length:%d]\n", address, len);
         goto exit;
     }
 
@@ -1803,9 +1786,7 @@ static uint32_t pt_pci_read_config(PCIDevice *d, uint32_t address, int len)
 exit:
 
 #ifdef PT_DEBUG_PCI_CONFIG_ACCESS
-    PT_LOG("[%02x:%02x.%x]: address=%04x val=0x%08x len=%d\n",
-       pci_bus_num(d->bus), PCI_SLOT(d->devfn), PCI_FUNC(d->devfn),
-       address, val, len);
+    PT_LOG_DEV(d, "address=%04x val=0x%08x len=%d\n", address, val, len);
 #endif
 
     return val;
@@ -2181,9 +2162,8 @@ static void pt_bar_mapping_one(struct pt_dev *ptdev, int bar, int io_enable,
     ret = pt_chk_bar_overlap(dev->bus, dev->devfn,
                     r_addr, r_size, r->type);
     if (ret > 0)
-        PT_LOG("Warning: ptdev[%02x:%02x.%x][Region:%d][Address:%08xh]"
-            "[Size:%08xh] is overlapped.\n", pci_bus_num(dev->bus),
-            PCI_SLOT(dev->devfn), PCI_FUNC(dev->devfn), bar, r_addr, r_size);
+        PT_LOG_DEV(dev, "Warning: [Region:%d][Address:%08xh]"
+            "[Size:%08xh] is overlapped.\n", bar, r_addr, r_size);
 
     /* check whether we need to update the mapping or not */
     if (r_addr != ptdev->bases[bar].e_physbase)
@@ -2217,9 +2197,8 @@ static int check_power_state(struct pt_dev *ptdev)
 
     if (pm_state->req_state != cur_state)
     {
-        PT_LOG("Error: Failed to change power state. "
-            "[%02x:%02x.%x][requested state:%d][current state:%d]\n",
-            pci_bus_num(d->bus), PCI_SLOT(d->devfn), PCI_FUNC(d->devfn),
+        PT_LOG_DEV(d, "Error: Failed to change power state. "
+            "[requested state:%d][current state:%d]\n",
             pm_state->req_state, cur_state);
         return -1;
     }
@@ -2379,9 +2358,8 @@ static void pt_config_restore(struct pt_dev *ptdev)
             }
 
 #ifdef PT_DEBUG_PCI_CONFIG_ACCESS
-            PT_LOG("[%02x:%02x.%x]: address=%04x val=0x%08x len=%d\n",
-                pci_bus_num(d->bus), PCI_SLOT(d->devfn), PCI_FUNC(d->devfn),
-                real_offset, val, reg->size);
+            PT_LOG_DEV(d, "address=%04x val=0x%08x len=%d\n",
+                    real_offset, val, reg->size);
 #endif
 
             ret = pci_write_block(ptdev->pci_dev, real_offset,
@@ -2426,9 +2404,8 @@ static int pt_init_pci_config(struct pt_dev *ptdev)
     PCIDevice *d = &ptdev->dev;
     int ret = 0;
 
-    PT_LOG("Reinitialize PCI configuration registers "
-        "due to power state transition with internal reset. [%02x:%02x.%x]\n",
-        pci_bus_num(d->bus), PCI_SLOT(d->devfn), PCI_FUNC(d->devfn));
+    PT_LOG_DEV(d, "Reinitialize PCI configuration registers "
+        "due to power state transition with internal reset.\n");
 
     /* restore a part of I/O device register */
     pt_config_restore(ptdev);
@@ -3493,10 +3470,9 @@ static int pt_bar_reg_write(struct pt_dev *ptdev,
             if ((last_addr >= 0x10000) &&
                 (cfg_entry->data != (PT_BAR_ALLF & ~bar_ro_mask)))
             {
-                PT_LOG("Warning: Guest attempt to set Base Address "
+                PT_LOG_DEV(d, "Warning: Guest attempt to set Base Address "
                     "over the 64KB. "
-                    "[%02x:%02x.%x][Offset:%02xh][Address:%08xh][Size:%08xh]\n",
-                    pci_bus_num(d->bus), PCI_SLOT(d->devfn), PCI_FUNC(d->devfn),
+                    "[Offset:%02xh][Address:%08xh][Size:%08xh]\n",
                     reg->offset, new_addr, r_size);
             }
             /* just remove mapping */
@@ -3509,11 +3485,10 @@ static int pt_bar_reg_write(struct pt_dev *ptdev,
         {
             if (cfg_entry->data != (PT_BAR_ALLF & ~bar_ro_mask))
             {
-                PT_LOG("Warning: Guest attempt to set high MMIO Base Address. "
+                PT_LOG_DEV(d, "Warning: Guest attempt to set high MMIO Base Address. "
                     "Ignore mapping. "
-                    "[%02x:%02x.%x][Offset:%02xh][High Address:%08xh]\n",
-                    pci_bus_num(d->bus), PCI_SLOT(d->devfn),
-                    PCI_FUNC(d->devfn), reg->offset, cfg_entry->data);
+                    "[Offset:%02xh][High Address:%08xh]\n",
+                    reg->offset, cfg_entry->data);
             }
             /* clear lower address */
             d->io_regions[index-1].addr = -1;
@@ -3678,9 +3653,8 @@ static int pt_pmcsr_reg_write(struct pt_dev *ptdev,
     if ((pm_state->req_state != 0) &&
         (pm_state->cur_state > pm_state->req_state))
     {
-        PT_LOG("Error: Invalid power transition. "
-            "[%02x:%02x.%x][requested state:%d][current state:%d]\n",
-            pci_bus_num(d->bus), PCI_SLOT(d->devfn), PCI_FUNC(d->devfn),
+        PT_LOG_DEV(d, "Error: Invalid power transition. "
+            "[requested state:%d][current state:%d]\n",
             pm_state->req_state, pm_state->cur_state);
 
         return 0;
@@ -3691,9 +3665,8 @@ static int pt_pmcsr_reg_write(struct pt_dev *ptdev,
         || ((pm_state->req_state == 2) &&
         !(pm_state->pmc_field & PCI_PM_CAP_D2)))
     {
-        PT_LOG("Error: Invalid power transition. "
-            "[%02x:%02x.%x][requested state:%d][current state:%d]\n",
-            pci_bus_num(d->bus), PCI_SLOT(d->devfn), PCI_FUNC(d->devfn),
+        PT_LOG_DEV(d, "Error: Invalid power transition. "
+            "[requested state:%d][current state:%d]\n",
             pm_state->req_state, pm_state->cur_state);
 
         return 0;
