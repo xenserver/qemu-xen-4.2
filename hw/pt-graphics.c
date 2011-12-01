@@ -32,7 +32,7 @@ void intel_pch_init(PCIBus *bus)
     did = pt_pci_host_read(pci_dev_1f, PCI_DEVICE_ID, 2);
     rid = pt_pci_host_read(pci_dev_1f, PCI_REVISION, 1);
 
-    if ( vid == 0x8086 ) 
+    if ( vid == PCI_VENDOR_ID_INTEL )
         pci_bridge_init(bus, PCI_DEVFN(0x1f, 0), vid, did, rid,
                         pch_map_irq, "intel_bridge_1f");
 }
@@ -117,8 +117,8 @@ int register_vga_regions(struct pt_dev *real_device)
 
     /* 1:1 map ASL Storage register value */
     vendor_id = pt_pci_host_read(real_device->pci_dev, 0, 2);
-    igd_opregion = pt_pci_host_read(real_device->pci_dev, 0xfc, 4);
-    if ( (vendor_id == 0x8086) && igd_opregion )
+    igd_opregion = pt_pci_host_read(real_device->pci_dev, PCI_INTEL_OPREGION, 4);
+    if ( (vendor_id == PCI_VENDOR_ID_INTEL ) && igd_opregion )
     {
         ret |= xc_domain_memory_mapping(xc_handle, domid,
                 igd_opregion >> XC_PAGE_SHIFT,
@@ -157,9 +157,9 @@ int unregister_vga_regions(struct pt_dev *real_device)
             20,
             DPCI_REMOVE_MAPPING);
 
-    vendor_id = pt_pci_host_read(real_device->pci_dev, 0, 2);
-    igd_opregion = pt_pci_host_read(real_device->pci_dev, 0xfc, 4);
-    if ( (vendor_id == 0x8086) && igd_opregion )
+    vendor_id = pt_pci_host_read(real_device->pci_dev, PCI_VENDOR_ID, 2);
+    igd_opregion = pt_pci_host_read(real_device->pci_dev, PCI_INTEL_OPREGION, 4);
+    if ( (vendor_id == PCI_VENDOR_ID_INTEL) && igd_opregion )
     {
         ret |= xc_domain_memory_mapping(xc_handle, domid,
                 igd_opregion >> XC_PAGE_SHIFT,

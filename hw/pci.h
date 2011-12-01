@@ -169,6 +169,7 @@ typedef struct PCIIORegion {
 #define PCI_INTERRUPT_PIN	0x3d	/* 8 bits */
 #define PCI_MIN_GNT		0x3e	/* 8 bits */
 #define PCI_MAX_LAT		0x3f	/* 8 bits */
+#define PCI_INTEL_OPREGION	0xfc    /* 32 bits */
 
 /* Header type 1 (PCI-to-PCI bridges) */
 #define PCI_SEC_STATUS		0x1e	/* Secondary status register */
