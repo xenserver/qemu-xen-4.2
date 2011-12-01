@@ -542,6 +542,7 @@ RTCState *rtc_init(int base, qemu_irq irq, int base_year)
     s->base_year = base_year;
     rtc_set_date_from_host(s);
 
+#ifndef CONFIG_DM
     s->periodic_timer = qemu_new_timer(vm_clock,
                                        rtc_periodic_timer, s);
     s->second_timer = qemu_new_timer(vm_clock,
@@ -551,6 +552,7 @@ RTCState *rtc_init(int base, qemu_irq irq, int base_year)
 
     s->next_second_time = qemu_get_clock(vm_clock) + (ticks_per_sec * 99) / 100;
     qemu_mod_timer(s->second_timer2, s->next_second_time);
+#endif
 
     register_ioport_write(base, 2, 1, cmos_ioport_write, s);
     register_ioport_read(base, 2, 1, cmos_ioport_read, s);
