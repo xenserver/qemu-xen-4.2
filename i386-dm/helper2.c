@@ -576,8 +576,8 @@ int main_loop(void)
             /* Wait up to 10 msec. */
             main_loop_wait(10);
 #else
-            /* Wait up to 10s. */
-            main_loop_wait(10000);
+            /* Wait up to 1h. */
+            main_loop_wait(1000*60*60);
 #endif
 
         fprintf(logfile, "device model saving state\n");
