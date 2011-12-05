@@ -1201,6 +1201,10 @@ void qemu_mod_timer(QEMUTimer *ts, int64_t expire_time)
 int qemu_timer_pending(QEMUTimer *ts)
 {
     QEMUTimer *t;
+
+    if (ts == NULL)
+        return 0;
+
     for(t = active_timers[ts->clock->type]; t != NULL; t = t->next) {
         if (t == ts)
             return 1;
@@ -1271,6 +1275,9 @@ void qemu_put_timer(QEMUFile *f, QEMUTimer *ts)
 void qemu_get_timer(QEMUFile *f, QEMUTimer *ts)
 {
     uint64_t expire_time;
+
+    if (ts == NULL)
+        return;
 
     expire_time = qemu_get_be64(f);
     if (expire_time != -1) {
