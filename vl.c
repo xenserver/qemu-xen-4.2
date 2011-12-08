@@ -1274,6 +1274,8 @@ void qemu_put_timer(QEMUFile *f, QEMUTimer *ts)
 
 void qemu_get_timer(QEMUFile *f, QEMUTimer *ts)
 {
+    /* If ts==NULL, reads the relevant amount of data from the
+       savefile but discards it */
     uint64_t expire_time;
 
     expire_time = qemu_get_be64(f);
