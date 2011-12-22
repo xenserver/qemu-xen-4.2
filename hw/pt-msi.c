@@ -284,15 +284,6 @@ void pt_disable_msi_translate(struct pt_dev *dev)
     dev->msi_trans_en = 0;
 }
 
-/* MSI-X virtulization functions */
-static void mask_physical_msix_entry(struct pt_dev *dev, int entry_nr, int mask)
-{
-    void *phys_off;
-
-    phys_off = dev->msix->phys_iomem_base + 16 * entry_nr + 12;
-    *(uint32_t *)phys_off = mask;
-}
-
 static int pt_msix_update_one(struct pt_dev *dev, int entry_nr)
 {
     struct msix_entry_info *entry = &dev->msix->msix_entry[entry_nr];
@@ -486,7 +477,6 @@ static void pci_msix_writel(void *opaque, target_phys_addr_t addr, uint32_t val)
     {
         if ( msix->enabled && !(val & 0x1) )
             pt_msix_update_one(dev, entry_nr);
-        mask_physical_msix_entry(dev, entry_nr, entry->io_mem[3] & 0x1);
     }
 }
 
@@ -519,7 +509,11 @@ static uint32_t pci_msix_readl(void *opaque, target_phys_addr_t addr)
     entry_nr = (addr - msix->mmio_base_addr) / 16;
     offset = ((addr - msix->mmio_base_addr) % 16) / 4;
 
-    return msix->msix_entry[entry_nr].io_mem[offset];
+    if ( addr - msix->mmio_base_addr < msix->total_entries * 16 )
+        return msix->msix_entry[entry_nr].io_mem[offset];
+    else
+        return *(uint32_t *)(msix->phys_iomem_base +
+                             (addr - msix->mmio_base_addr));
 }
 
 static CPUReadMemoryFunc *pci_msix_read[] = {
@@ -528,39 +522,12 @@ static CPUReadMemoryFunc *pci_msix_read[] = {
     pci_msix_readl
 };
 
-int add_msix_mapping(struct pt_dev *dev, int bar_index)
+int has_msix_mapping(struct pt_dev *dev, int bar_index)
 {
     if ( !(dev->msix && dev->msix->bar_index == bar_index) )
         return 0;
 
-    return xc_domain_memory_mapping(xc_handle, domid,
-                dev->msix->mmio_base_addr >> XC_PAGE_SHIFT,
-                (dev->bases[bar_index].access.maddr
-                + dev->msix->table_off) >> XC_PAGE_SHIFT,
-                (dev->msix->total_entries * 16
-                + XC_PAGE_SIZE -1) >> XC_PAGE_SHIFT,
-                DPCI_ADD_MAPPING);
-}
-
-int remove_msix_mapping(struct pt_dev *dev, int bar_index)
-{
-    if ( !(dev->msix && dev->msix->bar_index == bar_index) )
-        return 0;
-
-    dev->msix->mmio_base_addr = dev->bases[bar_index].e_physbase
-                                + dev->msix->table_off;
-
-    cpu_register_physical_memory(dev->msix->mmio_base_addr,
-                                 dev->msix->total_entries * 16,
-                                 dev->msix->mmio_index);
-
-    return xc_domain_memory_mapping(xc_handle, domid,
-                dev->msix->mmio_base_addr >> XC_PAGE_SHIFT,
-                (dev->bases[bar_index].access.maddr
-                + dev->msix->table_off) >> XC_PAGE_SHIFT,
-                (dev->msix->total_entries * 16
-                + XC_PAGE_SIZE -1) >> XC_PAGE_SHIFT,
-                DPCI_REMOVE_MAPPING);
+    return 1;
 }
 
 int pt_msix_init(struct pt_dev *dev, int pos)
@@ -616,7 +583,7 @@ int pt_msix_init(struct pt_dev *dev, int pos)
     PT_LOG("table_off = %x, total_entries = %d\n", table_off, total_entries);
     dev->msix->table_offset_adjust = table_off & 0x0fff;
     dev->msix->phys_iomem_base = mmap(0, total_entries * 16 + dev->msix->table_offset_adjust,
-                          PROT_WRITE | PROT_READ, MAP_SHARED | MAP_LOCKED,
+                          PROT_READ, MAP_SHARED | MAP_LOCKED,
                           fd, dev->msix->table_base + table_off - dev->msix->table_offset_adjust);
     dev->msix->phys_iomem_base = (void *)((char *)dev->msix->phys_iomem_base + 
                           dev->msix->table_offset_adjust);

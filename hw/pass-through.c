@@ -92,6 +92,7 @@
 
 #include <unistd.h>
 #include <sys/ioctl.h>
+#include <assert.h>
 
 extern int gfx_passthru;
 int igd_passthru = 0;
@@ -1097,6 +1098,44 @@ uint8_t pci_intx(struct pt_dev *ptdev)
     return r_val;
 }
 
+static int _pt_iomem_helper(struct pt_dev *assigned_device, int i,
+                            uint32_t e_base, uint32_t e_size, int op)
+{
+    if ( has_msix_mapping(assigned_device, i) )
+    {
+        uint32_t msix_last_pfn = (assigned_device->msix->mmio_base_addr - 1 +
+            assigned_device->msix->total_entries * 16) >> XC_PAGE_SHIFT;
+        uint32_t bar_last_pfn = (e_base + e_size - 1) >> XC_PAGE_SHIFT;
+        int ret = 0;
+
+        if ( assigned_device->msix->table_off )
+            ret = xc_domain_memory_mapping(xc_handle, domid,
+                e_base >> XC_PAGE_SHIFT,
+                assigned_device->bases[i].access.maddr >> XC_PAGE_SHIFT,
+                (assigned_device->msix->mmio_base_addr >> XC_PAGE_SHIFT)
+                - (e_base >> XC_PAGE_SHIFT), op);
+
+        if ( ret == 0 && msix_last_pfn != bar_last_pfn )
+        {
+            assert(msix_last_pfn < bar_last_pfn);
+            ret = xc_domain_memory_mapping(xc_handle, domid,
+                msix_last_pfn + 1,
+                (assigned_device->bases[i].access.maddr +
+                 assigned_device->msix->table_off +
+                 assigned_device->msix->total_entries * 16 +
+                 XC_PAGE_SIZE - 1) >> XC_PAGE_SHIFT,
+                bar_last_pfn - msix_last_pfn, op);
+        }
+
+        return ret;
+    }
+
+    return xc_domain_memory_mapping(xc_handle, domid,
+        e_base >> XC_PAGE_SHIFT,
+        assigned_device->bases[i].access.maddr >> XC_PAGE_SHIFT,
+        (e_size + XC_PAGE_SIZE - 1) >> XC_PAGE_SHIFT, op);
+}
+
 /* Being called each time a mmio region has been updated */
 static void pt_iomem_map(PCIDevice *d, int i, uint32_t e_phys, uint32_t e_size,
                          int type)
@@ -1118,13 +1157,11 @@ static void pt_iomem_map(PCIDevice *d, int i, uint32_t e_phys, uint32_t e_size,
 
     if ( !first_map && old_ebase != -1 )
     {
-        add_msix_mapping(assigned_device, i);
-        /* Remove old mapping */
-        ret = xc_domain_memory_mapping(xc_handle, domid,
-                old_ebase >> XC_PAGE_SHIFT,
-                assigned_device->bases[i].access.maddr >> XC_PAGE_SHIFT,
-                (e_size+XC_PAGE_SIZE-1) >> XC_PAGE_SHIFT,
-                DPCI_REMOVE_MAPPING);
+        if ( has_msix_mapping(assigned_device, i) )
+            unregister_iomem(assigned_device->msix->mmio_base_addr);
+
+        ret = _pt_iomem_helper(assigned_device, i, old_ebase, e_size,
+                               DPCI_REMOVE_MAPPING);
         if ( ret != 0 )
         {
             PT_LOG("Error: remove old mapping failed!\n");
@@ -1135,21 +1172,25 @@ static void pt_iomem_map(PCIDevice *d, int i, uint32_t e_phys, uint32_t e_size,
     /* map only valid guest address */
     if (e_phys != -1)
     {
-        /* Create new mapping */
-        ret = xc_domain_memory_mapping(xc_handle, domid,
-                assigned_device->bases[i].e_physbase >> XC_PAGE_SHIFT,
-                assigned_device->bases[i].access.maddr >> XC_PAGE_SHIFT,
-                (e_size+XC_PAGE_SIZE-1) >> XC_PAGE_SHIFT,
-                DPCI_ADD_MAPPING);
+        if ( has_msix_mapping(assigned_device, i) )
+        {
+            assigned_device->msix->mmio_base_addr =
+                assigned_device->bases[i].e_physbase
+                + assigned_device->msix->table_off;
 
+            cpu_register_physical_memory(assigned_device->msix->mmio_base_addr,
+                 (assigned_device->msix->total_entries * 16 + XC_PAGE_SIZE - 1)
+                  & XC_PAGE_MASK,
+                 assigned_device->msix->mmio_index);
+        }
+
+        ret = _pt_iomem_helper(assigned_device, i, e_phys, e_size,
+                               DPCI_ADD_MAPPING);
         if ( ret != 0 )
         {
             PT_LOG("Error: create new mapping failed!\n");
+            return;
         }
-
-        ret = remove_msix_mapping(assigned_device, i);
-        if ( ret != 0 )
-            PT_LOG("Error: remove MSI-X mmio mapping failed!\n");
 
         if ( old_ebase != e_phys && old_ebase != -1 )
             pt_msix_update_remap(assigned_device, i);

@@ -109,10 +109,7 @@ void
 pt_msix_disable(struct pt_dev *dev);
 
 int
-remove_msix_mapping(struct pt_dev *dev, int bar_index);
-
-int
-add_msix_mapping(struct pt_dev *dev, int bar_index);
+has_msix_mapping(struct pt_dev *dev, int bar_index);
 
 int
 pt_msix_init(struct pt_dev *dev, int pos);
