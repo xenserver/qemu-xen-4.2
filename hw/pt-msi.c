@@ -431,8 +431,8 @@ int pt_msix_update_remap(struct pt_dev *dev, int bar_index)
 static void pci_msix_invalid_write(void *opaque, target_phys_addr_t addr,
                                    uint32_t val)
 {
-    PT_LOG("Error: Invalid write to MSI-X table, \
-            only dword access is allowed.\n");
+    PT_LOG("Error: Invalid write to MSI-X table, addr %016"PRIx64";"
+           " only dword access is allowed\n", addr);
 }
 
 static void pci_msix_writel(void *opaque, target_phys_addr_t addr, uint32_t val)
@@ -441,13 +441,11 @@ static void pci_msix_writel(void *opaque, target_phys_addr_t addr, uint32_t val)
     struct pt_msix_info *msix = dev->msix;
     struct msix_entry_info *entry;
     int entry_nr, offset;
-    void *phys_off;
-    uint32_t vec_ctrl;
 
     if ( addr % 4 )
     {
-        PT_LOG("Error: Unaligned dword access to MSI-X table, \
-                addr %016"PRIx64"\n", addr);
+        PT_LOG("Error: Unaligned dword write to MSI-X table,"
+               " addr %016"PRIx64"\n", addr);
         return;
     }
 
@@ -455,22 +453,30 @@ static void pci_msix_writel(void *opaque, target_phys_addr_t addr, uint32_t val)
     entry = &msix->msix_entry[entry_nr];
     offset = ((addr - msix->mmio_base_addr) % 16) / 4;
 
-    /*
-     * If Xen intercepts the mask bit access, io_mem[3] may not be
-     * up-to-date. Read from hardware directly.
-     */
-    phys_off = dev->msix->phys_iomem_base + 16 * entry_nr + 12;
-    vec_ctrl = *(uint32_t *)phys_off;
-
-    if ( offset != 3 && msix->enabled && !(vec_ctrl & 0x1) )
+    if ( offset != 3 )
     {
-        PT_LOG("Error: Can't update msix entry %d since MSI-X is already \
-                function.\n", entry_nr);
-        return;
+        const volatile uint32_t *vec_ctrl;
+
+        if ( entry->io_mem[offset] == val )
+            return;
+
+        /*
+         * If Xen intercepts the mask bit access, io_mem[3] may not be
+         * up-to-date. Read from hardware directly.
+         */
+        vec_ctrl = msix->phys_iomem_base + 16 * entry_nr + 12;
+
+        if ( msix->enabled && !(*vec_ctrl & 0x1) )
+        {
+            PT_LOG("Can't update entry %d since MSI-X is already enabled"
+                   " (%08"PRIx32" -> %08"PRIx32")\n",
+                   entry_nr, entry->io_mem[offset], val);
+            return;
+        }
+
+        entry->flags = 1;
     }
 
-    if ( offset != 3 && entry->io_mem[offset] != val )
-        entry->flags = 1;
     entry->io_mem[offset] = val;
 
     if ( offset == 3 )
@@ -488,8 +494,8 @@ static CPUWriteMemoryFunc *pci_msix_write[] = {
 
 static uint32_t pci_msix_invalid_read(void *opaque, target_phys_addr_t addr)
 {
-    PT_LOG("Error: Invalid read to MSI-X table, \
-            only dword access is allowed.\n");
+    PT_LOG("Error: Invalid read >from MSI-X table, addr %016"PRIx64";"
+           " only dword access is allowed\n", addr);
     return 0;
 }
 
@@ -501,8 +507,8 @@ static uint32_t pci_msix_readl(void *opaque, target_phys_addr_t addr)
 
     if ( addr % 4 )
     {
-        PT_LOG("Error: Unaligned dword access to MSI-X table, \
-                addr %016"PRIx64"\n", addr);
+        PT_LOG("Error: Unaligned dword read from MSI-X table,"
+               " addr %016"PRIx64"\n", addr);
         return 0;
     }
 
