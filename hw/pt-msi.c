@@ -537,7 +537,6 @@ int pt_msix_init(struct pt_dev *dev, int pos)
     int i, total_entries, table_off, bar_index;
     struct pci_dev *pd = dev->pci_dev;
     int fd;
-    int err;
 
     id = pci_read_byte(pd, pos + PCI_CAP_LIST_ID);
 
@@ -585,17 +584,14 @@ int pt_msix_init(struct pt_dev *dev, int pos)
     dev->msix->phys_iomem_base = mmap(0, total_entries * 16 + dev->msix->table_offset_adjust,
                           PROT_READ, MAP_SHARED | MAP_LOCKED,
                           fd, dev->msix->table_base + table_off - dev->msix->table_offset_adjust);
-    dev->msix->phys_iomem_base = (void *)((char *)dev->msix->phys_iomem_base + 
-                          dev->msix->table_offset_adjust);
-    err = errno;
-    PT_LOG("errno = %d\n",err);
+    close(fd);
     if ( dev->msix->phys_iomem_base == MAP_FAILED )
     {
         PT_LOG("Error: Can't map physical MSI-X table: %s\n", strerror(errno));
-        close(fd);
         goto error_out;
     }
-    close(fd);
+
+    dev->msix->phys_iomem_base += dev->msix->table_offset_adjust;
 
     PT_LOG("mapping physical MSI-X table to %lx\n",
            (unsigned long)dev->msix->phys_iomem_base);
