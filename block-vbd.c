@@ -144,7 +144,7 @@ void qemu_aio_wait(void)
 	    break;
 	schedule();
     }
-    remove_waiter(w);
+    remove_waiter(w, blkfront_queue);
 }
 
 static void vbd_do_aio(struct blkfront_aiocb *aiocbp, int ret) {
