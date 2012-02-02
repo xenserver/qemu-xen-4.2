@@ -444,6 +444,8 @@ process_tx_desc(E1000State *s, struct e1000_tx_desc *dp)
             bytes = split_size;
             if (tp->size + bytes > msh)
                 bytes = msh - tp->size;
+
+            bytes = MIN(sizeof(tp->data) - tp->size, bytes);
             cpu_physical_memory_read(addr, tp->data + tp->size, bytes);
             if ((sz = tp->size + bytes) >= hdr && tp->size < hdr)
                 memmove(tp->header, tp->data, hdr);
@@ -459,6 +461,7 @@ process_tx_desc(E1000State *s, struct e1000_tx_desc *dp)
         // context descriptor TSE is not set, while data descriptor TSE is set
         DBGOUT(TXERR, "TCP segmentaion Error\n");
     } else {
+        split_size = MIN(sizeof(tp->data) - tp->size, split_size);
         cpu_physical_memory_read(addr, tp->data + tp->size, split_size);
         tp->size += split_size;
     }
