@@ -360,7 +360,7 @@ void cpu_unregister_io_memory(int io_table_address)
     int io_index = io_table_address >> IO_MEM_SHIFT;
 
     for (i = 0; i < mmio_cnt; i++) {
-	if (mmio[i].size && mmio[i].io_index == io_index) {
+	if (mmio[i].io_index == io_index) {
 	   mmio[i].start = mmio[i].size = 0;
 	   break;
 	}
@@ -466,12 +466,16 @@ static int iomem_index(target_phys_addr_t addr)
 
 void unregister_iomem(target_phys_addr_t start)
 {
-    int index = iomem_index(start);
-    if (index) {
+    unsigned int index;
+
+    for (index = 0; index < mmio_cnt; index++)
+        if (start == mmio[index].start)
+            break;
+    if (index < mmio_cnt) {
         fprintf(logfile, "squash iomem [%lx, %lx).\n",
 		(unsigned long)(mmio[index].start),
                 (unsigned long)(mmio[index].start + mmio[index].size));
-        mmio[index].start = mmio[index].size = 0;
+        mmio[index].size = 0;
     }
 }
 
