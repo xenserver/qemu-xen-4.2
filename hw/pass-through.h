@@ -29,6 +29,8 @@
 /* Log acesss */
 #define PT_LOGGING_ENABLED
 
+/* Print errors even if logging is disabled */
+#define PT_ERR(_f, _a...)   fprintf(logfile, "%s: " _f, __func__, ##_a)
 #ifdef PT_LOGGING_ENABLED
 #define PT_LOG(_f, _a...)   fprintf(logfile, "%s: " _f, __func__, ##_a)
 #define PT_LOG_DEV(_dev, _f, _a...)   fprintf(logfile, "%s: [%02x:%02x:%01x] " _f, __func__,    \

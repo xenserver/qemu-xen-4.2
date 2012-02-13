@@ -23,10 +23,16 @@ void intel_pch_init(PCIBus *bus)
 {
     uint16_t vid, did;
     uint8_t  rid;
-    struct pci_dev *pci_dev_1f = pt_pci_get_dev(0, 0x1f, 0);
+    struct pci_dev *pci_dev_1f;
 
-    if ( !gfx_passthru || !pci_dev_1f )
+    if ( !gfx_passthru )
         return;
+
+    if ( !(pci_dev_1f=pt_pci_get_dev(0, 0x1f, 0)) )
+    {
+        PT_ERR("Error: Can't get pci_dev_host_bridge\n");
+        abort();
+    }
 
     vid = pt_pci_host_read(pci_dev_1f, PCI_VENDOR_ID, 2);
     did = pt_pci_host_read(pci_dev_1f, PCI_DEVICE_ID, 2);
@@ -39,36 +45,45 @@ void intel_pch_init(PCIBus *bus)
 
 void igd_pci_write(PCIDevice *pci_dev, uint32_t config_addr, uint32_t val, int len)
 {
-    struct pci_dev *pci_dev_host_bridge = pt_pci_get_dev(0, 0, 0);
+    struct pci_dev *pci_dev_host_bridge;
     assert(pci_dev->devfn == 0x00);
-    if ( !igd_passthru ) {
-        pci_default_write_config(pci_dev, config_addr, val, len);
-        return;
-    }
+    if ( !igd_passthru )
+        goto write_default;
 
     switch (config_addr)
     {
         case 0x58:        // PAVPC Offset
-            pt_pci_host_write(pci_dev_host_bridge, config_addr, val, len);
-#ifdef PT_DEBUG_PCI_CONFIG_ACCESS
-            PT_LOG_DEV(pci_dev, "addr=%x len=%x val=%x\n",
-                    config_addr, len, val);
-#endif
             break;
         default:
-            pci_default_write_config(pci_dev, config_addr, val, len);
+            goto write_default;
     }
+
+    /* Host write */
+    if ( !(pci_dev_host_bridge = pt_pci_get_dev(0, 0, 0)) )
+    {
+        PT_ERR("Error: Can't get pci_dev_host_bridge\n");
+        abort();
+    }
+
+    pt_pci_host_write(pci_dev_host_bridge, config_addr, val, len);
+#ifdef PT_DEBUG_PCI_CONFIG_ACCESS
+    PT_LOG_DEV(pci_dev, "addr=%x len=%x val=%x\n",
+               config_addr, len, val);
+#endif
+    return;
+
+write_default:
+    pci_default_write_config(pci_dev, config_addr, val, len);
 }
 
 uint32_t igd_pci_read(PCIDevice *pci_dev, uint32_t config_addr, int len)
 {
-    struct pci_dev *pci_dev_host_bridge = pt_pci_get_dev(0, 0, 0);
+    struct pci_dev *pci_dev_host_bridge;
     uint32_t val;
 
     assert(pci_dev->devfn == 0x00);
-    if ( !igd_passthru ) {
-        return pci_default_read_config(pci_dev, config_addr, len);
-    }
+    if ( !igd_passthru )
+        goto read_default;
 
     switch (config_addr)
     {
@@ -81,16 +96,28 @@ uint32_t igd_pci_read(PCIDevice *pci_dev, uint32_t config_addr, int len)
         case 0x58:        /* SNB: PAVPC Offset */
         case 0xa4:        /* SNB: graphics base of stolen memory */
         case 0xa8:        /* SNB: base of GTT stolen memory */
-            val = pt_pci_host_read(pci_dev_host_bridge, config_addr, len);
-#ifdef PT_DEBUG_PCI_CONFIG_ACCESS
-            PT_LOG_DEV(pci_dev, "addr=%x len=%x val=%x\n",
-                    config_addr, len, val);
-#endif
             break;
         default:
-            val = pci_default_read_config(pci_dev, config_addr, len);
+            goto read_default;
     }
+
+    /* Host read */
+    if ( !(pci_dev_host_bridge = pt_pci_get_dev(0, 0, 0)) )
+    {
+        PT_ERR("Error: Can't get pci_dev_host_bridge\n");
+        abort();
+    }
+
+    val = pt_pci_host_read(pci_dev_host_bridge, config_addr, len);
+#ifdef PT_DEBUG_PCI_CONFIG_ACCESS
+    PT_LOG_DEV(pci_dev, "addr=%x len=%x val=%x\n",
+               config_addr, len, val);
+#endif
     return val;
+   
+read_default:
+   
+   return pci_default_read_config(pci_dev, config_addr, len);
 }
 
 /*
