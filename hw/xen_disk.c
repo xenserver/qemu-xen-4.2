@@ -382,6 +382,8 @@ static void qemu_aio_complete(void *opaque, int ret)
     ioreq->aio_inflight--;
     if (ioreq->aio_inflight > 0)
         return;
+    if (ioreq->postsync)
+	bdrv_flush(ioreq->blkdev->bs);
 
     ioreq->status = ioreq->aio_errors ? BLKIF_RSP_ERROR : BLKIF_RSP_OKAY;
     ioreq_unmap(ioreq);
@@ -409,9 +411,9 @@ static int ioreq_runio_qemu_aio(struct ioreq *ioreq)
 	break;
     case BLKIF_OP_WRITE:
     case BLKIF_OP_WRITE_BARRIER:
-        ioreq->aio_inflight++;
         if (!ioreq->req.nr_segments)
             break;
+        ioreq->aio_inflight++;
         bdrv_aio_writev(blkdev->bs, ioreq->start / BLOCK_SIZE,
                         &ioreq->v, ioreq->v.size / BLOCK_SIZE,
                         qemu_aio_complete, ioreq);
@@ -421,8 +423,6 @@ static int ioreq_runio_qemu_aio(struct ioreq *ioreq)
 	goto err;
     }
 
-    if (ioreq->postsync)
-	bdrv_flush(blkdev->bs); /* FIXME: aio_flush() ??? */
     qemu_aio_complete(ioreq, 0);
 
     return 0;
