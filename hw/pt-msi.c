@@ -627,4 +627,5 @@ void pt_msix_delete(struct pt_dev *dev)
 
 
     free(dev->msix);
+    dev->msix = NULL;
 }

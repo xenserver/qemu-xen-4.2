@@ -1969,11 +1969,9 @@ static void pt_unregister_regions(struct pt_dev *assigned_device)
         if ( type == PCI_ADDRESS_SPACE_MEM ||
              type == PCI_ADDRESS_SPACE_MEM_PREFETCH )
         {
-            ret = xc_domain_memory_mapping(xc_handle, domid,
-                    assigned_device->bases[i].e_physbase >> XC_PAGE_SHIFT,
-                    assigned_device->bases[i].access.maddr >> XC_PAGE_SHIFT,
-                    (e_size+XC_PAGE_SIZE-1) >> XC_PAGE_SHIFT,
-                    DPCI_REMOVE_MAPPING);
+            ret = _pt_iomem_helper(assigned_device, i,
+                                   assigned_device->bases[i].e_physbase,
+                                   e_size, DPCI_REMOVE_MAPPING);
             if ( ret != 0 )
             {
                 PT_LOG("Error: remove old mem mapping failed!\n");
@@ -4393,11 +4391,11 @@ static int unregister_real_device(int devfn)
         }
     }
 
-    /* delete all emulated config registers */
-    pt_config_delete(assigned_device);
-
     /* unregister real device's MMIO/PIO BARs */
     pt_unregister_regions(assigned_device);
+
+    /* delete all emulated config registers */
+    pt_config_delete(assigned_device);
 
     pt_iomul_free(assigned_device);
 
