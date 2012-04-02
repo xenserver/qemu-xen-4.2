@@ -46,11 +46,11 @@
 
 /* ------------------------------------------------------------- */
 
-static int syncwrite    = 1;
-static int batch_maps   = 0;
+static int syncwrite    = 0;
+static int batch_maps   = 1;
 
 static int max_requests = 32;
-static int use_aio      = 0;
+static int use_aio      = 1;
 
 /* ------------------------------------------------------------- */
 
@@ -617,12 +617,13 @@ static int blk_init(struct XenDevice *xendev)
 	return -1;
 
     /* read-only ? */
+    qflags = BDRV_O_NOCACHE;
     if (strcmp(blkdev->mode, "w") == 0) {
 	mode   = O_RDWR;
-	qflags = BDRV_O_RDWR;
+	qflags |= BDRV_O_RDWR;
     } else {
 	mode   = O_RDONLY;
-	qflags = BDRV_O_RDONLY;
+	qflags |= BDRV_O_RDONLY;
 	info  |= VDISK_READONLY;
     }
 
