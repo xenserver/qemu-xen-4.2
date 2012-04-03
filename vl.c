@@ -1410,8 +1410,7 @@ static int64_t qemu_next_deadline(void)
         delta = active_timers[QEMU_TIMER_VIRTUAL]->expire_time -
                      qemu_get_clock(vm_clock);
     } else {
-        /* To avoid problems with overflow limit this to 2^32.  */
-        delta = INT32_MAX;
+        delta = INT64_MAX;
     }
 
     if (delta < 0)
@@ -1427,9 +1426,11 @@ static uint64_t qemu_next_deadline_dyntick(void)
     int64_t rtdelta;
 
     if (use_icount)
-        delta = INT32_MAX;
-    else
-        delta = (qemu_next_deadline() + 999) / 1000;
+        delta = INT64_MAX;
+    else {
+        delta = qemu_next_deadline();
+        delta = (delta / 1000) + (delta % 1000 > 0 ? 1 : 0);
+    }
 
     if (active_timers[QEMU_TIMER_REALTIME]) {
         rtdelta = (active_timers[QEMU_TIMER_REALTIME]->expire_time -
@@ -3872,8 +3873,8 @@ int main_loop(void)
                     env->icount_decr.u16.low = 0;
                     env->icount_extra = 0;
                     count = qemu_next_deadline();
-                    count = (count + (1 << icount_time_shift) - 1)
-                            >> icount_time_shift;
+                    count = (count >> icount_time_shift) +
+                        ((count & ((1 << icount_time_shift) - 1)) > 0 ? 1 : 0);
                     qemu_icount += count;
                     decr = (count > 0xffff) ? 0xffff : count;
                     count -= decr;
