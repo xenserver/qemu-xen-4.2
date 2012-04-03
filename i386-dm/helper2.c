@@ -111,12 +111,15 @@ int send_vcpu = 0;
 
 //the evtchn port for polling the notification,
 evtchn_port_t *ioreq_local_port;
+/* evtchn local port for buffered io */
+evtchn_port_t bufioreq_local_port;
 
 CPUX86State *cpu_x86_init(const char *cpu_model)
 {
     CPUX86State *env;
     static int inited;
     int i, rc;
+    unsigned long bufioreq_evtchn;
 
     env = qemu_mallocz(sizeof(CPUX86State));
     if (!env)
@@ -154,6 +157,19 @@ CPUX86State *cpu_x86_init(const char *cpu_model)
             }
             ioreq_local_port[i] = rc;
         }
+        rc = xc_get_hvm_param(xc_handle, domid, HVM_PARAM_BUFIOREQ_EVTCHN,
+                &bufioreq_evtchn);
+        if (rc < 0) {
+            fprintf(logfile, "failed to get HVM_PARAM_BUFIOREQ_EVTCHN error=%d\n",
+                    errno);
+            return NULL;
+        }
+        rc = xc_evtchn_bind_interdomain(xce_handle, domid, (uint32_t)bufioreq_evtchn);
+        if (rc == -1) {
+            fprintf(logfile, "bind interdomain ioctl error %d\n", errno);
+            return NULL;
+        }
+        bufioreq_local_port = rc;
     }
 
     return env;
@@ -263,6 +279,12 @@ static ioreq_t *cpu_get_ioreq(void)
     evtchn_port_t port;
 
     port = xc_evtchn_pending(xce_handle);
+    if (port == bufioreq_local_port) {
+        qemu_mod_timer(buffered_io_timer,
+                BUFFER_IO_MAX_DELAY + qemu_get_clock(rt_clock));
+        return NULL;
+    }
+ 
     if (port != -1) {
         for ( i = 0; i < vcpus; i++ )
             if ( ioreq_local_port[i] == port )
@@ -459,14 +481,16 @@ static void __handle_ioreq(CPUState *env, ioreq_t *req)
     }
 }
 
-static void __handle_buffered_iopage(CPUState *env)
+static int __handle_buffered_iopage(CPUState *env)
 {
     buf_ioreq_t *buf_req = NULL;
     ioreq_t req;
     int qw;
 
     if (!buffered_io_page)
-        return;
+        return 0;
+
+    memset(&req, 0x00, sizeof(req));
 
     while (buffered_io_page->read_pointer !=
            buffered_io_page->write_pointer) {
@@ -493,15 +517,21 @@ static void __handle_buffered_iopage(CPUState *env)
         xen_mb();
         buffered_io_page->read_pointer += qw ? 2 : 1;
     }
+
+    return req.count;
 }
 
 static void handle_buffered_io(void *opaque)
 {
     CPUState *env = opaque;
 
-    __handle_buffered_iopage(env);
-    qemu_mod_timer(buffered_io_timer, BUFFER_IO_MAX_DELAY +
-		   qemu_get_clock(rt_clock));
+    if (__handle_buffered_iopage(env)) {
+        qemu_mod_timer(buffered_io_timer,
+                BUFFER_IO_MAX_DELAY + qemu_get_clock(rt_clock));
+    } else {
+        qemu_del_timer(buffered_io_timer);
+        xc_evtchn_unmask(xce_handle, bufioreq_local_port);
+    }
 }
 
 static void cpu_handle_ioreq(void *opaque)
@@ -561,7 +591,6 @@ int main_loop(void)
 
     buffered_io_timer = qemu_new_timer(rt_clock, handle_buffered_io,
 				       cpu_single_env);
-    qemu_mod_timer(buffered_io_timer, qemu_get_clock(rt_clock));
 
     if (evtchn_fd != -1)
         qemu_set_fd_handler(evtchn_fd, cpu_handle_ioreq, NULL, env);
