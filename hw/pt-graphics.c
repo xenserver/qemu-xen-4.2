@@ -13,6 +13,8 @@
 extern int gfx_passthru;
 extern int igd_passthru;
 
+static uint32_t igd_guest_opregion = 0;
+
 static int pch_map_irq(PCIDevice *pci_dev, int irq_num)
 {
     PT_LOG("pch_map_irq called\n");
@@ -41,6 +43,54 @@ void intel_pch_init(PCIBus *bus)
     if ( vid == PCI_VENDOR_ID_INTEL )
         pci_bridge_init(bus, PCI_DEVFN(0x1f, 0), vid, did, rid,
                         pch_map_irq, "intel_bridge_1f");
+}
+
+uint32_t igd_read_opregion(struct pt_dev *pci_dev)
+{
+    uint32_t val = -1;
+
+    if ( igd_guest_opregion == 0 )
+        return -1;
+
+    val = igd_guest_opregion;
+#ifdef PT_DEBUG_PCI_CONFIG_ACCESS
+    PT_LOG_DEV((PCIDevice*)pci_dev, "addr=%x len=%x val=%x\n",
+            PCI_INTEL_OPREGION, 4, val);
+#endif
+    return val;
+}
+
+void igd_write_opregion(struct pt_dev *real_dev, uint32_t val)
+{
+    uint32_t host_opregion = 0;
+    int ret;
+
+    if ( igd_guest_opregion )
+    {
+        PT_LOG("opregion register already been set, ignoring %x\n", val);
+        return;
+    }
+
+    host_opregion = pt_pci_host_read(real_dev->pci_dev, PCI_INTEL_OPREGION, 4);
+    igd_guest_opregion = (val & ~0xfff) | (host_opregion & 0xfff);
+    PT_LOG("Map OpRegion: %x -> %x\n", host_opregion, igd_guest_opregion);
+
+    ret = xc_domain_memory_mapping(xc_handle, domid,
+            igd_guest_opregion >> XC_PAGE_SHIFT,
+            host_opregion >> XC_PAGE_SHIFT,
+            2,
+            DPCI_ADD_MAPPING);
+
+    if ( ret != 0 )
+    {
+        PT_LOG("Error: Can't map opregion\n");
+        igd_guest_opregion = 0;
+    }
+#ifdef PT_DEBUG_PCI_CONFIG_ACCESS
+    PT_LOG_DEV((PCIDevice*)real_dev, "addr=%x len=%lx val=%x\n",
+            PCI_INTEL_OPREGION, len, val);
+#endif
+
 }
 
 void igd_pci_write(PCIDevice *pci_dev, uint32_t config_addr, uint32_t val, int len)
@@ -129,7 +179,6 @@ read_default:
 int register_vga_regions(struct pt_dev *real_device)
 {
     u16 vendor_id;
-    int igd_opregion;
     int ret = 0;
 
     if ( !gfx_passthru || real_device->pci_dev->device_class != 0x0300 )
@@ -147,19 +196,6 @@ int register_vga_regions(struct pt_dev *real_device)
             0x20,
             DPCI_ADD_MAPPING);
 
-    /* 1:1 map ASL Storage register value */
-    vendor_id = pt_pci_host_read(real_device->pci_dev, 0, 2);
-    igd_opregion = pt_pci_host_read(real_device->pci_dev, PCI_INTEL_OPREGION, 4);
-    if ( (vendor_id == PCI_VENDOR_ID_INTEL ) && igd_opregion )
-    {
-        ret |= xc_domain_memory_mapping(xc_handle, domid,
-                igd_opregion >> XC_PAGE_SHIFT,
-                igd_opregion >> XC_PAGE_SHIFT,
-                2,
-                DPCI_ADD_MAPPING);
-        PT_LOG("register_vga: igd_opregion = %x\n", igd_opregion);
-    }
-
     if ( ret != 0 )
         PT_LOG("VGA region mapping failed\n");
 
@@ -171,7 +207,7 @@ int register_vga_regions(struct pt_dev *real_device)
  */
 int unregister_vga_regions(struct pt_dev *real_device)
 {
-    u32 vendor_id, igd_opregion;
+    u32 vendor_id;
     int ret = 0;
 
     if ( !gfx_passthru || real_device->pci_dev->device_class != 0x0300 )
@@ -190,12 +226,11 @@ int unregister_vga_regions(struct pt_dev *real_device)
             DPCI_REMOVE_MAPPING);
 
     vendor_id = pt_pci_host_read(real_device->pci_dev, PCI_VENDOR_ID, 2);
-    igd_opregion = pt_pci_host_read(real_device->pci_dev, PCI_INTEL_OPREGION, 4);
-    if ( (vendor_id == PCI_VENDOR_ID_INTEL) && igd_opregion )
+    if ( (vendor_id == PCI_VENDOR_ID_INTEL) && igd_guest_opregion )
     {
         ret |= xc_domain_memory_mapping(xc_handle, domid,
-                igd_opregion >> XC_PAGE_SHIFT,
-                igd_opregion >> XC_PAGE_SHIFT,
+                igd_guest_opregion >> XC_PAGE_SHIFT,
+                igd_guest_opregion >> XC_PAGE_SHIFT,
                 2,
                 DPCI_REMOVE_MAPPING);
     }

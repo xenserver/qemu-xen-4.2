@@ -238,6 +238,14 @@ static int pt_bar_reg_restore(struct pt_dev *ptdev,
 static int pt_exp_rom_bar_reg_restore(struct pt_dev *ptdev,
     struct pt_reg_tbl *cfg_entry,
     uint32_t real_offset, uint32_t dev_value, uint32_t *value);
+static int pt_intel_opregion_read(struct pt_dev *ptdev,
+        struct pt_reg_tbl *cfg_entry,
+        uint32_t *value, uint32_t valid_mask);
+static int pt_intel_opregion_write(struct pt_dev *ptdev,
+        struct pt_reg_tbl *cfg_entry,
+        uint32_t *value, uint32_t dev_value, uint32_t valid_mask);
+static uint8_t pt_reg_grp_header0_size_init(struct pt_dev *ptdev,
+        struct pt_reg_grp_info_tbl *grp_reg, uint32_t base_offset);
 
 /* pt_reg_info_tbl declaration
  * - only for emulated register (either a part or whole bit).
@@ -443,6 +451,16 @@ static struct pt_reg_info_tbl pt_emu_reg_header0_tbl[] = {
         .u.dw.read  = pt_long_reg_read,
         .u.dw.write = pt_exp_rom_bar_reg_write,
         .u.dw.restore = pt_exp_rom_bar_reg_restore,
+    },
+    /* Intel IGFX OpRegion reg */
+    {
+        .offset     = PCI_INTEL_OPREGION,
+        .size       = 4,
+        .init_val   = 0,
+        .no_wb      = 1,
+        .u.dw.read   = pt_intel_opregion_read,
+        .u.dw.write  = pt_intel_opregion_write,
+        .u.dw.restore  = NULL,
     },
     {
         .size = 0,
@@ -737,7 +755,7 @@ static const struct pt_reg_grp_info_tbl pt_emu_reg_grp_tbl[] = {
         .grp_id     = 0xFF,
         .grp_type   = GRP_TYPE_EMU,
         .grp_size   = 0x40,
-        .size_init  = pt_reg_grp_size_init,
+        .size_init  = pt_reg_grp_header0_size_init,
         .emu_reg_tbl= pt_emu_reg_header0_tbl,
     },
     /* PCI PowerManagement Capability reg group */
@@ -3004,6 +3022,19 @@ static uint32_t pt_msixctrl_reg_init(struct pt_dev *ptdev,
     return reg->init_val;
 }
 
+static uint8_t pt_reg_grp_header0_size_init(struct pt_dev *ptdev,
+        struct pt_reg_grp_info_tbl *grp_reg, uint32_t base_offset)
+{
+    /*
+    ** By default we will trap up to 0x40 in the cfg space.
+    ** If an intel device is pass through we need to trap 0xfc,
+    ** therefore the size should be 0xff.
+    */
+    if (igd_passthru)
+        return 0xFF;
+    return grp_reg->grp_size;
+}
+
 /* get register group size */
 static uint8_t pt_reg_grp_size_init(struct pt_dev *ptdev,
         struct pt_reg_grp_info_tbl *grp_reg, uint32_t base_offset)
@@ -4149,6 +4180,22 @@ static int pt_pmcsr_reg_restore(struct pt_dev *ptdev,
      */
     *value = (dev_value & ~PCI_PM_CTRL_PME_ENABLE) | PCI_PM_CTRL_PME_STATUS;
 
+    return 0;
+}
+
+static int pt_intel_opregion_read(struct pt_dev *ptdev,
+        struct pt_reg_tbl *cfg_entry,
+        uint32_t *value, uint32_t valid_mask)
+{
+    *value = igd_read_opregion(ptdev);
+    return 0;
+}
+
+static int pt_intel_opregion_write(struct pt_dev *ptdev,
+        struct pt_reg_tbl *cfg_entry,
+        uint32_t *value, uint32_t dev_value, uint32_t valid_mask)
+{
+    igd_write_opregion(ptdev, *value);
     return 0;
 }
 
