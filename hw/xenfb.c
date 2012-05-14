@@ -37,7 +37,7 @@
 #include <string.h>
 #include <time.h>
 
-#include <xs.h>
+#include <xenstore.h>
 #include <xenctrl.h>
 #include <xen/event_channel.h>
 #include <xen/io/xenbus.h>
