@@ -116,10 +116,53 @@ static int posix_aio_init(void);
 
 static int fd_open(BlockDriverState *bs);
 
+#if defined(__NetBSD__)
+static int raw_normalize_devicepath(const char **filename)
+{
+    static char namebuf[PATH_MAX];
+    const char *dp, *fname;
+    struct stat sb;
+
+    fname = *filename;
+    dp = strrchr(fname, '/');
+    if (lstat(fname, &sb) < 0) {
+        fprintf(stderr, "%s: stat failed: %s\n",
+            fname, strerror(errno));
+        return -errno;
+    }
+
+    if (!S_ISBLK(sb.st_mode)) {
+        return 0;
+    }
+
+    if (dp == NULL) {
+        snprintf(namebuf, PATH_MAX, "r%s", fname);
+    } else {
+        snprintf(namebuf, PATH_MAX, "%.*s/r%s",
+            (int)(dp - fname), fname, dp + 1);
+    }
+    fprintf(stderr, "%s is a block device", fname);
+    *filename = namebuf;
+    fprintf(stderr, ", using %s\n", *filename);
+
+    return 0;
+}
+#else
+static int raw_normalize_devicepath(const char **filename)
+{
+    return 0;
+}
+#endif
+
 static int raw_open(BlockDriverState *bs, const char *filename, int flags)
 {
     BDRVRawState *s = bs->opaque;
     int fd, open_flags, ret;
+
+    ret = raw_normalize_devicepath(&filename);
+    if (ret != 0) {
+        return ret;
+    }
 
     posix_aio_init();
 
