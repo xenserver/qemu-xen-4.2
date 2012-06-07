@@ -36,6 +36,12 @@
  *      @(#)queue.h     8.5 (Berkeley) 8/20/94
  */
 
+#include "config-host.h"
+#ifdef _BSD
+/* include native header before sys-queue.h */
+#include <sys/queue.h>
+#endif
+
 #ifndef _SYS_QUEUE_H_
 #define _SYS_QUEUE_H_
 
