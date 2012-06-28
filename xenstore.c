@@ -427,7 +427,7 @@ uint32_t xenstore_read_target(void)
     return target_domid;
 }
 
-#define PT_PCI_MSITRANSLATE_DEFAULT 1
+#define PT_PCI_MSITRANSLATE_DEFAULT 0
 #define PT_PCI_POWER_MANAGEMENT_DEFAULT 0
 int direct_pci_msitranslate;
 int direct_pci_power_mgmt;
