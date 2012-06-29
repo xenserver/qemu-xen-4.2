@@ -1538,7 +1538,7 @@ static void pt_pci_write_config(PCIDevice *d, uint32_t address, uint32_t val,
 #endif
 
     /* check offset range */
-    if (address >= 0xFF)
+    if (address > 0xFF)
     {
         PT_LOG_DEV(d, "Error: Failed to write register with offset exceeding FFh. "
             "[Offset:%02xh][Length:%d]\n", address, len);
@@ -1714,7 +1714,7 @@ static uint32_t pt_pci_read_config(PCIDevice *d, uint32_t address, int len)
     int ret = 0;
 
     /* check offset range */
-    if (address >= 0xFF)
+    if (address > 0xFF)
     {
         PT_LOG_DEV(d, "Error: Failed to read register with offset exceeding FFh. "
             "[Offset:%02xh][Length:%d]\n", address, len);
