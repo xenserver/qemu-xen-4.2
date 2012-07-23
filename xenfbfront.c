@@ -355,7 +355,7 @@ int xenfb_pv_display_init(DisplayState *ds)
     return 0;
 }
 
-int xenfb_pv_display_vram(void *data)
+void xenfb_pv_display_vram(void *data)
 {
     vga_vram = data;
 }

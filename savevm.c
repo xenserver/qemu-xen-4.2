@@ -210,8 +210,8 @@ static int popen_close(void *opaque)
     QEMUFilePopen *s = opaque;
     pclose(s->popen_file);
     qemu_free(s);
-    return 0;
 #endif
+    return 0;
 }
 
 QEMUFile *qemu_popen(FILE *popen_file, const char *mode)

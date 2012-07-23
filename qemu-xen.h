@@ -129,7 +129,7 @@ int xenstore_find_device(BlockDriverState *bs);
 
 /* xenfbfront.c */
 int xenfb_pv_display_init(DisplayState *ds);
-int xenfb_pv_display_vram(void *vram_start);
+void xenfb_pv_display_vram(void *vram_start);
 int xenfb_connect_vkbd(const char *path);
 int xenfb_connect_vfb(const char *path);
 
