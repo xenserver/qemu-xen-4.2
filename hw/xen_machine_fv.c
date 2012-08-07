@@ -181,9 +181,6 @@ void qemu_invalidate_entry(uint8_t *buffer)
     unsigned long paddr_index;
     int found = 0;
     
-    if (last_address_vaddr == buffer)
-        last_address_page =  ~0UL;
-
     TAILQ_FOREACH(reventry, &locked_entries, next) {
         if (reventry->vaddr_req == buffer) {
             paddr_index = reventry->paddr_index;
@@ -200,6 +197,10 @@ void qemu_invalidate_entry(uint8_t *buffer)
     }
     TAILQ_REMOVE(&locked_entries, reventry, next);
     qemu_free(reventry);
+
+    if (last_address_page >> (MCACHE_BUCKET_SHIFT - XC_PAGE_SHIFT) == paddr_index) {
+        last_address_page =  ~0UL;
+    }
 
     entry = &mapcache_entry[paddr_index % nr_buckets];
     while (entry && entry->paddr_index != paddr_index) {
