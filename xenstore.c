@@ -643,7 +643,7 @@ void xenstore_parse_domain_config(int hvm_domid)
 	    }
             pstrcpy(bs->filename, sizeof(bs->filename), params);
 
-            flags = BDRV_O_NOCACHE;
+            flags = BDRV_O_CACHE_WB; /* snapshot and write-back */
             is_readonly = 0;
             if (pasprintf(&buf, "%s/mode", bpath) == -1)
                 continue;
