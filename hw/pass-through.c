@@ -3841,21 +3841,18 @@ static int pt_msgctrl_reg_write(struct pt_dev *ptdev,
                 PT_LOG("guest enabling MSI, disable MSI-INTx translation\n");
                 pt_disable_msi_translate(ptdev);
             }
-            else
+            /* Init physical one */
+            PT_LOG("setup msi for dev %x\n", pd->devfn);
+            if (pt_msi_setup(ptdev))
             {
-                /* Init physical one */
-                PT_LOG("setup msi for dev %x\n", pd->devfn);
-                if (pt_msi_setup(ptdev))
-                {
-		    /* We do not broadcast the error to the framework code, so
-		     * that MSI errors are contained in MSI emulation code and
-		     * QEMU can go on running.
-		     * Guest MSI would be actually not working.
-		     */
-		    *value &= ~PCI_MSI_FLAGS_ENABLE;
-		    PT_LOG("Warning: Can not map MSI for dev %x\n", pd->devfn);
-		    return 0;
-                }
+                /* We do not broadcast the error to the framework code, so
+                 * that MSI errors are contained in MSI emulation code and
+                 * QEMU can go on running.
+                 * Guest MSI would be actually not working.
+                 */
+                *value &= ~PCI_MSI_FLAGS_ENABLE;
+                PT_LOG("Warning: Can not map MSI for dev %x\n", pd->devfn);
+                return 0;
             }
             if (pt_msi_update(ptdev))
             {

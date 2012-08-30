@@ -263,16 +263,8 @@ void pt_disable_msi_translate(struct pt_dev *dev)
     uint8_t e_device = 0;
     uint8_t e_intx = 0;
 
-    /* MSI_ENABLE bit should be disabed until the new handler is set */
-    msi_set_enable(dev, 0);
-
-    e_device = PCI_SLOT(dev->dev.devfn);
-    e_intx = pci_intx(dev);
-
-    if (xc_domain_unbind_pt_irq(xc_handle, domid, dev->msi->pirq,
-                                 PT_IRQ_TYPE_MSI_TRANSLATE, 0,
-                                 e_device, e_intx, 0))
-        PT_LOG("Error: Unbinding pt irq for MSI-INTx failed!\n");
+    pt_msi_disable(dev);
+    dev->msi->flags |= MSI_FLAG_UNINIT;
 
     if (dev->machine_irq)
     {
@@ -280,8 +272,6 @@ void pt_disable_msi_translate(struct pt_dev *dev)
                                        0, e_device, e_intx))
             PT_LOG("Error: Rebinding of interrupt failed!\n");
     }
-
-    dev->msi_trans_en = 0;
 }
 
 static int pt_msix_update_one(struct pt_dev *dev, int entry_nr)
