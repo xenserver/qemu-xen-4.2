@@ -55,6 +55,9 @@ static int debugflags = DBGBIT(TXERR) | DBGBIT(GENERAL);
 #define REG_IOADDR 0x0
 #define REG_IODATA 0x4
 
+/* this is the size past which hardware will drop packets when setting LPE=0 */
+#define MAXIMUM_ETHERNET_VLAN_SIZE 1522
+
 /*
  * HW models:
  *  E1000_DEV_ID_82540EM works with Windows and Linux
@@ -626,6 +629,13 @@ e1000_receive(void *opaque, const uint8_t *buf, int size)
         DBGOUT(RX, "packet too large for buffers (%d > %d)\n", size,
                s->rxbuf_size);
         return;
+    }
+
+    /* Discard oversized packets if !LPE and !SBP. */
+    if (size > MAXIMUM_ETHERNET_VLAN_SIZE
+        && !(s->mac_reg[RCTL] & E1000_RCTL_LPE)
+        && !(s->mac_reg[RCTL] & E1000_RCTL_SBP)) {
+        return size;
     }
 
     if (!receive_filter(s, buf, size))
