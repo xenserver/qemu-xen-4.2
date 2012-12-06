@@ -614,6 +614,12 @@ void xenstore_parse_domain_config(int hvm_domid)
         if (pasprintf(&danger_buf, "%s/device/vbd/%s", danger_path, e_danger[i]) == -1)
             continue;
 	if (bdrv_open2(bs, danger_buf, BDRV_O_CACHE_WB /* snapshot and write-back */, &bdrv_raw) == 0) {
+        if (pasprintf(&buf, "%s/params", bpath) == -1)
+                continue;
+        free(params);
+        params = xs_read(xsh, XBT_NULL, buf, &len);
+        if (params == NULL)
+            continue;
 	    pstrcpy(bs->filename, sizeof(bs->filename), params);
 	}
 #else
@@ -667,11 +673,7 @@ void xenstore_parse_domain_config(int hvm_domid)
 
 	drives_table[nb_drives].bdrv = bs;
 	drives_table[nb_drives].used = 1;
-#ifdef CONFIG_STUBDOM
-    media_filename[nb_drives] = strdup(danger_buf);
-#else
     media_filename[nb_drives] = strdup(bs->filename);
-#endif
 	nb_drives++;
 
     }
