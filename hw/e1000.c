@@ -638,7 +638,8 @@ e1000_receive(void *opaque, const uint8_t *buf, int size)
         (size > MAXIMUM_ETHERNET_VLAN_SIZE
         && !(s->mac_reg[RCTL] & E1000_RCTL_LPE)))
         && !(s->mac_reg[RCTL] & E1000_RCTL_SBP)) {
-        return size;
+        DBGOUT(RX, "packet too large for applicable LPE/VLAN size\n");
+        return;
     }
 
     if (!receive_filter(s, buf, size))
